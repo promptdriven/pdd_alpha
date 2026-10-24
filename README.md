@@ -10,7 +10,7 @@ Describe what your software should do in prompts, Stories and test cases. Your c
 npm install -g github:promptdriven/pdd_alpha
 ```
 
-Requires Node.js 22.16+ and [Codex CLI](https://developers.openai.com/codex/cli/) or [Claude Code](https://code.claude.com/docs/en/overview). If you have the older Python `pdd`, uninstall it first: `pip uninstall pdd-cli`.
+Requires Node.js 22.16+ and [Codex CLI](https://developers.openai.com/codex/cli/) or [Claude Code](https://code.claude.com/docs/en/overview). If you have the older Python `pdd`, uninstall it first: `uv tool uninstall pdd-cli` or `pip uninstall pdd-cli`.
 
 ## Quickstart
 
@@ -29,7 +29,7 @@ pdd workflow run feature 42
 
 PDD works on issue #42 in its own branch and worktree. Each step runs in a fresh agent session. You approve the plan, PDD runs your tests and opens the PR, and you merge.
 
-Needs Git, [GitHub CLI](https://cli.github.com) and [Herdr](https://herdr.dev). This command is in preview.
+Needs Git, [GitHub CLI](https://cli.github.com) and [Herdr](https://herdr.dev).
 
 ## Highlights
 

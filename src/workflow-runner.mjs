@@ -1,8 +1,8 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: c0805079516dc01ec360ac58336ed19789e874d7c93005a1d8a466883f8eda74).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: c91d67f5cb5d96ee86fd4728fa48a0f7afc36c105df572a35f1fdbd11ef67516).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
-import { constants, fstatSync, openSync, closeSync, writeSync, fsyncSync, mkdirSync, readFileSync, readdirSync,
+import { constants, fstatSync, openSync, closeSync, writeSync, readSync, fsyncSync, mkdirSync, readFileSync, readdirSync,
   lstatSync, realpathSync, unlinkSync, readlinkSync, existsSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, sep, basename, dirname } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -94,14 +94,39 @@ function durable(path, value) {
 function readSaved(directory) {
   requireDirectory(directory);
   const path = join(directory, 'journal.jsonl'); journalFile(path);
-  const raw = readFileSync(path, 'utf8');
-  if (!raw.endsWith('\n')) fail('Saved workflow journal is incomplete; inspect it without replaying effects.');
-  let saved;
-  for (const [i, line] of raw.trimEnd().split('\n').entries()) {
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  let saved, sequence = 0, fragments = [], length = 0, padding = false, terminated = false;
+  const consume = line => {
+    if (!line.trim()) { padding = true; return; }
+    if (padding) fail('Saved workflow journal is invalid.');
     const row = json(line);
-    if (row.seq !== i + 1 || row.state?.seq !== row.seq || !row.state || saved && row.state.runId !== saved.runId) fail('Saved workflow journal is invalid.');
+    if (row.seq !== ++sequence || row.state?.seq !== row.seq || !row.state
+      || saved && row.state.runId !== saved.runId) fail('Saved workflow journal is invalid.');
     saved = row.state;
-  }
+  };
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.nlink !== 1) fail('Workflow journal cannot alias another file.');
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let count;
+    while ((count = readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+      let start = 0, newline;
+      while ((newline = chunk.indexOf(10, start)) !== -1 && newline < count) {
+        if (fragments.length) {
+          fragments.push(chunk.subarray(start, newline));
+          consume(Buffer.concat(fragments, length + newline - start).toString('utf8'));
+          fragments = []; length = 0;
+        } else consume(chunk.toString('utf8', start, newline));
+        start = newline + 1;
+      }
+      if (start < count) {
+        const fragment = Buffer.from(chunk.subarray(start, count));
+        fragments.push(fragment); length += fragment.length;
+      }
+      terminated = chunk[count - 1] === 10;
+    }
+    if (!terminated) fail('Saved workflow journal is incomplete; inspect it without replaying effects.');
+  } finally { closeSync(fd); }
   if (!saved || !UUID.test(saved.runId) || saved.runId !== basename(directory)
     || !Number.isInteger(saved.index) || saved.index < 0 || saved.index > saved.definitions?.length
     || saved.version !== 2 || !Array.isArray(saved.completed) || !saved.definition || !saved.assignment
@@ -409,12 +434,18 @@ async function reconcile(s, r, directory, options, p, canAdvance) {
     return acceptAgent(s, stage, r, directory, options, p, seen);
   }
   try {
-    const outcome = await reconcileWorkflowPr({ cwd: r.root, intent: s.pending.intent }, p.commandPorts);
+    let outcome = await reconcileWorkflowPr({ cwd: r.root, intent: s.pending.intent }, p.commandPorts);
+    if (outcome.state === 'recovery_required' && canAdvance) {
+      await current(s, r, p);
+      record(s, directory, 'pr.unpublished_retry_intent');
+      outcome = await publishWorkflowPr({ cwd: r.root, intent: s.pending.intent, unpublishedOnly: true }, p.commandPorts);
+    }
     if (!['open', 'merged'].includes(outcome.state) || !outcome.pr)
       return result(s, 'recovery_required', outcome.message || 'The exact original PR was not proved; no effect was repeated.');
+    await current(s, r, p);
     await completePr(s, stage, s.pending.intent, outcome.pr, directory);
     return result(s, 'waiting', 'Original PR reconciled. Resume without a decision to observe merge, or with approve to advance.');
-  } catch { return result(s, 'recovery_required', 'Original PR could not be proved; no effect repeated.'); }
+  } catch { return result(s, 'recovery_required', 'Original PR recovery is unconfirmed; preserve this same intent for inspection.'); }
 }
 async function advance(s, r, directory, options, p, decision, initial) {
   authority(s, r);
