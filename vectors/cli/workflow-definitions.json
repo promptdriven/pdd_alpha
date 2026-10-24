@@ -1,0 +1,172 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-definitions.prompt.md",
+  "story": "story/cli/WORKFLOW-DEFINITIONS.md",
+  "cases": [
+    {
+      "id": "keys-and-order",
+      "criteria": ["AC1"],
+      "input": { "import": "src/workflow-definitions.mjs", "read": "Object.keys(WORKFLOW_STAGES)" },
+      "expected": ["feature", "bug", "small-change"]
+    },
+    {
+      "id": "runner-reexport-same-object",
+      "criteria": ["AC1"],
+      "input": { "compare": ["WORKFLOW_STAGES from src/workflow-definitions.mjs", "WORKFLOW_STAGES from src/workflow-runner.mjs"] },
+      "expected": { "sameObject": true }
+    },
+    {
+      "id": "no-other-workflow-keys",
+      "criteria": ["AC1", "AC6"],
+      "input": { "read": "Object.hasOwn(WORKFLOW_STAGES, 'team-review')" },
+      "expected": false
+    },
+    {
+      "id": "feature-equals-loader-stages",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "compare": ["WORKFLOW_STAGES.feature", "loadWorkflowDefinition({ name: 'feature', cwd: packageRoot, packageRoot }).stages"] },
+      "expected": { "deepEqual": true }
+    },
+    {
+      "id": "bug-equals-loader-stages",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "compare": ["WORKFLOW_STAGES.bug", "loadWorkflowDefinition({ name: 'bug', cwd: packageRoot, packageRoot }).stages"] },
+      "expected": { "deepEqual": true }
+    },
+    {
+      "id": "small-change-equals-loader-stages",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "compare": ["WORKFLOW_STAGES['small-change']", "loadWorkflowDefinition({ name: 'small-change', cwd: packageRoot, packageRoot }).stages"] },
+      "expected": { "deepEqual": true }
+    },
+    {
+      "id": "shipped-stage-counts",
+      "criteria": ["AC2"],
+      "given": "The bundled definitions as the bundled workflows prompt describes them.",
+      "input": { "read": "per key: total entries, agent entries, agent entries with optional false" },
+      "expected": {
+        "feature": { "total": 12, "agent": 7, "mandatoryAgent": 5 },
+        "bug": { "total": 11, "agent": 6, "mandatoryAgent": 5 },
+        "small-change": { "total": 5, "agent": 3, "mandatoryAgent": 3 }
+      }
+    },
+    {
+      "id": "small-change-definition-order",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "read": "WORKFLOW_STAGES['small-change'].map(stage => stage.id)" },
+      "expected": ["scope", "change", "verify", "open-pr", "wait-merge"]
+    },
+    {
+      "id": "proposal-entry-exact-fields",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "read": "WORKFLOW_STAGES['small-change'][0]" },
+      "expected": { "id": "scope", "kind": "agent", "file": "scope.md", "protocol": "proposal", "requiredRoles": ["cases"], "approval": "next-advance", "optional": false }
+    },
+    {
+      "id": "agent-entry-normalized-defaults",
+      "criteria": ["AC2"],
+      "given": "The bundled feature definition omits optional and requiredRoles on its first stage.",
+      "input": { "read": "WORKFLOW_STAGES.feature[0]" },
+      "expected": { "id": "understand", "kind": "agent", "file": "understand.md", "protocol": "report", "requiredRoles": [], "optional": false }
+    },
+    {
+      "id": "human-entry-exact-fields",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "read": "WORKFLOW_STAGES.feature.find(stage => stage.id === 'approve')" },
+      "expected": { "id": "approve", "kind": "human", "file": "approve.md", "optional": false }
+    },
+    {
+      "id": "optional-pr-entry",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "read": "WORKFLOW_STAGES.feature.find(stage => stage.id === 'prompt-pr')" },
+      "expected": { "id": "prompt-pr", "kind": "pr", "file": "prompt-pr.md", "publication": "proposal", "optional": true }
+    },
+    {
+      "id": "pr-entry-with-merge-requirement",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "read": "WORKFLOW_STAGES.feature.find(stage => stage.id === 'code-pr')" },
+      "expected": { "id": "code-pr", "kind": "pr", "file": "code-pr.md", "publication": "verified", "requiresMerge": "prompt-merge", "optional": false }
+    },
+    {
+      "id": "merge-entry-exact-fields",
+      "criteria": ["AC2"],
+      "given": "The package as shipped.",
+      "input": { "read": "WORKFLOW_STAGES.feature.find(stage => stage.id === 'prompt-merge')" },
+      "expected": { "id": "prompt-merge", "kind": "merge", "file": "prompt-merge.md", "prStage": "prompt-pr", "optional": false }
+    },
+    {
+      "id": "frozen-object",
+      "criteria": ["AC4"],
+      "input": { "strictModeWrite": "WORKFLOW_STAGES.feature = []" },
+      "expectedError": { "class": "TypeError" },
+      "effects": ["WORKFLOW_STAGES.feature still has 12 entries"]
+    },
+    {
+      "id": "frozen-stage-array",
+      "criteria": ["AC4"],
+      "input": { "strictModeWrite": "WORKFLOW_STAGES.bug.push({})" },
+      "expectedError": { "class": "TypeError" },
+      "effects": ["WORKFLOW_STAGES.bug still has 11 entries"]
+    },
+    {
+      "id": "frozen-stage-entry",
+      "criteria": ["AC4"],
+      "input": { "strictModeWrite": "WORKFLOW_STAGES['small-change'][0].id = 'changed'" },
+      "expectedError": { "class": "TypeError" },
+      "effects": ["the entry id stays scope"]
+    },
+    {
+      "id": "frozen-required-roles",
+      "criteria": ["AC4"],
+      "input": { "strictModeWrite": "WORKFLOW_STAGES['small-change'][0].requiredRoles.push('tests')" },
+      "expectedError": { "class": "TypeError" },
+      "effects": ["requiredRoles stays ['cases']"]
+    },
+    {
+      "id": "project-folder-ignored",
+      "criteria": ["AC3"],
+      "given": "The process working directory is a project with a valid .pdd/workflows/feature/workflow.json that has one report stage.",
+      "input": { "import": "src/workflow-definitions.mjs", "read": "WORKFLOW_STAGES.feature.length" },
+      "expected": 12
+    },
+    {
+      "id": "malformed-bundled-definition-fails-import",
+      "criteria": ["AC5"],
+      "given": "A copy of the package where .pdd/workflows/bug/workflow.json contains malformed JSON.",
+      "input": { "import": "src/workflow-definitions.mjs" },
+      "expectedError": { "phase": "module import", "class": "Error" },
+      "effects": ["no WORKFLOW_STAGES binding is available", "importing src/workflow-runner.mjs also fails"]
+    },
+    {
+      "id": "missing-bundled-definition-fails-import",
+      "criteria": ["AC5"],
+      "given": "A copy of the package without the .pdd/workflows/small-change folder.",
+      "input": { "import": "src/workflow-definitions.mjs" },
+      "expectedError": { "phase": "module import", "class": "Error" },
+      "effects": ["no partial object with only feature and bug"]
+    },
+    {
+      "id": "custom-project-name-still-selectable",
+      "criteria": ["AC6"],
+      "given": "The project has a valid .pdd/workflows/team-review definition.",
+      "input": ["workflow", "list", "--json"],
+      "expected": { "exitCode": 0, "workflowsInclude": { "name": "team-review", "source": "project" } },
+      "effects": ["WORKFLOW_STAGES has no team-review key"]
+    },
+    {
+      "id": "import-has-no-effects",
+      "criteria": ["AC7"],
+      "input": { "import": "src/workflow-definitions.mjs" },
+      "expected": { "imported": true },
+      "effects": ["no file is written", "no child process starts", "no network request"]
+    }
+  ]
+}

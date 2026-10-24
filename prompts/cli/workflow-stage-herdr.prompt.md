@@ -1,77 +1,182 @@
-# Background native workflow stage transport
+# Background native stage transport
 
-Own `src/workflow-stage-herdr.mjs`. Export runHerdrStage({runId,stageId,attemptId,agent,cwd,context,instructions,backend?,checkpoint},ports), inspectHerdrStage({backend,cwd},ports), attachHerdrStage({backend},ports), closeHerdrStage({backend,acceptance},ports). Native interactive pdd session and its launcher remain unchanged. Use only documented Herdr0.9.1 inspected commands; this is a capability baseline, not a claim of the first supported version. No upgrade, restart, credentials/config copy, native flags, shell interpolation, permission override or shared-session takeover.
+Owns `src/workflow-stage-herdr.mjs`. Exports the async module functions `runHerdrStage(input, ports)`, `inspectHerdrStage({ backend, cwd }, ports)`, `attachHerdrStage({ backend }, ports)` and `closeHerdrStage({ backend, acceptance }, ports)`. The [workflow runner](workflow-runner.prompt.md) calls them through ports that [CLI dispatch](pdd-cli.prompt.md) binds.
 
-The runner is the foreground controller; Herdr hosts background native agents. The adapter does not keep PDD advancing after its invoking controller exits. It returns state settled|blocked|recovery_required, backend, evidence, optional reason. Settled means transport candidate only: the runner still checks exact closed handoff, original stage/input, revision/file hashes and actual tests before durable acceptance. Never equate idle with success or invent a native turn ID.
+The runner is the foreground **controller**. For each agent stage, this module starts a fresh **native agent** in a background Herdr server that the run owns. It sends one prompt and watches the same agent work and become ready again. The result is a **candidate**: the transport settled, nothing more. The runner validates the handoff, files, revision and tests before **acceptance**. This module also inspects a saved stage, attaches a person to its live agent and closes its workspace after acceptance. It acts only inside a caller's call and starts no PDD daemon, so nothing advances after the controller exits.
 
-## Identity and effect boundary
+Inputs: run, stage and attempt IDs, the agent (`codex` or `claude`), the assigned issue worktree, the full context and stage instructions, an awaited `checkpoint`, the runner's `withStageGuard` and, on later calls, the saved **backend** record. Run, inspect and close return [`{ state, backend, evidence, reason?, detail? }`](#results-and-errors). Attach returns an exit code.
 
-Run/attempt IDs are UUIDv4; stage is a safe bounded name; agent codex|claude; cwd is the actual immutable assigned worktree. Herdr PTYs inherit the owned long-running server environment plus shell startup, not later CLI invoker environment. Preserve those ordinary user settings; never serialize/forward the whole environment or tokens. Explicit workspace cwd and actual ready-agent cwd must match the assigned worktree. Surface missing native/settings without repair or shared-server restart. The owning background server is selected explicitly by its run-derived name, never the user's focused session. A fresh run may provision that named headless Herdr server only after an awaited durable server intent and only if target is absent. Reuse only an owned server reference recorded by an earlier accepted stage of the SAME run/cwd. Refuse unowned pre-existing target, incompatible target protocol or unknown server identity. Do not stop/restart servers to repair compatibility.
+Preservation: behavioral refinement. Keep the exports and their binding kind, input and result shapes, backend fields, phase names, Herdr argv, reason codes, checkpoint order and forbidden effects. Private helpers, polling and check order may vary unless a rule names an order. Herdr 0.9.1 is the inspected capability baseline, not a proven minimum version. `pdd session` is out of scope.
 
-Await checkpoint(serializableBackend) BEFORE server/workspace/start/prompt effects and after each returned identity, BEFORE any prompt delivery. Failed durability halts that path. A fresh native stage has a newly allocated no-focus workspace and backing pane in the owned server, with recorded actual workspace/tab/pane/terminal/name/kind/native-session identity when actually present. Names identify local correlation only. Native session absence remains null; never derive a native ID from pane/name/attempt. Preserve startup blocked/failed original pane; do not autoanswer or start again.
+## Routing and phases
 
-Record exact full context+stage instruction digest and durable prompt intent before exactly ONE prompt. Include guide-first actual supplied bytes, never merely links. Confirm fresh ready identity immediately before submit. Prompt reply loss, timeout/stall or unknown identity preserves original intent and becomes recovery_required with no resend, replacement agent or fresh attempt. The explicit backend input is reconciliation only, except a durably closed previous stage backend may donate its same-run owned server reference for a new stage.
+What may `runHerdrStage` do with the backend that the caller supplies?
 
-## Observation and acceptance
+```mermaid
+flowchart TD
+    A{Saved backend supplied?} -->|No| S[Verify or bootstrap the owned server]
+    A -->|Yes| B{Same stage and attempt?}
+    B -->|No| C{Previous stage closed and accepted?}
+    C -->|No| X([recovery_required])
+    C -->|Yes| S
+    B -->|Yes| P{Saved phase}
+    P -->|Pre-native server_intent| S
+    P -->|Pre-prompt start_intent or ready| R[Check the same agent is ready]
+    P -->|Any other phase| I([Inspection result])
+    S --> W[New workspace and native agent]
+    W --> R
+    R --> D[Send one prompt and observe]
+    D --> E([settled, blocked or recovery_required])
+```
 
-Use actual Herdr agent status/interactive_ready/state_change_seq and agent_session. Pin workspace/tab/pane/terminal/name/agent and any reported native identity; reject replacement/move/identity change rather than selecting another target. Observe this fresh owned ready agent working after the one prompt and later ready idle/done with later lifecycle sequence. A successful prompt --wait carries its documented observed-activity gate but must be paired with fresh identity/readiness reassertion; it is not a native turn receipt. Return transport settled only with observed working->ready evidence. blocked returns blocked; unknown, lost identity, stalled/timeout or incomplete evidence returns recovery_required. Inspect is read-only, never a prompt/start/wait mutation. Do not recover missing evidence from terminal prose or fabricate a report.
+- **Fail closed.** A failed check, a bad Herdr reply or a failed checkpoint returns `recovery_required` at once, with the backend as far as it got. Only the [observation table](#identity-and-observation) polls again; nothing is retried.
+- **Same original.** A supplied backend must pass the [backend check](#ports-and-records) and keep the run ID and worktree (`stage_binding_changed`). For the same stage and attempt, the prompt digest and agent must also match (`stage_input_changed`).
+- **Pre-native** means phase `server_intent`, `nativeSession` null, empty `evidence`, and only the [start fields](#ports-and-records) plus an optional `server`. It proves that no workspace, agent or prompt effect happened. Recovery keeps the same IDs and digest.
+- **Pre-prompt** means phase `start_intent` or `ready`, saved workspace, tab, pane and terminal IDs, no evidence except `readySeq`, and no `acceptanceDigest` or `cleanupConfirmation`. This path checks server status against the saved fingerprint, then the agent. It never bootstraps, creates a workspace or starts an agent.
+- **Next stage.** A different stage or attempt needs a previous backend in phase `closed` with an `acceptanceDigest` (`previous_stage_not_released`). It donates its server and seed inventory, never its native conversation.
 
-closeHerdrStage requires the runner's actual durable acceptance record bound to run/stage/attempt/prompt digest/terminal plus validated evidence digest. Recheck exact owned identity and ready status/sequence before closing only that stage's workspace. Acceptance is not person consent. Do not close working/blocked/unknown/replaced/unrelated stages. Checkpoint cleanup intent before effect. Lost cleanup reply becomes uncertain and does not repeat prompt or pretend cleanup succeeded. Preserve actual IDs/native identity before closure; completed closed stages are archived evidence, not live attachable conversations. Keep one seed workspace per owned run server and active stage workspaces only, not permanent historical stage panes.
+This table owns the checkpoint order. Each phase is checkpointed before the named effect.
 
-attachHerdrStage checks exact saved active identity and invokes documented agent attach with inherited terminal/cwd/environment, no takeover. It does not create a new native conversation, resume closed history, move unrelated panes or change lifecycle success. Return native attach exit; missing/closed identity refuses finitely.
+| Phase | Checkpointed before |
+| --- | --- |
+| `server_intent` | any Herdr call; again with the fingerprint, before the workspace list |
+| `workspace_intent` | `workspace create` |
+| `start_intent` | `agent start`; again with the start reply's sequence and native session, before the live lookup |
+| `ready` | the prompt step, with `readySeq` |
+| `prompt_intent` | `agent prompt` |
+| `submitted` | observation, after the prompt reply |
+| `candidate` | returning `settled` |
+| `close_intent` | `workspace close` |
+| `closed` | returning `closed` |
+
+## Owned server and workspace
+
+- **Server name.** `pdd-` plus the first 20 hex characters of the SHA-256 of the lowercase run UUID. A name with the full UUID makes the socket path exceed Unix limits. Every Herdr command names this server with `--session`, never the person's focused or default session, so each run has its own server. Run and attempt IDs stay full in the record.
+- **Legacy name.** The backend check also accepts `pdd-<lowercase run UUID>`, and inspect, attach and close use it as saved. Only pre-native recovery may switch to the short name, after status reports the legacy server stopped (`legacy_server_not_stopped`). It checkpoints the short name, without a fingerprint, before it touches the new target.
+- **Ownership.** A fresh or pre-native stage may bootstrap only when status reports `running: false` for its session. A stopped donated server, or any other non-running reply, is `owned_server_missing`. A running target without a recorded fingerprint is not owned (`unowned_herdr_session`). A recorded fingerprint `{ session, socket, protocol, version }` must match exactly (`herdr_server_changed`). After bootstrap, poll status until the server runs or the startup limit ends; the target must then be [compatible](#herdr-commands) (`herdr_target_incompatible`). Never stop, restart or upgrade a server, or take over a shared one.
+- **Environment.** The server child starts in the worktree with the controller's environment unchanged; add no `HERDR_STARTUP_CWD` or other variable. Agents inherit the server environment and shell startup, not a later caller's. Never serialize, forward or log environment values, tokens, credentials or config files. A missing tool, login or setting stays visible in the stage, unrepaired.
+- **Capacity.** One active stage workspace per run server, beside its seed inventory. A fresh or recovered stage records the current workspace list as `seedWorkspaceIds`; a next stage uses the donated list. The seed list may be empty or hold one workspace, and the current list must equal it before allocation (`active_stage_capacity_unavailable`). Refuse without closing anything, and never close a seed workspace. Locks across issues belong to the runner and the [issue worktree](workflow-worktree.prompt.md) owner.
+- **Workspace.** Create one no-focus workspace in the worktree and record its workspace, tab, root pane and terminal IDs (`invalid_workspace_reply`).
+
+## Native start and the one prompt
+
+**Accepted product decision:** each new stage runs its agent with full access and no approval prompts. After Herdr's `--` boundary, Codex gets `--no-daemon`, `--dangerously-bypass-approvals-and-sandbox`, `-c`, `projects={"<worktree>"={trust_level="trusted"}}`; Claude gets `--dangerously-skip-permissions`.
+
+- `--no-daemon` selects the ordinary interactive Codex process, because the shared Codex daemon can refuse startup and the agent then disappears after the prompt.
+- The `-c` value trusts only the worktree, for this invocation only, so Codex does not stop at its folder-trust question. Use the root key `projects` because Codex 0.159.1 splits `-c` override keys on literal dots. The JSON-quoted path keeps dots, spaces, quotes, backslashes and equals signs in one key.
+- Forbidden: writing trust, config, auth or permission files; changing model, effort, provider, profile or `HOME`; another mode or a retry with other flags; changing or relaunching an existing agent.
+
+1. **Start reply.** Pin it to the [agent identity](#identity-and-observation) and record its sequence and native session.
+2. **Startup needs a person.** If start fails with `agent_not_ready`, look up the exact saved agent and checkpoint what it reports. If it is `blocked` or has `launch_pending`, return `blocked` with reason `native_start_person_action_required`, phase `start_intent` and a `detail` for operation `agent.start` whose message names `pdd workflow attach <runId>`. Otherwise return the refusal. A live lookup that finds this state after a good start returns the same result. Never scrape terminal text, answer a menu, restart the agent or add flags.
+3. **Ready** means `agent_status` is `idle` or `done`, `interactive_ready` is true and `launch_pending` is not set. The live lookup must find the agent ready (`native_start_not_ready`); its sequence becomes `readySeq`.
+4. **One prompt.** Send exactly `<context>\n\n# Current workflow stage\n<instructions>` as one argv item, never links in place of these bytes. `promptDigest` is its SHA-256 hex. In a nested guard call, look up the agent again and require it ready at `readySeq` (`fresh_agent_changed_before_prompt`), then send one `agent prompt` and pin its reply. A reply that shows `working` at a later sequence sets `workingSeq`. The reply is not a native turn receipt.
+5. **No resend.** A failure before `prompt_intent` sends no prompt. After it, a lost reply, timeout, stall or unknown state leaves the original attempt for inspection: no second prompt, other agent, other workspace or new attempt.
+
+## Identity and observation
+
+Each lookup is `agent get <agentName>`. Every lookup and reply keeps the pinned identity:
+
+- A reply on the saved pane and terminal with no agent is `native_agent_unavailable`, not a replacement or a missing account.
+- Workspace, tab, pane, terminal, name and agent kind equal the saved values (`stage_identity_changed`). The agent's real cwd (`cwd`, else `foreground_cwd`) is the worktree (`stage_cwd_changed`).
+- Once `nativeSession` is set, `agent_session` stays equal (`native_identity_changed`). Record it only when Herdr reports it, else keep null. Never derive a native ID from a pane, name or attempt.
+- `state_change_seq` is a safe integer of 0 or more (`invalid_agent_reply`), never below the last recorded value (`stage_sequence_reversed`).
+
+After submission, `runHerdrStage` polls the same agent. Each lookup is its own guard call; the guard is never held across the wait, so that a person can attach.
+
+| Observed | Result |
+| --- | --- |
+| `blocked` | checkpoint; return `blocked` (`native_person_action_required`) |
+| `working` in `prompt_intent` or `submitted`, above `readySeq` | keep the first `workingSeq`; checkpoint; poll again |
+| `working` in another phase, or not above `readySeq` | `unexpected_native_activity` or `missing_new_prompt_activity` |
+| ready, after `workingSeq`, at a later sequence | set `settledSeq` and phase `candidate`; checkpoint; return `settled` |
+| any other ready state | `no_observed_prompt_activity`: poll again; with no work seen when the first-activity window ends, `prompt_activity_stalled` |
+| anything else | `native_state_unknown` |
+
+Settled evidence is exactly `{ readySeq, workingSeq, settledSeq }`, each above the one before. A `candidate` whose sequence later differs from `settledSeq` is `candidate_sequence_changed`, never a new candidate. The overall wait ends with `stage_wait_timeout`. Never infer success from idle, terminal prose or a finished turn, and never invent a turn ID or report.
+
+<details>
+<summary><strong>Stage guard: requirement, reentrance and attach contention</strong></summary>
+
+All four functions require `ports.withStageGuard(backend, action)`. Without it, `runHerdrStage` returns `invalid_stage_input` before any checkpoint or Herdr call, inspect and close return `stage_guard_required`, and attach returns 1. The runner owns the lock, its reentrance and the attachment epoch; this module writes no journal or epoch. One guard call covers the whole `runHerdrStage` startup, from the server check to `submitted`. The guard must be reentrant: close inspects inside its own guard, and the runner may call close inside the same guard.
+
+While a person is attached, the guard throws code `WORKFLOW_STAGE_BUSY`. In `runHerdrStage` observation only, this means "still active": no lookup, checkpoint or settlement, and backend and evidence stay unchanged. Sleep one poll interval and observe the same original again. Paused time does not count toward the first-activity window, but it counts toward the overall wait. Inspection reports this contention as `native_stage_active`. Anywhere else it is a refusal with that code. After detach the runner treats an earlier candidate as stale; this module never resends for it.
+
+</details>
+
+## Inspection, attachment and cleanup
+
+**`inspectHerdrStage`** is read only. Its `cwd` (default: the saved one) must resolve to the saved worktree. Phase `closed` returns `stage_archived` and `close_intent` returns `stage_cleanup_unconfirmed`, both with no Herdr call. Otherwise it checks status against the saved fingerprint and makes one observation from the table, without a checkpoint. A row that would poll again is final: active work is `native_stage_active`, and another ready state is `no_observed_prompt_activity`. It never prompts, starts, bootstraps, creates, closes, waits or checkpoints, even in `server_intent`.
+
+**`attachHerdrStage`** returns 2 for phase `closed`, with no effect. Otherwise, under the guard, it verifies the fingerprint and exact agent identity. It runs `herdr --session <session> agent attach <agentName>` in the worktree with inherited stdio and environment and no shell, holds the guard until that process exits and returns its exit code. A refusal, a spawn error or a missing integer code returns 1. It never starts a conversation, resumes closed history, moves panes or changes stage state.
+
+**`closeHerdrStage`** needs phase `candidate` and an acceptance with matching `runId`, `stageId`, `attemptId`, `promptDigest` and `terminalId` and a 64-character lowercase hex `evidenceDigest` (`durable_stage_acceptance_required`). Acceptance is the runner's durable record, not a person's consent. Under the guard it inspects again and requires `settled` at the same `settledSeq` (`stage_not_quiescent`). It sets `acceptanceDigest`, checkpoints `close_intent` through `ports.checkpoint`, closes only the stage workspace and [confirms the close](#cleanup-confirmation). Then it sets `cleanupConfirmation`, checkpoints `closed` and returns `{ state: 'closed', backend, evidence }`. A later failure keeps `close_intent` and returns `recovery_required`. Never repeat the close, send a prompt or claim an unconfirmed close. Never close a working, blocked, unknown, replaced or unrelated workspace, or a seed workspace. A closed stage is archived evidence, not a live conversation.
+
+<a id="cleanup-confirmation"></a>
+<details>
+<summary><strong>Cleanup confirmation: acknowledgement and readback</strong></summary>
+
+Both checks must pass under the same guard, or the reason is `workspace_close_unconfirmed`:
+
+1. The close reply is an object, not an array, with `id` `cli:workspace:close` and `result.type` `ok`.
+2. A following `workspace list` reply has `id` `cli:workspace:list`, `result.type` `workspace_list`, an array of objects with unique string `workspace_id` values, and no entry for the closed workspace.
+
+Exit code 0 or parseable JSON alone is not proof. On success, `cleanupConfirmation` is `{ acknowledgement: 'ok', absentWorkspaceId: <workspaceId> }`.
+
+</details>
+
+<a id="herdr-commands"></a>
+<details>
+<summary><strong>Herdr commands and required replies</strong></summary>
+
+Each command runs `herdr --session <session> ...` through `execFile` with the worktree as cwd, `shell: false`, no `env` option, UTF-8, a 1 MiB output limit and a 10-second timeout. Each reply must be one JSON object without an `error` field.
+
+| Purpose | Arguments after `--session <session>` | Required reply |
+| --- | --- | --- |
+| Status | `status server --json` | compatible: `running` true, same `session`, `compatible` and `endpoint_compatible` true, integer `protocol`, string `version`, non-empty `socket` |
+| Bootstrap | `server`, spawned detached with `stdio: 'ignore'`, then released | none; poll status |
+| Inventory | `workspace list` | `result.workspaces`: objects with string `workspace_id` |
+| Workspace | `workspace create --cwd <worktree> --label "PDD <stageId>" --no-focus` | `result.workspace.workspace_id`, `result.tab.tab_id`, `result.root_pane.pane_id` and `terminal_id` |
+| Start | `agent start <agentName> --kind <agent> --pane <paneId> --timeout <startupMs> -- <native argv>`, command timeout `startupMs` plus 5 seconds | `result.agent` |
+| Lookup | `agent get <agentName>` | `result.agent` |
+| Prompt | `agent prompt <agentName> <prompt>` | `result.agent` |
+| Close | `workspace close <workspaceId>` | see cleanup confirmation |
+| Attach | `agent attach <agentName>`, spawned with `stdio: 'inherit'` | exit code |
+
+</details>
+
+<a id="ports-and-records"></a>
+<details>
+<summary><strong>Input check, ports, defaults and backend record</strong></summary>
+
+`runHerdrStage` input: `runId` and `attemptId` are UUIDv4 text in any case, `stageId` matches `^[a-z][a-z0-9-]{0,63}$`, `agent` is `codex` or `claude`, `cwd` resolves to its real path, `context` and `instructions` are non-blank strings, `checkpoint` is a function and `backend` is optional. Other input is `invalid_stage_input`, with no checkpoint and no Herdr call.
+
+`checkpoint(snapshot)` gets a structured clone of the backend and is awaited. If it throws, its error `code` becomes the reason and the next effect does not happen. `closeHerdrStage` takes it from `ports.checkpoint` (`durable_checkpoint_required` if absent).
+
+Optional ports, which tests replace with stand-ins instead of a live server, agent or account: `execFile`, `spawn`, `spawnServer(session, cwd)`, `spawnAttach(session, agentName, cwd)`, `sleep(ms)`, `now()`, and in milliseconds `pollMs` (default 100), `startupMs` (30,000: bootstrap wait and agent start), `activityMs` (5,000: first-activity window) and `timeoutMs` (1,800,000: overall wait).
+
+Backend record, version 1. The start fields are `version`, `runId`, `stageId`, `attemptId`, `agent`, `cwd`, `session`, `agentName` (`pdd-` plus the first 24 hex characters of the SHA-256 of the attempt ID), `promptDigest`, `nativeSession` (object or null), `phase` and `evidence`. Later fields are `server`, `seedWorkspaceIds`, `maxActiveStages` (1), `workspaceId`, `tabId`, `paneId`, `terminalId`, `lastSeq`, `acceptanceDigest` (SHA-256 of the acceptance as JSON with sorted keys) and `cleanupConfirmation`. Once set, identity fields do not change, except in the legacy rename.
+
+The backend check (`invalid_stage_backend`) requires version 1, valid IDs, stage name and agent, a string `cwd`, a `session` that is the short or legacy name of that run, and either a `server` with the same session or a pre-native record.
+
+</details>
+
+<a id="results-and-errors"></a>
+<details>
+<summary><strong>Results, reasons and structured error detail</strong></summary>
+
+Run and inspect return `state` `settled`, `blocked` or `recovery_required`. Close returns `closed` or `recovery_required`. None of them rejects for a refused stage. `backend` is a copy of the record as far as it got, or null when input failed before any backend existed. `evidence` copies `backend.evidence`, or is `{}`. `reason` is a stable code: one named in this prompt, a Herdr error code, a Node error code, or a fallback (`stage_transport_uncertain`, `stage_inspection_unavailable`, `stage_cleanup_uncertain`).
+
+When a Herdr command fails, the code comes from its JSON `error.code` (letters, digits, `_` or `-`, at most 100 characters), else from a text process error code, else `herdr_command_failed`. Output that is not JSON is `herdr_invalid_json`. A non-object reply, or an error reply without a usable code, is `invalid_herdr_reply`. `runHerdrStage` adds `detail: { operation, code, message? }`, where `operation` is the command group and verb, such as `workspace.list`. `message` is the Herdr error message cut to 600 characters. It is never kept for `agent.prompt`, because that error can echo the prompt. Never include the Node failure message, the prompt, raw stdout or stderr, or environment values.
+
+</details>
 
 ## Dependencies
 
-Read entire [Prompting guide](../../docs/prompting-guide.md) before authoring. Follow [public boundary](public-boundary.prompt.md). Existing runner owns journal/currentness/acceptance/worktree assignment and supplies awaited checkpoint; this adapter owns transport identity and one-delivery observations only. Existing native launcher owns ordinary foreground pdd session. Herdr's public0.9.1 schema/skill commands establish concrete transport behavior; no private Host/Runtime dependency. Tests use capturing Herdr command/process stand-ins and temporary paths, never live servers/agents/models/accounts.
+- [Prompting guide](../../docs/prompting-guide.md) — authoring and review method for this prompt.
+- [Public boundary](public-boundary.prompt.md) — shared local scope and the full-access decision (authoring, generation). Local consequence: the native argv above is the only permission change, with no private service and no global config rewrite.
+- [Workflow runner](workflow-runner.prompt.md) — caller (generation, runtime, testing). It supplies `checkpoint` and `withStageGuard`, journals each snapshot, owns the attachment epoch and acceptance, and decides when to pass the same original again.
+- Node built-ins (runtime): `node:child_process` `execFile` and `spawn` run Herdr; `node:util` `promisify`; `node:crypto` `createHash` for SHA-256; `node:fs/promises` `realpath` for worktree paths.
+- `herdr` CLI (runtime), 0.9.1 baseline: `status server`, `server`, `workspace list|create|close`, `agent start|get|prompt|attach`.
+- `codex` and `claude` (runtime): started only through `herdr agent start`.
 
-Admission is finite: one active stage workspace per owned run server, in addition to its recorded seed workspace. Before allocation require the current workspace inventory to equal the recorded seed inventory (at most one); occupied, unknown or changed inventories refuse without closing anything. A closed accepted predecessor may donate that recorded owned server/seed reference for the next fresh stage; never reuse its native conversation. Cross-issue admission/controller locks belong to the existing common-repository runner/worktree owner, not an unbounded claim of 30-issue capacity.
-
-Require ports.withStageGuard(backend,async action) for stage operation; absent guard refuses, never silently falls back to unprotected prompt/attach/cleanup. Main owns the common-repository/run filesystem lock, AsyncLocalStorage same-call reentrance and fsynced attachment epoch. Wrap current identity/ready reassertion + prompt intent/delivery, each observation, entire attach through detach, and cleanup including its fresh inspection. Main holds the same guard across full handoff/currentness/tests/durable acceptance/close. Main invalidates any candidate from an older attachment epoch; it may freshly reconcile the original after detach without resubmitting. Native code must not write a parallel journal/epoch or hold the guard across the whole waiting loop (which would prevent authorized attachment).
-
-A previously captured candidate must not be refreshed by silently substituting a later lifecycle sequence: changed candidate sequence is recovery_required. A cleanup-intent backend stays cleanup-uncertain during inspection and cannot be relabeled as a fresh candidate. Explicit main reconciliation may inspect the original resources, but no unknown prompt or close effect is replayed by this adapter.
-
-Cleanup confirmation is strict: pinned Herdr workspace close returns id cli:workspace:close with result.type ok (not an invented workspace_closed action). Require that documented acknowledgement, then under the same guard require a valid cli:workspace:list/result.type workspace_list inventory with the exact owned workspace absent. Malformed/array/empty/unrelated/wrong-request acknowledgement, invalid readback or workspace still present retains close_intent/recovery_required. Do not repeat close or prompt. A process exit0 or parseable JSON alone is not cleanup proof.
-
-## Fresh headless bootstrap and proven pre-native recovery
-
-Follow the inspected Herdr normal daemon builder: supply HERDR_STARTUP_CWD equal to the assigned absolute worktree to the NEW owned local server child, in addition to process cwd. Headless bootstrap consumes this one startup-context hint to create its seed workspace; process cwd alone does not supply it. This local child inherits the ordinary environment with only that path overlaid; never persist environment values or send them through workspace/native/public ports, and do not read/copy auth/config files. No new native flags, shared-server restart or settings repair. Require a real seed workspace before stage allocation, not transient health alone.
-
-Preserve structured Herdr subprocess error code, bounded structured message and command group instead of erasing numeric process exit into generic uncertainty; never include the Node command-failure message or raw prompt/stdout/stderr/environment. Invalid JSON has its own finite transport code.
-
-A direct runHerdrStage invocation may recover the SAME original run/stage/attempt/prompt digest ONLY when saved phase is exactly server_intent, nativeSession null, evidence empty, and no workspace/tab/pane/terminal/seed/sequence/submission/cleanup fields exist. This proves this adapter never reached a workspace mutation or prompt intent. Reuse the actual recorded server fingerprint and owned name; if that exact owned target is stopped, normal bootstrap under the shared stage guard is allowed after another awaited checkpoint, with the SAME IDs/cwd/context/attempt, not a fresh operation. Running target must match the saved server fingerprint; never touch a different/shared session. Recovered bootstrap reads a genuine seed then continues once. Other phases remain original-only inspection: workspace/start/prompt intents, pending/uncertain delivery, candidate and cleanup can never trigger bootstrap restart or prompt retry. inspectHerdrStage remains strictly read-only even for server_intent. Main must explicitly select this proven pre-native recovery through normal resume; no product operation is authorized merely by source delivery.
-
-
-## Controlling reproduced socket-length correction
-
-The actual root cause is the full UUID server name exceeding Unix API/client socket limits. Use `pdd-` plus the first 20 lowercase SHA256 hex characters of the lowercase run UUID as the deterministic named server; validate this exact run binding in assertBackend. Full run/attempt identities remain unchanged. Do NOT change native environment, stdio, permissions or daemon mechanics to fix this. The earlier proposed HERDR_STARTUP_CWD overlay and mandatory seed are superseded: normal empty workspace inventory is supported and stays permitted; preserve ordinary inherited environment unchanged.
-
-Recognize the historical pdd-FULLUUID backend name for inspection and proven pre-native recovery. Migration to the short name is allowed only from exact server_intent/no native/workspace/prompt evidence and after a normal read confirms the historical target STOPPED. Checkpoint the changed backend name before touching its new target; never stop/restart the original long-name target. A running new target without recorded fingerprint remains unowned and refuses. If a pre-native saved checkpoint has no server fingerprint yet, it may bootstrap only a stopped target, never adopt a running one. All submitted/later attempts remain inspection-only. Serialize migration/bootstrap under the same stage guard. Require a usable actual workspace-list response, including an empty list, before allocating a stage. Preserve structured failure details. New/legacy saved server references never authorize another run or prompt replay.
-
-
-## Ordinary Codex launch compatibility and honest liveness
-
-Retained actual feature10 failure showed Codex refusing the shared daemon for api_key_model_discovery and then disappearing after Herdr accepted prompt delivery. The actual already-authorized ordinary WORK8 caller uses --no-daemon. For NEW Codex stages pass exactly documented --no-daemon via Herdr agent start's supported -- native-argument boundary. This selects the ordinary non-daemon interactive process; it is not a sandbox/approval/config/provider bypass. Do not change any profile/env/auth/home/model/effort/settings or ordinary pdd session; Claude start argv stays unchanged. Do not retry an existing unknown submitted prompt or relaunch any saved later-phase stage just because this code changed.
-
-Agent start readiness and immediate pre-submit identity/readiness remain required; agent disappearance, missing known kind, launch_pending or noninteractive replies cannot qualify. If exact saved pane/terminal identity returns no native agent, report native_agent_unavailable, not replacement identity or account absence; preserve original phase/backend/evidence and no replay. Structured errors for safe native start/get lifecycle commands may retain bounded actual message+operation, but native prompt errors must never retain message/raw text that could contain the stage prompt. Native session IDs remain optional, never fabricated. Launch refusal/vanishing before intent means ZERO stage prompts; after intent/delivery remains unknown model consumption and original-only recovery.
-
-Owning controls verify exact Codex/Claude argv; a stand-in reproduces the actual daemon-only startup refusal unless no-daemon is supplied, with no real agent/model call. Add liveness cases for native disappearing before/after submit and preservation of noresend/actual phase; old daemon failure is not reclassified as successful completion or safe retry.
-
-## Existing native startup blocked before first PDD prompt
-
-Mac actual update screen returned agent_not_ready while the saved backend was start_intent with exact workspace/pane/terminal, no prompt evidence and no native session. On start refusal, perform read-only exact agent lookup: if the saved owned agent is blocked or launch_pending, return blocked/native_start_person_action_required with actionable normal `pdd workflow attach RUN_ID` guidance, preserving phase. Do not scrape terminal text, answer update choices, restart native, or add update/config flags.
-
-A direct runHerdrStage call with SAME run/stage/attempt/input digest may continue the FIRST prompt on an existing exact saved start_intent or ready agent after normal person startup action. Require no working/settled evidence or acceptance/cleanup/submission fields. Reassert server and full actual agent identity/cwd; if not ready return blocked/recovery without starting/replacing anything. Checkpoint actual ready native identity and sequence, then perform the existing one durable prompt_intent and one prompt under shared guard. NEVER server/workspace/native start effects on this path. NativeIDs remain optional, no fake ID. Any saved prompt_intent/submitted/later phase stays inspection-only, including Linux feature10. Main must explicitly route normal resume to this pre-prompt continuation; inspect stays read-only.
-
-## Retained f9 P2: pin launch acknowledgement before live reassertion
-
-A validated start acknowledgement is actual identity/evidence, not disposable. Record its native session (when supplied) and sequence, then await the same direct-backend checkpoint in start_intent before any live lookup/first prompt. Live lookup must match that native session and cannot reverse sequence. For agent_not_ready startup-error exact-agent lookup, record/checkpoint that supplied native ID and sequence BEFORE returning blocked or propagating the refusal. Missing native IDs stay null. Any durability failure fences further lookup/prompt; no account/settings/launch flags change. Controls must reject startA->liveB, backwards seq, retain blocked ID/seq and prove post-ack checkpoint failure sends zero prompts.
-
-
-## Normal attach contention waits without abandoning original stage
-
-Existing withStageGuard(backend,action) throws WORKFLOW_STAGE_BUSY when ordinary person attach owns the entire shared stageguard until detach. For native observation ONLY, map this exact contention to active/stage_temporarily_guarded with unchanged backend/evidence, no live query/checkpoint/settlement outsideguard. The foreground controller sleeps/re-polls SAME original until detach, bounded by its existing overall deadline. Do not count those unobservable polling intervals against the short first-activity watchdog. Other failures keep refusal semantics. Attach keeps WHOLEguard; acceptance/cleanup still require fresh guard/identity/sequence and main attachmentepoch/currentness afterdetach. No new guard API, no unprotected reads/acceptance, prompt/native/server retry or newattempt. The inspector remains read-only; an active wait remains unresolved. Focused stand-ins prove temporary contention longerthan activitywindow still reaches honest working->settled afterdetach once, and persistentcontention timesoutwithoutsecondprompt/cleanup.
-
-
-## Controlling first-preview publication full-access mode
-
-For every NEW workflow stage, Serhan now authorizes full access without approval prompts. Codex native arguments after Herdr's -- boundary are --no-daemon --dangerously-bypass-approvals-and-sandbox followed by -c and one invocation-only projects={"<actual assigned absolute cwd>"={trust_level="trusted"}} override; use the simple root override key projects because Codex 0.159.1 splits override keys on literal dots. Encode the path as a quoted TOML inline-table VALUE key so dots, spaces, quotes, backslashes and equals signs remain one exact worktree key; native config selects an exact cwd entry before a parent repo-root entry; Claude uses --dangerously-skip-permissions. Preserve canonical installed agent, cwd/environment/auth/provider/model/effort and actual stage identity/first-prompt/noresend checks. No permission/config/sandbox fallback or global writes. This explicitly supersedes the earlier no-permission-override rule for these exact flags only. Existing startup/consent/root failure remains actionable/finite, no autoanswer or mode retry. Actual Mac session and Diana Colony issue12 stage startup both stopped at Folder Trust despite YOLO full access. The person authorized the supported per-invocation worktree-trust override for subsequent fresh Codex starts. Never persist trust/config/auth/environment changes, automate update choices or apply this launch correction to an existing live agent. Claude arguments remain unchanged. Active old-context runs/agents are not relaunched or modified by this source change. Same four exports and controller semantics remain unchanged.
+Navigation only: [background stages in the workflows guide](../../docs/workflows.md#background-stages-and-attachment).

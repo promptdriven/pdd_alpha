@@ -1,0 +1,710 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-stage-herdr.prompt.md",
+  "story": "story/cli/WORKFLOW-STAGE-HERDR.md",
+  "cases": [
+    {
+      "id": "fresh-stage-settles-once",
+      "criteria": [
+        "AC1",
+        "AC3"
+      ],
+      "given": "No saved backend. Status for the run's server first reports running false for that session, then running and compatible after bootstrap. Workspace list returns one workspace `seed`. Before the prompt the agent is idle at sequence 10, and the prompt reply also shows idle at 10. After the prompt, lookups show working at 11, then done at 12. Both ports and the checkpoint succeed.",
+      "input": {
+        "call": "runHerdrStage",
+        "runId": "12345678-1234-4123-8123-123456789abc",
+        "attemptId": "87654321-4321-4321-8321-cba987654321",
+        "stageId": "check",
+        "agent": "codex",
+        "cwd": "/work/issue-7",
+        "context": "# Entire guide\nSelected recipe",
+        "instructions": "literal $(not shell)"
+      },
+      "expected": {
+        "state": "settled",
+        "evidence": {
+          "readySeq": 10,
+          "workingSeq": 11,
+          "settledSeq": 12
+        },
+        "backend": {
+          "version": 1,
+          "phase": "candidate",
+          "session": "pdd-af16785cab34225b1e15",
+          "agentName": "pdd-a400881c4ea41937be4413ff",
+          "promptDigest": "a693545a961c852317c3d3b46fec5f5241d66cca00d13765e487c9862d8b40b4",
+          "seedWorkspaceIds": [
+            "seed"
+          ],
+          "maxActiveStages": 1
+        }
+      },
+      "effects": [
+        "exactly one server bootstrap: herdr --session pdd-af16785cab34225b1e15 server",
+        "exactly one workspace create with --cwd /work/issue-7 --label \"PDD check\" --no-focus",
+        "exactly one agent start and exactly one agent prompt",
+        "the prompt argv item is exactly \"# Entire guide\\nSelected recipe\\n\\n# Current workflow stage\\nliteral $(not shell)\"",
+        "checkpoint phases appear in this order: server_intent, workspace_intent, start_intent, ready, prompt_intent, submitted, candidate",
+        "every Herdr command uses shell false and no env option",
+        "no workspace close"
+      ]
+    },
+    {
+      "id": "codex-full-access-argv-with-quoted-path",
+      "criteria": [
+        "AC1"
+      ],
+      "given": "Fresh stage as in fresh-stage-settles-once, but the worktree real path is /work/pdd stage \"quoted\".back\\slash=chosen and the default startup limit applies.",
+      "input": {
+        "call": "runHerdrStage",
+        "agent": "codex",
+        "cwd": "/work/pdd stage \"quoted\".back\\slash=chosen"
+      },
+      "expected": {
+        "state": "settled",
+        "startArgvAfterSession": [
+          "agent",
+          "start",
+          "pdd-a400881c4ea41937be4413ff",
+          "--kind",
+          "codex",
+          "--pane",
+          "<paneId>",
+          "--timeout",
+          "30000",
+          "--",
+          "--no-daemon",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "-c",
+          "projects={\"/work/pdd stage \\\"quoted\\\".back\\\\slash=chosen\"={trust_level=\"trusted\"}}"
+        ]
+      },
+      "effects": [
+        "no trust, config, auth or permission file is written",
+        "no model, provider, effort or profile flag"
+      ]
+    },
+    {
+      "id": "claude-full-access-argv",
+      "criteria": [
+        "AC1"
+      ],
+      "given": "Fresh stage as in fresh-stage-settles-once, with agent claude.",
+      "input": {
+        "call": "runHerdrStage",
+        "agent": "claude",
+        "cwd": "/work/issue-7"
+      },
+      "expected": {
+        "state": "settled",
+        "startArgvAfterSession": [
+          "agent",
+          "start",
+          "pdd-a400881c4ea41937be4413ff",
+          "--kind",
+          "claude",
+          "--pane",
+          "<paneId>",
+          "--timeout",
+          "30000",
+          "--",
+          "--dangerously-skip-permissions"
+        ]
+      },
+      "effects": [
+        "no --no-daemon and no -c argument"
+      ]
+    },
+    {
+      "id": "empty-workspace-inventory-allowed",
+      "criteria": [
+        "AC2"
+      ],
+      "given": "Fresh stage as in fresh-stage-settles-once, but the workspace list after bootstrap is empty.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expected": {
+        "state": "settled",
+        "backend": {
+          "seedWorkspaceIds": [],
+          "phase": "candidate"
+        }
+      },
+      "effects": [
+        "exactly one workspace create",
+        "no HERDR_STARTUP_CWD or other environment variable is added to the server child"
+      ]
+    },
+    {
+      "id": "occupied-inventory-refused",
+      "criteria": [
+        "AC2"
+      ],
+      "given": "Fresh stage, but the workspace list after bootstrap holds two workspaces, `seed` and `occupied`.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "active_stage_capacity_unavailable"
+      },
+      "effects": [
+        "no workspace create",
+        "no agent start",
+        "no prompt",
+        "no workspace close"
+      ]
+    },
+    {
+      "id": "running-target-without-fingerprint-not-owned",
+      "criteria": [
+        "AC2"
+      ],
+      "given": "No saved backend. The first status read for the run's server already reports running true.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "unowned_herdr_session"
+      },
+      "effects": [
+        "no server bootstrap",
+        "no workspace list or create",
+        "no prompt",
+        "the running server is not stopped or restarted"
+      ]
+    },
+    {
+      "id": "checkpoint-failure-at-server-intent",
+      "criteria": [
+        "AC3"
+      ],
+      "given": "Fresh stage. The checkpoint throws an error with code CHECKPOINT_FAILED for the first server_intent snapshot.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "CHECKPOINT_FAILED"
+      },
+      "effects": [
+        "no Herdr command of any kind",
+        "no server bootstrap"
+      ]
+    },
+    {
+      "id": "checkpoint-failure-at-prompt-intent",
+      "criteria": [
+        "AC3"
+      ],
+      "given": "Fresh stage. The checkpoint throws an error with code CHECKPOINT_FAILED for the prompt_intent snapshot.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "CHECKPOINT_FAILED"
+      },
+      "effects": [
+        "no agent prompt",
+        "exactly one agent start"
+      ]
+    },
+    {
+      "id": "lost-prompt-reply-never-resent",
+      "criteria": [
+        "AC4",
+        "AC12"
+      ],
+      "given": "Fresh stage. The agent prompt command fails with process error code ETIMEDOUT and no JSON error. Then the caller passes the returned backend again with the same run, stage, attempt, agent, worktree, context and instructions.",
+      "input": {
+        "call": "runHerdrStage, then runHerdrStage again with backend"
+      },
+      "expected": {
+        "first": {
+          "state": "recovery_required",
+          "reason": "ETIMEDOUT",
+          "backend": {
+            "phase": "prompt_intent"
+          },
+          "detail": {
+            "operation": "agent.prompt",
+            "code": "ETIMEDOUT"
+          }
+        },
+        "second": {
+          "state": "recovery_required"
+        }
+      },
+      "effects": [
+        "exactly one agent prompt across both calls",
+        "the first detail has no message field",
+        "the second call runs only status and agent lookups",
+        "no second agent start or workspace create",
+        "no workspace close"
+      ]
+    },
+    {
+      "id": "ready-without-observed-work-stalls",
+      "criteria": [
+        "AC4"
+      ],
+      "given": "Fresh stage. The prompt reply shows idle at 10, and every later lookup shows idle at 10.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "prompt_activity_stalled",
+        "backend": {
+          "phase": "submitted"
+        }
+      },
+      "effects": [
+        "exactly one agent prompt",
+        "no workspace close"
+      ]
+    },
+    {
+      "id": "native-session-replaced-before-prompt",
+      "criteria": [
+        "AC4",
+        "AC3"
+      ],
+      "given": "Fresh stage. The start reply reports agent_session { value: A } at sequence 20. The live lookup after start reports agent_session { value: B } at sequence 21.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "native_identity_changed",
+        "backend": {
+          "nativeSession": {
+            "value": "A"
+          },
+          "lastSeq": 20
+        }
+      },
+      "effects": [
+        "a start_intent checkpoint holds native session A and lastSeq 20",
+        "no agent prompt"
+      ]
+    },
+    {
+      "id": "agent-vanishes-before-submit",
+      "criteria": [
+        "AC4"
+      ],
+      "given": "Fresh stage. The live lookup after start returns the saved pane and terminal with no agent.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "native_agent_unavailable"
+      },
+      "effects": [
+        "no agent prompt",
+        "no second agent start"
+      ]
+    },
+    {
+      "id": "startup-blocked-then-first-prompt",
+      "criteria": [
+        "AC5"
+      ],
+      "given": "Fresh stage. Agent start fails with JSON error code agent_not_ready. The exact saved agent is blocked with launch_pending true at sequence 10 and reports a native session. Later the person finishes startup and the agent is idle at 10, and the caller passes the returned backend again with the same original input.",
+      "input": {
+        "call": "runHerdrStage, then runHerdrStage again with backend"
+      },
+      "expected": {
+        "first": {
+          "state": "blocked",
+          "reason": "native_start_person_action_required",
+          "backend": {
+            "phase": "start_intent",
+            "lastSeq": 10
+          },
+          "detail": {
+            "operation": "agent.start",
+            "code": "native_start_person_action_required"
+          }
+        },
+        "second": {
+          "state": "settled"
+        }
+      },
+      "effects": [
+        "the first detail message names pdd workflow attach 12345678-1234-4123-8123-123456789abc",
+        "the last checkpoint before the first return holds the reported native session",
+        "zero prompts after the first call",
+        "exactly one agent start and one agent prompt across both calls",
+        "no terminal text is read and no menu is answered"
+      ]
+    },
+    {
+      "id": "pre-native-recovery-keeps-ids",
+      "criteria": [
+        "AC6",
+        "AC12"
+      ],
+      "given": "Fresh stage. The first workspace list fails: its process error has message 'DO NOT LEAK' and stderr JSON error code app_not_ready with message 'Workspace service not initialized'. Then the run's server stops, and the caller passes the returned backend again with the same original input. After the new bootstrap, status reports the same fingerprint as before.",
+      "input": {
+        "call": "runHerdrStage, then runHerdrStage again with backend"
+      },
+      "expected": {
+        "first": {
+          "state": "recovery_required",
+          "reason": "app_not_ready",
+          "backend": {
+            "phase": "server_intent",
+            "nativeSession": null
+          },
+          "detail": {
+            "operation": "workspace.list",
+            "code": "app_not_ready",
+            "message": "Workspace service not initialized"
+          }
+        },
+        "second": {
+          "state": "settled",
+          "backend": {
+            "runId": "12345678-1234-4123-8123-123456789abc",
+            "attemptId": "87654321-4321-4321-8321-cba987654321",
+            "promptDigest": "a693545a961c852317c3d3b46fec5f5241d66cca00d13765e487c9862d8b40b4"
+          }
+        }
+      },
+      "effects": [
+        "the first result contains no 'DO NOT LEAK' text",
+        "zero prompts after the first call",
+        "two server bootstraps across both calls",
+        "exactly one agent prompt across both calls"
+      ]
+    },
+    {
+      "id": "pre-native-with-extra-field-is-inspection-only",
+      "criteria": [
+        "AC6"
+      ],
+      "given": "A saved same-original backend in phase server_intent with nativeSession null and empty evidence, but with an extra lastSeq field. The run's server is stopped.",
+      "input": {
+        "call": "runHerdrStage",
+        "backend": {
+          "phase": "server_intent",
+          "lastSeq": 0
+        }
+      },
+      "expectedError": {
+        "state": "recovery_required"
+      },
+      "effects": [
+        "no server bootstrap",
+        "no workspace create",
+        "no agent prompt"
+      ]
+    },
+    {
+      "id": "legacy-stopped-server-moves-to-short-name",
+      "criteria": [
+        "AC6"
+      ],
+      "given": "A pre-native same-original backend whose session and server fingerprint use pdd-12345678-1234-4123-8123-123456789abc. Status for that legacy name reports running false. The short-name server is stopped.",
+      "input": {
+        "call": "runHerdrStage",
+        "backend": {
+          "phase": "server_intent",
+          "session": "pdd-12345678-1234-4123-8123-123456789abc"
+        }
+      },
+      "expected": {
+        "state": "settled",
+        "backend": {
+          "session": "pdd-af16785cab34225b1e15",
+          "attemptId": "87654321-4321-4321-8321-cba987654321"
+        }
+      },
+      "effects": [
+        "a server_intent checkpoint with the short session and no server field comes before any command on the short name",
+        "the legacy server is not stopped or restarted",
+        "exactly one agent prompt"
+      ]
+    },
+    {
+      "id": "legacy-running-server-refused",
+      "criteria": [
+        "AC6"
+      ],
+      "given": "The same legacy pre-native backend, but status for the legacy name reports running true.",
+      "input": {
+        "call": "runHerdrStage",
+        "backend": {
+          "phase": "server_intent",
+          "session": "pdd-12345678-1234-4123-8123-123456789abc"
+        }
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "legacy_server_not_stopped"
+      },
+      "effects": [
+        "no server bootstrap",
+        "no agent prompt"
+      ]
+    },
+    {
+      "id": "inspect-cleanup-intent-without-herdr",
+      "criteria": [
+        "AC7"
+      ],
+      "given": "A valid backend in phase close_intent.",
+      "input": {
+        "call": "inspectHerdrStage",
+        "backend": {
+          "phase": "close_intent"
+        }
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "stage_cleanup_unconfirmed"
+      },
+      "effects": [
+        "no Herdr command",
+        "no checkpoint"
+      ]
+    },
+    {
+      "id": "missing-guard-refuses-before-effects",
+      "criteria": [
+        "AC8"
+      ],
+      "given": "Valid fresh input, but ports has no withStageGuard.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "invalid_stage_input",
+        "backend": null
+      },
+      "effects": [
+        "no checkpoint",
+        "no Herdr command",
+        "attachHerdrStage with the same ports and a valid active backend returns exit code 1 and spawns nothing"
+      ]
+    },
+    {
+      "id": "attach-contention-waits-then-settles",
+      "criteria": [
+        "AC8"
+      ],
+      "given": "Fresh stage with pollMs 1 and activityMs 3. While the phase is submitted, the guard throws code WORKFLOW_STAGE_BUSY for the first six observation calls, then works. After that, lookups show working at 11, then done at 12.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expected": {
+        "state": "settled",
+        "evidence": {
+          "readySeq": 10,
+          "workingSeq": 11,
+          "settledSeq": 12
+        }
+      },
+      "effects": [
+        "exactly one agent prompt",
+        "exactly one agent start",
+        "no workspace close",
+        "no agent lookup during a busy guard call"
+      ]
+    },
+    {
+      "id": "persistent-contention-times-out",
+      "criteria": [
+        "AC8"
+      ],
+      "given": "Fresh stage. While the phase is submitted, every observation guard call throws code WORKFLOW_STAGE_BUSY until the overall wait ends.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "stage_wait_timeout",
+        "backend": {
+          "phase": "submitted"
+        },
+        "evidence": {
+          "readySeq": 10
+        }
+      },
+      "effects": [
+        "exactly one agent prompt",
+        "no workspace close"
+      ]
+    },
+    {
+      "id": "attach-verified-active-stage",
+      "criteria": [
+        "AC9"
+      ],
+      "given": "A settled candidate backend from fresh-stage-settles-once. The server fingerprint and agent identity still match. The attach process exits with code 17.",
+      "input": {
+        "call": "attachHerdrStage"
+      },
+      "expected": 17,
+      "effects": [
+        "spawns herdr with --session pdd-af16785cab34225b1e15 agent attach pdd-a400881c4ea41937be4413ff",
+        "spawn cwd is the worktree, stdio inherit, shell false",
+        "the guard is held until the attach process exits",
+        "no checkpoint and no new conversation"
+      ]
+    },
+    {
+      "id": "attach-closed-stage",
+      "criteria": [
+        "AC9"
+      ],
+      "given": "A valid backend in phase closed.",
+      "input": {
+        "call": "attachHerdrStage",
+        "backend": {
+          "phase": "closed"
+        }
+      },
+      "expected": 2,
+      "effects": [
+        "no Herdr command",
+        "no guard call",
+        "no spawn"
+      ]
+    },
+    {
+      "id": "close-confirmed",
+      "criteria": [
+        "AC10"
+      ],
+      "given": "A settled candidate backend with workspaceId w2. The acceptance matches runId, stageId, attemptId, promptDigest and terminalId and has a 64-character lowercase hex evidenceDigest. The agent is still done at settledSeq. The close reply has id cli:workspace:close and result.type ok, and the following list has id cli:workspace:list, result.type workspace_list and only `seed`.",
+      "input": {
+        "call": "closeHerdrStage"
+      },
+      "expected": {
+        "state": "closed",
+        "backend": {
+          "phase": "closed",
+          "cleanupConfirmation": {
+            "acknowledgement": "ok",
+            "absentWorkspaceId": "w2"
+          }
+        }
+      },
+      "effects": [
+        "a close_intent checkpoint comes before the workspace close",
+        "exactly one workspace close, for w2 only",
+        "the seed workspace is not closed",
+        "no agent prompt"
+      ]
+    },
+    {
+      "id": "close-unconfirmed-acknowledgement-kept",
+      "criteria": [
+        "AC10"
+      ],
+      "given": "As in close-confirmed, but the close reply is { id: cli:workspace:close, result: { action: workspace_closed } }. Afterwards the caller inspects the returned backend.",
+      "input": {
+        "call": "closeHerdrStage, then inspectHerdrStage"
+      },
+      "expected": {
+        "close": {
+          "state": "recovery_required",
+          "reason": "workspace_close_unconfirmed",
+          "backend": {
+            "phase": "close_intent"
+          }
+        },
+        "inspect": {
+          "state": "recovery_required",
+          "reason": "stage_cleanup_unconfirmed"
+        }
+      },
+      "effects": [
+        "the last checkpoint is close_intent",
+        "exactly one workspace close across both calls",
+        "no agent prompt"
+      ]
+    },
+    {
+      "id": "close-refused-without-matching-acceptance",
+      "criteria": [
+        "AC10"
+      ],
+      "given": "A settled candidate backend and an empty acceptance object.",
+      "input": {
+        "call": "closeHerdrStage",
+        "acceptance": {}
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "durable_stage_acceptance_required"
+      },
+      "effects": [
+        "no checkpoint",
+        "no workspace close"
+      ]
+    },
+    {
+      "id": "next-stage-on-donated-server",
+      "criteria": [
+        "AC11"
+      ],
+      "given": "The closed backend from close-confirmed, passed with a new attempt ID cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa. Status for its server reports running with the same fingerprint, and the workspace list holds only `seed`. The new workspace is w3 with a new terminal, and the agent reports a new native session.",
+      "input": {
+        "call": "runHerdrStage",
+        "attemptId": "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
+      },
+      "expected": {
+        "state": "settled",
+        "backend": {
+          "session": "pdd-af16785cab34225b1e15",
+          "workspaceId": "w3",
+          "seedWorkspaceIds": [
+            "seed"
+          ]
+        }
+      },
+      "effects": [
+        "no server bootstrap",
+        "exactly one workspace create, one agent start and one agent prompt",
+        "agentName differs from the previous stage",
+        "the previous native session is not reused"
+      ]
+    },
+    {
+      "id": "prompt-error-keeps-no-message",
+      "criteria": [
+        "AC12",
+        "AC4"
+      ],
+      "given": "Fresh stage. The agent prompt command fails with stderr JSON error code prompt_rejected and a message that repeats the stage prompt.",
+      "input": {
+        "call": "runHerdrStage"
+      },
+      "expectedError": {
+        "state": "recovery_required",
+        "reason": "prompt_rejected",
+        "backend": {
+          "phase": "prompt_intent"
+        },
+        "detail": {
+          "operation": "agent.prompt",
+          "code": "prompt_rejected"
+        }
+      },
+      "effects": [
+        "detail has no message field",
+        "the result contains no prompt text",
+        "exactly one agent prompt"
+      ]
+    }
+  ]
+}

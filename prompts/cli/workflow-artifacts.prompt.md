@@ -1,97 +1,135 @@
-# Local workflow artifacts
+# Workflow handoff artifacts
 
-`src/workflow-artifacts.mjs` owns the local handoff between an agent-produced
-artifact list and its workflow caller. Preserve the caller's exact run, stage,
-issue and input revision; an agent's summary or claimed test pass is never an
-observation. This new module promises behavioral refinement of the interfaces
-below. It reads files and executes explicit local test argv only. The caller
-owns Git HEAD, approval/currentness, journal and publication decisions.
+Owns `src/workflow-artifacts.mjs`. Exports the async module functions
+`readWorkflowHandoff(...)`, `assertWorkflowArtifacts(...)` and
+`runWorkflowTestCommands(...)`.
 
-## Public module functions
+The [workflow runner](workflow-runner.prompt.md) uses them to turn a stage
+agent's claims into observations: a summary, listed digest or claimed test pass
+proves nothing. Refusals reject the promise: those the module detects use
+`TypeError` with a message naming the failed check, while filesystem and JSON
+errors may pass through.
 
-- `readWorkflowHandoff({handoffPath,cwd,expected:{runId,stageId,issueUrl,inputRevision},requiredRoles:[]}, ports={})`
-  asynchronously returns the validated handoff only after its identities,
-  required roles and actual file bytes agree.
-- `assertWorkflowArtifacts({cwd,files}, ports={})` returns `Promise<void>` after
-  checking every listed artifact against its actual file and digest.
-- `runWorkflowTestCommands({cwd,testCommands}, ports={})` returns a promise of
-  `{passed,results:[{argv,exitCode,stdout,stderr}]}`. `passed` requires all
-  commands to execute and finish with exit code zero.
+The module only reads files and, in `runWorkflowTestCommands`, runs the given
+argv. It writes nothing and runs no Git, shell or network operation. The caller
+owns Git HEAD, currentness, approval, the journal and publication.
 
-```mermaid
-flowchart TD
-    H[Caller-bound handoff] --> B{Closed schema and exact identities?}
-    B -->|No| R[Reject]
-    B -->|Yes| F{Required roles and actual files match?}
-    F -->|No| R
-    F -->|Yes| A[Return validated artifacts]
-```
+Preservation: behavioral refinement. Keep the export names and binding kind,
+request fields, `ports` options, handoff schema, result shapes, refusal
+conditions and recorded exit codes. Helpers, check order unless stated, message
+wording and read technique may vary.
+
+## Check a handoff and its files
+
+`readWorkflowHandoff({handoffPath, cwd, expected, requiredRoles = []}, ports = {})`
+resolves with the handoff only when all of these hold:
+
+- It is a regular file inside the project's Git metadata (**Handoff location**).
+- It follows the closed schema, and its identities equal `expected` exactly.
+- Each role in `requiredRoles` is on at least one listed file.
+- Each listed file passes the **Artifact checks**.
+
+It returns the parsed JSON unchanged and adds no default, such as an empty
+`testCommands`. It checks the shape of `testCommands` but never runs them.
+
+`assertWorkflowArtifacts({cwd, files}, ports = {})` applies the file schema and
+artifact checks and resolves with `undefined`; an empty list is valid. Each call
+reads the files again, so the caller detects a change after acceptance.
 
 <details>
-<summary>Required handoff schema and identity</summary>
+<summary>Request, handoff schema and identities</summary>
 
-Schema V1 has exactly `version:1`, `runId`, `stageId`, `issueUrl`,
-`inputRevision`, `summary`, `files`, and optionally `testCommands`. Identity
-values and summary are nonempty strings; each expected identity is supplied by
-the caller and must match exactly, without normalization. `files` is an array; empty is allowed when requiredRoles is empty for
-report-only stages, whose executable-evidence classification remains caller-owned.
-Every requested role must still be present. Each entry has exactly `path`, `sha256`, `role`. SHA256 is a 64-digit hexadecimal
-digest compared with the actual bytes; hexadecimal letter case is immaterial.
-Roles are `prompt`, `story`, `cases`, `implementation`, `tests`, `evidence`,
-`notes`. Required roles are caller-selected from that set and must be present;
-prompt/Story callers select prompt/story/cases. Duplicate artifact paths and
-unknown keys/roles are errors. Return the original parsed values without
-manufacturing evidence, defaults or approval.
+**Nonempty** means a string with a non-whitespace character and no NUL.
+`expected` has exactly `runId`, `stageId`, `issueUrl` and `inputRevision`, each
+nonempty. `requiredRoles` is an array of distinct known roles.
 
-The handoff itself is a regular file at the exact caller-supplied path within
-the project's Git metadata directory. Support a regular `.git` directory or a
-regular Git worktree `.git` pointer file; do not execute Git or scan for another
-handoff. Missing Git metadata or a handoff outside the selected metadata fails.
+The handoff is UTF-8 JSON: an object with exactly `version` (the number `1`),
+those four identities, a nonempty `summary`, `files` and an optional
+`testCommands`. Identities match without normalization, so a handoff from
+another run, stage, issue or input revision cannot pass because its files are
+unchanged.
+
+Each `files` entry has exactly `path`, `sha256` (64 hexadecimal digits, either
+letter case) and `role` (`prompt`, `story`, `cases`, `implementation`, `tests`,
+`evidence` or `notes`). A repeated `path` is refused. An empty `files` array is
+valid; what a stage must list is caller policy. A present `testCommands` must
+pass the **Argv rules**.
 
 </details>
 
 <details>
-<summary>Required project containment and actual bytes</summary>
+<summary>Handoff location, artifact checks and actual bytes</summary>
 
-Artifacts use canonical project-relative slash paths: no absolute/drive paths,
-backslashes, empty/dot/traversal components or `.git` component (case-insensitive).
-Resolve from the actual selected project directory. Every ancestor inside that
-root must be a real directory and every artifact a regular file, never a symlink
-or directory. Apply the same no-symlink rule to the selected root and the
-handoff path beneath its actual Git metadata root. Read through a no-follow
-file descriptor where supported, check the open file against the selected path,
-and reject changes detected while reading. Recompute SHA256; a supplied digest
-alone proves nothing. Reassert these checks whenever the caller asks, including
-after earlier validation. This is a local validation boundary, not an OS sandbox
-or protection against arbitrary concurrent hostile filesystem mutation.
+**Handoff location.** The metadata directory is `<cwd>/.git` when that is a real
+directory, or the directory named by a regular `.git` file containing exactly
+`gitdir: <path>` and an optional line end (relative to `cwd`). A missing,
+symlinked or other `.git` is refused. `handoffPath`, absolute or relative to
+`cwd`, has no backslash and no `.` or `..` segment, and names a regular file
+strictly inside that directory. Never look elsewhere.
+
+**Artifact checks.** `cwd` and the metadata directory must already be real
+paths, with no symlink at any level. Each `path` is nonempty, canonical,
+project-relative and slash-separated: not absolute, no drive prefix such as
+`C:`, no backslash, no empty, `.` or `..` segment, and no `.git` segment in any
+letter case, because Git metadata is not project content (`.github` is fine).
+Every ancestor under `cwd` is a real directory and the file is a regular file,
+never a symlink. The SHA-256 of the actual bytes equals `sha256`, ignoring
+letter case.
+
+**Actual bytes.** Hash bytes from the file that passed these checks, without
+following a symlink. Refuse if it or an ancestor is replaced, or its size or
+timestamps change, before the read ends. The same applies to reading the
+handoff and the `.git` file. This is a local check, not a sandbox against
+hostile concurrent change.
 
 </details>
 
+## Run test commands
+
+`runWorkflowTestCommands({cwd, testCommands}, ports = {})` resolves with
+`{passed, results}`. It first checks every argv entry and `cwd` (**Argv rules**,
+**Artifact checks**); if one fails, it rejects and runs nothing. Then it runs
+each command in order without a shell, also after a failure, and records
+`{argv, exitCode, stdout, stderr}`. `passed` is true only when every `exitCode`
+is `0`; output such as `PASS` never counts.
+
+| Command outcome | Recorded `exitCode` |
+| --- | --- |
+| Resolved with an object and no truthy `signal` | Its own `exitCode`, else `code`, else `0`, if that is an integer of 0 or more; else `null` |
+| Rejected with an integer `code` above 0 and no truthy `signal` | That `code` |
+| Anything else, such as a non-object result, a signal, a spawn failure (`ENOENT`) or a rejection with code `0` | `null` |
+
+`stdout` and `stderr` hold the actual output as strings. A rejection without
+stderr records the error message there; a resolved result that is not a normal
+exit gets a diagnostic line added to `stderr`.
+
 <details>
-<summary>Required test argv and observed outcomes</summary>
+<summary>Argv rules and execution</summary>
 
-`testCommands`, when present, is a nonempty array of nonempty argv arrays. Each
-entry is a string without NUL; executable is nonempty, without whitespace or
-shell control characters. Arguments preserve spaces and shell metacharacters as
-literal arguments. Shell command strings and explicit shell launchers are not
-test argv. A missing or empty command set cannot produce a test pass; reject
-malformed command sets before executing any entry. An executable containing
-spaces is outside this narrow argv interface.
+**Argv rules.** `testCommands` is a nonempty array of nonempty arrays of strings
+without NUL. Arguments may be empty and stay literal, spaces and shell
+characters included. The executable is nonempty, with no whitespace, backtick
+or any of `;&|<>$()`. Its base name, in any letter case, is not a shell: `sh`,
+`bash`, `dash`, `zsh`, `fish`, `csh`, `tcsh`, `ksh`, or `cmd`, `powershell` or
+`pwsh` with or without `.exe`. So shell text cannot enter as a test.
 
-Execute commands in order using Node's ordinary `execFile(file,args,{cwd})`,
-without shell evaluation. The optional injected `ports.execFile` supports that callback signature or
-the ordinary promisified execFile result/rejection contract. Successful completion
-means exit zero; explicit nonzero result codes are never ignored. Record actual stdout/stderr and zero/nonzero numeric exit
-codes; spawn/operational failures and signal termination have `exitCode:null`
-and diagnostic stderr. Continue collecting results after an individual failure.
-Reject an invalid project directory or malformed argv rather than reporting a
-pass. Never treat output containing PASS, an agent claim, an invalid explicit exit status or a rejected process as success. Optional `ports.fs` supplies the
-Node promises-filesystem interface for local test injection.
+**Execution.** Call `execFile(executable, args, {cwd})` with the resolved
+project directory and no other option, so Node defaults apply: no timeout, and
+output beyond the default buffer limit records `null`. `ports.execFile` may
+replace it in callback form `(error, stdout, stderr)` or promisified form. A
+synchronous throw is a rejection.
 
 </details>
 
 ## Dependencies
 
-Node built-ins only: filesystem promises/constants for real files, crypto for
-SHA256, path for containment, child_process for ordinary local execution. No
-Runtime, solver, server, GitHub, managed session, private account or journal.
+- [Prompting guide](../../docs/prompting-guide.md) — authoring and review method for this prompt.
+- [Workflow runner](workflow-runner.prompt.md) — the only caller; consumer
+  contract for these calls and owner of the caller decisions. Uses: authoring
+  and testing.
+- Node built-ins — `node:fs/promises` with `node:fs` constants, `node:crypto`
+  (SHA-256), `node:path` and `node:child_process` (`execFile`). Uses:
+  generation and runtime. `ports.fs` may replace `node:fs/promises`; reads use
+  its `lstat`, `realpath` and `open` (handle `stat`, `readFile`, `close`).
+- No external tool; the module runs only the executables named in the given
+  argv.

@@ -1,44 +1,112 @@
-# Editable local workflow definitions
+# Workflow definition loader
 
-`src/workflow-definition-loader.mjs` owns selection, validation and immutable content snapshots of user-editable local workflow recipes. A user can add a safe workflow directory or change its stages and Markdown without editing a PDD module. The loader performs no Git, native-session or publication effects. The runner owns saved-run identity, approval, artifacts, test execution and advancement.
+Owns `src/workflow-definition-loader.mjs`. Exports synchronous module functions `loadWorkflowDefinition({ name, cwd, packageRoot })` and `listWorkflowDefinitions({ cwd, packageRoot })`.
 
-Export synchronous module functions `loadWorkflowDefinition({name,cwd,packageRoot}) -> {name,version,root,stages,files,digest}` and `listWorkflowDefinitions({cwd,packageRoot}) -> [{name,source}]`. `root` is the canonical selected recipe directory. `source` is project or bundled. Names and stage IDs contain 1–64 characters, start with a lowercase letter and contain lowercase letters, digits and single separating hyphens. Discovery is sorted, includes arbitrary valid names, and uses the same validator rather than a second catalog schema. Invalid discovered definitions refuse discovery with a useful error.
+The loader selects a workflow definition by name, validates it, and returns an immutable snapshot of its exact bytes. So a user can add or change a workflow without a change to PDD code. `cwd` is the project root and `packageRoot` is the PDD package root; every call needs both. The loader only reads files. It writes nothing and starts no Git, native agent, network or child process.
 
-## Selection and content ownership
+This prompt owns the schema and validation of every definition, project or bundled. [Bundled workflows](bundled-workflows.prompt.md) owns what the bundled definitions contain. The [runner](workflow-runner.prompt.md) owns how stages execute, and saves the snapshot before it assigns an issue worktree. [CLI dispatch](pdd-cli.prompt.md) prints `workflow list` from the listing. [Stage definitions](workflow-definitions.prompt.md) load the bundled definitions for a compatibility export.
+
+Preservation: behavioral refinement. Keep both exports and their binding kind, the argument objects, the result shapes, the selection rule, the schema, the stage-order rules, the limits and every refusal. A refusal throws an error and returns nothing. The error class and wording may vary, but the message identifies the faulty definition, stage or file. Private helpers, check order and the way a change during a read is detected may vary.
+
+## Select one definition
+
+A **workflow name** has 1 to 64 characters. It starts with a lowercase letter and has only lowercase letters, digits and single hyphens between groups, so `a--b`, `a-` and `Bad` are invalid. Stage IDs use the same syntax. An invalid requested name refuses before any file read.
 
 ```mermaid
 flowchart TD
-    P{Project named directory exists?} -->|Yes| V[Validate entire project definition]
-    P -->|No| B[Validate entire bundled definition]
-    V -->|Valid| S[Snapshot selected bytes]
-    V -->|Invalid| E[Refuse]
-    B -->|Valid| S
-    B -->|Missing or invalid| E
+    N{Workflow name valid?} -->|No| R([Refuse with an error])
+    N -->|Yes| P{Project entry exists?}
+    P -->|Yes| PV{Project definition valid?}
+    P -->|No| BV{Bundled definition exists and is valid?}
+    PV -->|Yes| S([Return snapshot of the selected directory])
+    PV -->|No| R
+    BV -->|Yes| S
+    BV -->|No| R
 ```
 
-The roots are `<cwd>/.pdd/workflows/NAME` and `<packageRoot>/.pdd/workflows/NAME`. An existing project directory claims the whole recipe, even if its workflow.json is missing or malformed; do not combine local and bundled stages or silently fall back. Missing project parents permit bundled fallback. Existing parents and all selected path components must be ordinary canonical directories, not symlinks. The selected workflow.json, overview and referenced Markdown must be ordinary single-linked files, remain unchanged while read and stay within the selected directory. Reject absolute paths, backslashes, empty/dot/traversal components, metadata paths, symlinks and non-Markdown instruction paths. Read no undeclared project files.
+A **project entry** is anything at `<cwd>/.pdd/workflows/NAME`: a directory, a file or a symbolic link. It claims the whole name, even when its `workflow.json` is missing or malformed. Never fall back to `<packageRoot>/.pdd/workflows/NAME` and never mix project and bundled files. Reason: a broken edit must stay visible, not be quietly replaced by instructions that the user did not choose. A project `.pdd` or `.pdd/workflows` that is missing means no project entry; one that exists but is not a real directory refuses.
 
-`files` snapshots unique files in sorted path order as `{path,sha256,content}` using actual UTF-8 bytes. Include workflow.json, overview and every referenced stage file. `digest` is SHA256 over the version/name, normalized ordered stages and ordered file path/hash pairs; it must change on semantic JSON or Markdown changes. The returned value and nested values are immutable. A file is at most256KiB, a snapshot at most2MiB, and a workflow contains1–64 stages; refuse oversized inputs before effects. The runner persists these exact bytes and digest before allocation and never silently substitutes later source edits.
+**Valid** means that the path and file rules, the closed schema and the stage-order rules all hold.
 
-## Closed definition and semantic stage rules
+## Return an immutable snapshot
 
-workflow.json has exactly `{version:1,name,overview,stages}`; its name must equal the selected directory. Each stage requires `id`, `kind`, `file`; optional false is the default. Reject unknown fields, null or wrong types and duplicate IDs. `kind` is agent, human, pr or merge. Only agent and PR stages may be optional. Merge conditionality comes from its referenced PR, not a separate optional decision.
+`loadWorkflowDefinition` returns `{ name, version, root, stages, files, digest }`:
 
-| Kind | Additional fields and meaning |
-| --- | --- |
-| agent | Required `protocol`: report, proposal, work or verify. Optional unique `requiredRoles` from prompt/story/cases/implementation/tests/evidence/notes. Proposal alone requires `approval`: human or next-advance and a nonempty role set. Proposal and verify cannot be optional. |
-| human | Accepts the preceding single proposal with approval human; cannot precede it or accept it twice. |
-| pr | Required `publication`: proposal or verified; the former requires an accepted proposal, the latter a prior mandatory verify. |
-| merge | Required `prStage` naming one preceding PR; each PR can have at most one matching merge. |
+- `name` is the requested name, `version` is `1`, and `root` is the canonical absolute path of the selected directory.
+- `stages` are the validated stages in declared order, with schema defaults added.
+- `files` has one `{ path, sha256, content }` entry each for `workflow.json`, the overview and the stage files, without duplicates. They are sorted by `path` in English locale order, where letter case only breaks ties (`edit.md` before `WORKFLOW.md`). `sha256` is the lowercase hexadecimal SHA-256 of the exact bytes read. `content` is their UTF-8 text.
+- `digest` is a lowercase hexadecimal SHA-256 over `name`, `version`, `stages` and the ordered `path` and `sha256` pairs, but not `root`. So a change to any byte of any snapshot file changes it.
 
-Agent work and verify require a prior accepted proposal. Exactly one proposal may exist; it supplies the independent cases/contract and concrete native argv plan. For next-advance approval, the runner pauses before the next effect for a current explicit advance without inventing a human stage. For human approval, a mandatory human stage must occur before work/verify/PR. A verify stage uses the accepted plan, never a model PASS. Reports alone may omit project files; work/proposal/verify must supply actual files. Required artifact roles express the contract without reserving particular stage IDs.
+The result is deeply frozen and holds only JSON values. A second load of unchanged files at the same location gives a deeply equal result. Reason: on resume the runner compares a fresh load with its saved JSON copy and stops on any difference, so source edits never silently replace saved instructions.
 
-Optional `requiresMerge` on agent work or PR names a preceding merge. A skipped optional PR permits its matching merge/dependent transition to skip that merge requirement; an executed PR requires its actual recorded merge revision and unchanged pinned artifacts. This field replaces special treatment of a stage named build or prompt-merge. It does not authorize checkout, reset, merge or native effects.
+<details>
+<summary><strong>Path, file and size rules</strong></summary>
 
-Reject meaningless field combinations, missing/forward/wrong-kind references, duplicate merge references, any PR before proposal acceptance, and verified publication without a mandatory verify after the latest work stage. Every work stage invalidates prior graph verification; a later verify restores it. This ordering check supplements the runner's exact output binding and never certifies changed source by itself. File/graph errors must identify the definition or stage. Definition validation never executes a command from JSON; actual test argv comes from the independently accepted stage handoff under the runner's existing protocol.
+- **Canonical roots.** `cwd` and `packageRoot` are nonblank strings that name directories. Resolve each one, relative to the process working directory, to its canonical real path. A root reached through a symbolic link is accepted.
+- **Real directories.** Below each root, `.pdd`, `.pdd/workflows`, the workflow directory and each directory on an instruction path are real directories, not symbolic links.
+- **Instruction path.** `overview` and each stage `file` is a relative path that ends with `.md` and uses `/` between components. Refuse an absolute path, a backslash, a NUL character, and an empty, `.`, `..` or `.git` component.
+- **Ordinary file.** Each snapshot file is a regular file in the workflow directory, not a symbolic link, with exactly one hard link, at most 256 KiB (262,144 bytes) and valid UTF-8. Reason: another hard link could change the recipe from outside the directory, and the limit bounds each native agent's context.
+- **Stable read.** A file stays the same, unchanged file from its check until its read ends, and its parent directories are still real directories after the read.
+- **Snapshot size.** All snapshot files together are at most 2 MiB (2,097,152 bytes).
+- **Declared files only.** Read no file in the workflow directory except `workflow.json` and the declared Markdown.
+
+</details>
+
+## List definitions
+
+`listWorkflowDefinitions` returns `[{ name, source }]`, sorted by name in character-code order. Candidates are the entries of `<packageRoot>/.pdd/workflows` and `<cwd>/.pdd/workflows` that are directories or symbolic links with a valid workflow name. Each name appears once. A symbolic link stays a candidate so that its load refuses it instead of hiding it. Ignore other entries, such as `README.md`. A missing `.pdd/workflows` adds nothing.
+
+Load each candidate with `loadWorkflowDefinition`; there is no second catalog or schema. `source` is `project` when the project directory was selected, otherwise `bundled`. If one candidate refuses, the whole listing refuses; never omit an invalid definition.
+
+## Definition schema and stage order
+
+`workflow.json` is a closed version-1 object with `version`, `name`, `overview` and an ordered `stages` array. Each stage has an `id`, a `kind` and a Markdown `file`. The kinds are `agent`, a fresh native agent conversation whose `protocol` is `report`, `proposal`, `work` or `verify`; `human`, a person's acceptance of the proposal; `pr`, a pull request publication; and `merge`, a wait for that PR's merge.
+
+The stage-order rules make sure that work follows an accepted proposal, a verified PR follows a verify stage after the latest work, and each merge follows its own PR. Stage behavior comes from these fields, never from reserved stage IDs such as `build` or `prompt-merge`. No field holds a command, and the loader runs nothing from JSON. Test commands come from the accepted proposal handoff, which the runner owns.
+
+<details>
+<summary><strong>Closed schema: fields, values and returned defaults</strong></summary>
+
+The top level has exactly `version` (the number `1`), `name` (the requested name), `overview` (an instruction path) and `stages` (an array of 1 to 64 stages).
+
+| Stage field | Allowed on | Required | Values |
+| --- | --- | --- | --- |
+| `id` | every stage | yes | A workflow name, unique in the definition |
+| `kind` | every stage | yes | `agent`, `human`, `pr`, `merge` |
+| `file` | every stage | yes | An instruction path |
+| `optional` | every stage | no | Boolean. `true` only on `pr`, or on `agent` with protocol `report` or `work` |
+| `protocol` | `agent` | yes | `report`, `proposal`, `work`, `verify` |
+| `requiredRoles` | `agent` | no | Distinct roles from `prompt`, `story`, `cases`, `implementation`, `tests`, `evidence`, `notes` |
+| `approval` | `agent` with protocol `proposal` | yes, there | `human`, `next-advance` |
+| `requiresMerge` | `pr`, and `agent` with protocol `work` | no | ID of an earlier merge stage |
+| `publication` | `pr` | yes | `proposal`, `verified` |
+| `prStage` | `merge` | yes | ID of an earlier PR stage |
+
+Refuse a top level or stage that is not an object, a missing required field, an unknown field, a field not allowed on that kind or protocol, `null` in any field, and any value outside its domain. A returned stage keeps its declared fields, has `optional: false` when `optional` is absent, and, for an agent, has `requiredRoles` (empty when absent).
+
+</details>
+
+<details>
+<summary><strong>Stage-order rules: proposal, acceptance, verification, publication and merges</strong></summary>
+
+"Earlier" means listed before the stage.
+
+- **Single proposal.** At most one agent stage has protocol `proposal`. It has a nonempty `requiredRoles` and an `approval`.
+- **Proposal acceptance.** With approval `next-advance`, the proposal counts as accepted from its own stage; the runner still pauses after it until the person approves. With approval `human`, it counts as accepted from the human stage after it.
+- **Human acceptance.** A human stage needs an earlier `human`-approval proposal that no earlier human stage accepted. So there is at most one human stage, and none without such a proposal.
+- **Accepted before work.** Each `work` or `verify` stage and each PR stage needs an earlier accepted proposal. A `report` stage may appear anywhere, so a definition without a proposal has only report stages.
+- **Current verification.** A `verify` stage makes verification current, and a later `work` stage, optional or not, makes it stale. A `verified` PR needs current verification. A `proposal` PR needs only the accepted proposal.
+- **One merge per PR.** A merge stage's `prStage` names an earlier PR stage that no earlier merge names. A PR may have no merge. When the runner skips an optional PR, it also skips that PR's merge.
+- **Merge dependency.** `requiresMerge` names an earlier merge stage that a work stage or PR depends on. The runner owns what that requires at run time. The field authorizes no checkout, reset or merge.
+
+This check adds to, and never replaces, the runner's run-time check of exact outputs. For example, a report stage that edits files after verification passes here, and the runner refuses the stale verification.
+
+</details>
 
 ## Dependencies
 
-- Node built-ins are the only required implementation dependencies. [Runner](workflow-runner.prompt.md) is navigation to the runtime consumer, not a required input back into this loader; it owns saved snapshots, handoffs and effects.
-- Bundled `.pdd/workflows/*/workflow.json` and their declared Markdown are runtime inputs; project overrides follow the same schema.
-- Node built-in filesystem/path/crypto support regular-file validation and actual byte hashing; no package, network or native call is required.
+- [Prompting guide](../../docs/prompting-guide.md) — authoring and review method for this prompt.
+- Bundled definitions in the package's `.pdd/workflows/`, owned by [bundled workflows](bundled-workflows.prompt.md) — runtime input that the loader reads and validates with these rules; in testing, each bundled definition must pass them. They supply no schema rules.
+- Node built-ins `node:fs`, `node:path`, `node:crypto` and the global `TextDecoder` — runtime: canonical paths, status checks that do not follow links, opens without following a final link, reads and directory listing; path containment; SHA-256; strict UTF-8 decoding.
+
+No package or external tool is used. The other links here, and the user guide [Edit workflows](../../docs/workflows.md#edit-workflows), are navigation only.

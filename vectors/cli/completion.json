@@ -1,0 +1,196 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/completion.prompt.md",
+  "story": "story/cli/COMPLETION.md",
+  "cases": [
+    {
+      "id": "render-bash",
+      "criteria": ["AC1", "AC2"],
+      "input": { "call": "renderCompletion", "args": ["bash"] },
+      "expected": { "type": "string", "endsWith": "\n", "registers": { "function": "_pdd_complete", "for": "pdd" } },
+      "effects": ["no file read or write", "no child process", "no network call"]
+    },
+    {
+      "id": "render-zsh",
+      "criteria": ["AC1", "AC2"],
+      "input": { "call": "renderCompletion", "args": ["zsh"] },
+      "expected": { "type": "string", "firstLine": "#compdef pdd", "endsWith": "\n", "registers": { "function": "_pdd", "for": "pdd", "loadedAfter": "compinit" } },
+      "effects": ["no file read or write", "no child process", "no network call"]
+    },
+    {
+      "id": "render-other-shell-refused",
+      "criteria": ["AC1"],
+      "input": { "call": "renderCompletion", "args": ["fish"] },
+      "expectedError": { "class": "TypeError" }
+    },
+    {
+      "id": "render-wrong-case-refused",
+      "criteria": ["AC1"],
+      "input": { "call": "renderCompletion", "args": ["Bash"] },
+      "expectedError": { "class": "TypeError" }
+    },
+    {
+      "id": "render-missing-argument-refused",
+      "criteria": ["AC1"],
+      "input": { "call": "renderCompletion", "args": [] },
+      "expectedError": { "class": "TypeError" }
+    },
+    {
+      "id": "word-1",
+      "criteria": ["AC3", "AC8"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": [""] },
+      "expected": { "offered": ["--help", "-h", "--skill", "--version", "completion", "help", "session", "workflow"] },
+      "effects": ["no program started", "no excluded command word such as runtime, doctor, verify or lint"]
+    },
+    {
+      "id": "word-2-after-workflow",
+      "criteria": ["AC3", "AC8"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", ""] },
+      "expected": { "offered": ["attach", "bug", "feature", "list", "resume", "run", "small-change"] },
+      "effects": ["no program started"]
+    },
+    {
+      "id": "word-2-typed-part-filters",
+      "criteria": ["AC3"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "re"] },
+      "expected": { "offered": ["resume"] }
+    },
+    {
+      "id": "word-2-after-help",
+      "criteria": ["AC3"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["help", ""] },
+      "expected": { "offered": ["completion", "help", "session", "workflow"] }
+    },
+    {
+      "id": "word-2-after-session",
+      "criteria": ["AC3"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["session", ""] },
+      "expected": { "offered": ["--agent"] }
+    },
+    {
+      "id": "word-2-after-completion",
+      "criteria": ["AC3"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["completion", ""] },
+      "expected": { "offered": ["bash", "zsh"] }
+    },
+    {
+      "id": "word-3-after-resume",
+      "criteria": ["AC3"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "resume", ""] },
+      "expected": { "offered": ["--decision"] }
+    },
+    {
+      "id": "word-3-after-recipe-shortcut",
+      "criteria": ["AC3"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "small-change", ""] },
+      "expected": { "offered": ["--agent"] }
+    },
+    {
+      "id": "word-3-after-attach-offers-nothing",
+      "criteria": ["AC3", "AC8"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "attach", ""] },
+      "expected": { "offered": [] },
+      "effects": ["no program started"]
+    },
+    {
+      "id": "agent-values-after-recipe-shortcut",
+      "criteria": ["AC4"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "bug", "--agent", ""] },
+      "expected": { "offered": ["claude", "codex"] }
+    },
+    {
+      "id": "agent-values-after-name-and-issue",
+      "criteria": ["AC4", "AC8"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "run", "feature", "12", "--agent", ""] },
+      "expected": { "offered": ["claude", "codex"] },
+      "effects": ["no program started"]
+    },
+    {
+      "id": "decision-values-after-run-id",
+      "criteria": ["AC4"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "resume", "a1234567-1234-4123-8123-123456789abc", "--decision", ""] },
+      "expected": { "offered": ["approve", "skip"] }
+    },
+    {
+      "id": "issue-position-offers-nothing",
+      "criteria": ["AC3", "AC8"],
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "run", "feature", ""] },
+      "expected": { "offered": [] },
+      "effects": ["no program started"]
+    },
+    {
+      "id": "run-name-from-listing",
+      "criteria": ["AC5", "AC6"],
+      "given": "A fake pdd on PATH prints listingReply. A file named must-not-exist does not exist in the current directory.",
+      "input": {
+        "shells": ["bash", "zsh"],
+        "wordsAfterPdd": ["workflow", "run", ""],
+        "listingReply": { "exitCode": 0, "stdoutJson": { "workflows": [ { "name": "team-review", "source": "project" }, { "name": "feature", "source": "bundled" }, { "name": "$(touch must-not-exist)", "source": "project" } ], "default": null } }
+      },
+      "expected": { "offered": ["feature", "team-review"] },
+      "effects": ["exactly one pdd call per completion request, with argv workflow list --json, in the current directory", "file must-not-exist is not created", "no other program besides node is started"]
+    },
+    {
+      "id": "run-name-unsafe-names-dropped",
+      "criteria": ["AC6"],
+      "given": "A fake pdd on PATH prints listingReply.",
+      "input": {
+        "shells": ["bash", "zsh"],
+        "wordsAfterPdd": ["workflow", "run", ""],
+        "listingReply": { "exitCode": 0, "stdoutJson": { "workflows": [
+          { "name": "x1-y2", "source": "project" },
+          { "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source": "project" },
+          { "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source": "project" },
+          { "name": "Bad", "source": "project" },
+          { "name": "a--b", "source": "project" },
+          { "name": "a-", "source": "project" },
+          { "name": "1st", "source": "project" },
+          { "name": "../bad", "source": "project" },
+          { "name": "two words", "source": "project" },
+          { "name": "glob*", "source": "project" },
+          { "name": 7, "source": "project" }
+        ], "default": null } }
+      },
+      "expected": { "offered": ["x1-y2", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] },
+      "effects": ["no listing text is evaluated or expanded"]
+    },
+    {
+      "id": "run-name-reply-not-json",
+      "criteria": ["AC7"],
+      "given": "A fake pdd on PATH prints listingReply.",
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "run", ""], "listingReply": { "exitCode": 0, "stdout": "feature bug small-change" } },
+      "expected": { "offered": [] },
+      "effects": ["no static fallback to feature, bug or small-change"]
+    },
+    {
+      "id": "run-name-listing-fails",
+      "criteria": ["AC7"],
+      "given": "A fake pdd on PATH refuses an invalid project definition: it writes a diagnostic to stderr, nothing to stdout, and exits with code 1.",
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "run", ""], "listingReply": { "exitCode": 1, "stdout": "" } },
+      "expected": { "offered": [] },
+      "effects": ["no static fallback to feature, bug or small-change", "the listing diagnostic is not shown in the command line"]
+    },
+    {
+      "id": "run-name-reply-without-workflows-array",
+      "criteria": ["AC7"],
+      "given": "A fake pdd on PATH prints listingReply.",
+      "input": { "shells": ["bash", "zsh"], "wordsAfterPdd": ["workflow", "run", ""], "listingReply": { "exitCode": 0, "stdoutJson": { "workflows": "feature", "default": null } } },
+      "expected": { "offered": [] },
+      "effects": ["no static fallback to feature, bug or small-change"]
+    },
+    {
+      "id": "cli-prints-script",
+      "criteria": ["AC9"],
+      "input": { "argv": ["completion", "bash"] },
+      "expected": { "exitCode": 0, "stdoutEquals": "renderCompletion('bash')", "stderr": "" },
+      "effects": ["no shell configuration file changed"]
+    },
+    {
+      "id": "cli-other-shell-refused",
+      "criteria": ["AC9"],
+      "input": { "argv": ["completion", "fish"] },
+      "expectedError": { "exitCode": 2 },
+      "effects": ["nothing on stdout", "a diagnostic on stderr"]
+    }
+  ]
+}

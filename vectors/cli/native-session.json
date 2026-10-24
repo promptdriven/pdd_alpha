@@ -1,0 +1,289 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/native-session.prompt.md",
+  "story": "story/cli/NATIVE-SESSION.md",
+  "cases": [
+    {
+      "id": "codex-argv-and-options",
+      "criteria": ["AC1", "AC3", "AC4", "AC5"],
+      "given": "Stand-in spawn, signal source and child. The child closes with code 0.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project with spaces", "context": "# Full guide\nquoted \"value\"", "request": "x; $(command)" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": {
+        "exitCode": 0,
+        "spawnCalls": 1,
+        "command": "codex",
+        "argv": [
+          "--no-daemon",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "-c",
+          "projects={\"/project with spaces\"={trust_level=\"trusted\"}}",
+          "# Full guide\nquoted \"value\"\n\n# Person request\nx; $(command)"
+        ],
+        "options": { "cwd": "/project with spaces", "stdio": "inherit", "shell": false }
+      },
+      "effects": ["options object has no env key", "no file written in HOME or the project", "no trust entry written to disk"]
+    },
+    {
+      "id": "claude-argv-and-options",
+      "criteria": ["AC2", "AC3", "AC4", "AC5"],
+      "given": "Stand-in spawn, signal source and child. The child closes with code 0.",
+      "input": {
+        "call": { "agent": "claude", "cwd": "/project with spaces", "context": "# Full guide", "request": "x; $(command)" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": {
+        "exitCode": 0,
+        "spawnCalls": 1,
+        "command": "claude",
+        "argv": ["--dangerously-skip-permissions", "# Full guide\n\n# Person request\nx; $(command)"],
+        "options": { "cwd": "/project with spaces", "stdio": "inherit", "shell": false }
+      },
+      "effects": ["options object has no env key", "no file written in HOME or the project"]
+    },
+    {
+      "id": "trust-key-keeps-special-characters",
+      "criteria": ["AC1"],
+      "given": "The cwd holds a space, double quotes, a dot, a backslash and an equals sign.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/tmp/a \"q\".b\\c=d", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": {
+        "exitCode": 0,
+        "argvPrefix": ["--no-daemon", "--dangerously-bypass-approvals-and-sandbox", "-c", "projects={\"/tmp/a \\\"q\\\".b\\\\c=d\"={trust_level=\"trusted\"}}"],
+        "options": { "cwd": "/tmp/a \"q\".b\\c=d", "stdio": "inherit", "shell": false }
+      }
+    },
+    {
+      "id": "relative-cwd-absolute-trust-key",
+      "criteria": ["AC1", "AC4"],
+      "given": "The launcher's current directory is /work. The supplied cwd is relative.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "repo/app", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": {
+        "exitCode": 0,
+        "argvPrefix": ["--no-daemon", "--dangerously-bypass-approvals-and-sandbox", "-c", "projects={\"/work/repo/app\"={trust_level=\"trusted\"}}"],
+        "options": { "cwd": "repo/app", "stdio": "inherit", "shell": false }
+      }
+    },
+    {
+      "id": "flag-like-request-stays-in-prompt",
+      "criteria": ["AC1", "AC3"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "--dangerously-not-a-flag --model x $(touch must-not-exist)" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": {
+        "exitCode": 0,
+        "argvLength": 5,
+        "lastArgument": "# Full guide\n\n# Person request\n--dangerously-not-a-flag --model x $(touch must-not-exist)"
+      },
+      "effects": ["request words are not separate native arguments", "no shell runs", "no file named must-not-exist is created"]
+    },
+    {
+      "id": "default-request-when-missing",
+      "criteria": ["AC3"],
+      "input": {
+        "call": { "agent": "claude", "cwd": "/project", "context": "# Full guide" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": { "exitCode": 0, "argvLength": 2, "lastArgumentStartsWith": "# Full guide\n\n# Person request\n" },
+      "effects": ["text after the heading is a non-empty default request that asks for a guide and workflow summary before any Story; wording is not checked"]
+    },
+    {
+      "id": "default-request-when-empty",
+      "criteria": ["AC3"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }]
+      },
+      "expected": { "exitCode": 0, "argvLength": 5, "lastArgumentStartsWith": "# Full guide\n\n# Person request\n" },
+      "effects": ["text after the heading is the same non-empty default request as for a missing request"]
+    },
+    {
+      "id": "exit-event-alone-does-not-settle",
+      "criteria": ["AC5"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "exit", "code": 19, "signal": null }, { "check": "settled" }, { "child": "close", "code": 19, "signal": null }]
+      },
+      "expected": { "settledAfterExitOnly": false, "exitCode": 19 }
+    },
+    {
+      "id": "nonzero-child-code-returned-once",
+      "criteria": ["AC5", "AC7"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 7, "signal": null }]
+      },
+      "expected": { "exitCode": 7, "spawnCalls": 1 },
+      "effects": ["no retry"]
+    },
+    {
+      "id": "native-refusal-is-the-result",
+      "criteria": ["AC7"],
+      "given": "The native agent refuses to start with full access and closes with code 1.",
+      "input": {
+        "call": { "agent": "claude", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 1, "signal": null }]
+      },
+      "expected": { "exitCode": 1, "spawnCalls": 1, "argvPrefix": ["--dangerously-skip-permissions"] },
+      "effects": ["no relaunch without the full-access flag", "no launch of the other agent", "no answer sent to the native agent"]
+    },
+    {
+      "id": "sigint-close-maps-to-130",
+      "criteria": ["AC5", "AC8"],
+      "given": "Interactive terminal. The person presses Ctrl-C, so the launcher also receives SIGINT.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": true },
+        "events": [{ "signal": "SIGINT" }, { "child": "close", "code": null, "signal": "SIGINT" }]
+      },
+      "expected": { "kills": [], "exitCode": 130 }
+    },
+    {
+      "id": "sigterm-close-maps-to-143",
+      "criteria": ["AC5"],
+      "input": {
+        "call": { "agent": "claude", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": null, "signal": "SIGTERM" }]
+      },
+      "expected": { "exitCode": 143 }
+    },
+    {
+      "id": "sighup-close-maps-to-129",
+      "criteria": ["AC5"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": null, "signal": "SIGHUP" }]
+      },
+      "expected": { "exitCode": 129 }
+    },
+    {
+      "id": "close-without-code-or-signal",
+      "criteria": ["AC5"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": null, "signal": null }]
+      },
+      "expected": { "exitCode": 1 }
+    },
+    {
+      "id": "not-found-reported-by-child-error",
+      "criteria": ["AC6", "AC7", "AC9"],
+      "given": "PATH has no codex. The child emits an error with code ENOENT, then closes with a negative code.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "error", "errorCode": "ENOENT" }, { "child": "close", "code": -2, "signal": null }]
+      },
+      "expected": { "exitCode": 127, "spawnCalls": 1, "stderrLines": 1, "stderrNamesAgent": "codex", "launcherListenersAfter": 0 },
+      "effects": ["no install attempt", "no launch of claude"]
+    },
+    {
+      "id": "not-found-thrown-by-spawn",
+      "criteria": ["AC6", "AC9"],
+      "given": "spawn throws an error with code ENOENT.",
+      "input": {
+        "call": { "agent": "claude", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false, "spawnThrows": { "code": "ENOENT" } }
+      },
+      "expected": { "exitCode": 127, "stderrLines": 1, "stderrNamesAgent": "claude", "launcherListenersAfter": 0 },
+      "effects": ["promise resolves; it does not reject"]
+    },
+    {
+      "id": "other-failure-reported-by-child-error",
+      "criteria": ["AC6"],
+      "given": "The executable is not runnable. The child emits an error with code EACCES, then closes with a negative code.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "error", "errorCode": "EACCES" }, { "child": "close", "code": -13, "signal": null }]
+      },
+      "expected": { "exitCode": 1, "spawnCalls": 1, "stderrLines": 1, "stderrNamesAgent": "codex", "launcherListenersAfter": 0 }
+    },
+    {
+      "id": "other-failure-thrown-by-spawn",
+      "criteria": ["AC6", "AC7"],
+      "given": "spawn throws because the prompt exceeds the OS argument limit (code E2BIG).",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Very long guide", "request": "go" },
+        "ports": { "stdinIsTTY": false, "spawnThrows": { "code": "E2BIG" } }
+      },
+      "expected": { "exitCode": 1, "spawnCalls": 1, "stderrLines": 1, "stderrNamesAgent": "codex", "launcherListenersAfter": 0 },
+      "effects": ["no retry with a shorter prompt", "promise resolves; it does not reject"]
+    },
+    {
+      "id": "non-tty-forwards-all-three-signals",
+      "criteria": ["AC8"],
+      "input": {
+        "call": { "agent": "claude", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "signal": "SIGINT" }, { "signal": "SIGTERM" }, { "signal": "SIGHUP" }, { "check": "settled" }, { "child": "close", "code": 19, "signal": null }]
+      },
+      "expected": { "kills": ["SIGINT", "SIGTERM", "SIGHUP"], "settledBeforeClose": false, "exitCode": 19 }
+    },
+    {
+      "id": "tty-does-not-forward-sigint",
+      "criteria": ["AC8"],
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": true },
+        "events": [{ "signal": "SIGINT" }, { "signal": "SIGTERM" }, { "signal": "SIGHUP" }, { "child": "close", "code": null, "signal": "SIGTERM" }]
+      },
+      "expected": { "kills": ["SIGTERM", "SIGHUP"], "exitCode": 143 }
+    },
+    {
+      "id": "forwarding-error-is-ignored",
+      "criteria": ["AC8"],
+      "given": "The child's kill method throws.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false, "killThrows": true },
+        "events": [{ "signal": "SIGTERM" }, { "check": "settled" }, { "child": "close", "code": null, "signal": "SIGTERM" }]
+      },
+      "expected": { "settledBeforeClose": false, "exitCode": 143 },
+      "effects": ["promise resolves; it does not reject"]
+    },
+    {
+      "id": "listeners-removed-after-close",
+      "criteria": ["AC9"],
+      "given": "The signal source already has one unrelated SIGINT listener.",
+      "input": {
+        "call": { "agent": "codex", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false },
+        "events": [{ "child": "close", "code": 0, "signal": null }, { "signal": "SIGTERM" }]
+      },
+      "expected": { "exitCode": 0, "kills": [], "listenerCounts": { "SIGINT": 1, "SIGTERM": 0, "SIGHUP": 0 } },
+      "effects": ["the unrelated SIGINT listener stays"]
+    },
+    {
+      "id": "unsupported-agent-refused",
+      "criteria": ["AC10"],
+      "input": {
+        "call": { "agent": "gemini", "cwd": "/project", "context": "# Full guide", "request": "go" },
+        "ports": { "stdinIsTTY": false }
+      },
+      "expected": { "exitCode": 2, "spawnCalls": 0, "stderrLines": 0, "launcherListenersAfter": 0 },
+      "effects": ["no native launch"]
+    }
+  ]
+}

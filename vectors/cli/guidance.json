@@ -1,0 +1,267 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/guidance.prompt.md",
+  "story": "story/cli/GUIDANCE.md",
+  "cases": [
+    {
+      "id": "skill-guide-first-nested-references",
+      "criteria": ["AC1", "AC6"],
+      "given": "Package /pkg holds docs/prompting-guide.md, skills/pdd/SKILL.md, skills/pdd/references/review.md and skills/pdd/references/nested/cases.md. It has no docs/workflows.md and no .pdd folder.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expected": {
+        "sectionOrder": [
+          "docs/prompting-guide.md",
+          "skills/pdd/SKILL.md",
+          "skills/pdd/references/nested/cases.md",
+          "skills/pdd/references/review.md"
+        ],
+        "sectionText": "complete file text of each listed file, unchanged"
+      }
+    },
+    {
+      "id": "reference-scan-order-code-units",
+      "criteria": ["AC1"],
+      "given": "skills/pdd/references holds b.md, B.md, a.md and a/z.md.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expected": {
+        "sectionOrder": [
+          "docs/prompting-guide.md",
+          "skills/pdd/SKILL.md",
+          "skills/pdd/references/B.md",
+          "skills/pdd/references/a/z.md",
+          "skills/pdd/references/a.md",
+          "skills/pdd/references/b.md"
+        ]
+      }
+    },
+    {
+      "id": "non-markdown-references-skipped",
+      "criteria": ["AC1"],
+      "given": "skills/pdd/references holds review.md, notes.txt and LEGACY.MD (uppercase extension).",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expected": {
+        "sectionOrder": ["docs/prompting-guide.md", "skills/pdd/SKILL.md", "skills/pdd/references/review.md"]
+      }
+    },
+    {
+      "id": "references-folder-absent",
+      "criteria": ["AC1"],
+      "given": "Package has the guide and skills/pdd/SKILL.md, but no skills/pdd/references folder.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expected": {
+        "returns": "string",
+        "sectionOrder": ["docs/prompting-guide.md", "skills/pdd/SKILL.md"]
+      }
+    },
+    {
+      "id": "session-loads-all-recipes",
+      "criteria": ["AC2"],
+      "given": "Package has references/review.md, docs/workflows.md and recipe folders bug (WORKFLOW.md, reproduce.md, workflow.json), feature (WORKFLOW.md, understand.md, workflow.json) and small-change (WORKFLOW.md, scope.md, workflow.json).",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true },
+      "expected": {
+        "sectionOrder": [
+          "docs/prompting-guide.md",
+          "skills/pdd/SKILL.md",
+          "skills/pdd/references/review.md",
+          "docs/workflows.md",
+          ".pdd/workflows/bug/WORKFLOW.md",
+          ".pdd/workflows/bug/reproduce.md",
+          ".pdd/workflows/feature/WORKFLOW.md",
+          ".pdd/workflows/feature/understand.md",
+          ".pdd/workflows/small-change/WORKFLOW.md",
+          ".pdd/workflows/small-change/scope.md"
+        ],
+        "selectedRecipePart": false
+      }
+    },
+    {
+      "id": "shortcut-loads-selected-recipe-only",
+      "criteria": ["AC3"],
+      "given": "Same package as session-loads-all-recipes.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true, "workflowName": "feature" },
+      "expected": {
+        "selectedRecipePart": "Selected bundled workflow: feature.",
+        "selectedRecipePartBeforeFirstSection": true,
+        "sectionOrder": [
+          "docs/prompting-guide.md",
+          "skills/pdd/SKILL.md",
+          "skills/pdd/references/review.md",
+          "docs/workflows.md",
+          ".pdd/workflows/feature/WORKFLOW.md",
+          ".pdd/workflows/feature/understand.md"
+        ]
+      },
+      "effects": ["no section for any file under .pdd/workflows/bug or .pdd/workflows/small-change"]
+    },
+    {
+      "id": "shortcut-entry-before-earlier-sorted-step",
+      "criteria": ["AC3"],
+      "given": "Recipe folder small-change holds 00-intro.md, WORKFLOW.md, scope.md and steps/check.md. The name 00-intro.md sorts before WORKFLOW.md.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true, "workflowName": "small-change" },
+      "expected": {
+        "sectionOrderAfterOverview": [
+          ".pdd/workflows/small-change/WORKFLOW.md",
+          ".pdd/workflows/small-change/00-intro.md",
+          ".pdd/workflows/small-change/scope.md",
+          ".pdd/workflows/small-change/steps/check.md"
+        ]
+      }
+    },
+    {
+      "id": "runner-stage-context-without-recipes",
+      "criteria": ["AC1", "AC4", "AC5"],
+      "given": "Same package as session-loads-all-recipes. The runner calls with the source project root.",
+      "input": { "packageRoot": "/pkg", "cwd": "/repo/source", "workflows": false },
+      "expected": {
+        "sectionOrder": ["docs/prompting-guide.md", "skills/pdd/SKILL.md", "skills/pdd/references/review.md"],
+        "line": "Current project: /repo/source",
+        "argvPrefixPresent": true,
+        "shellPrefixPresent": true
+      }
+    },
+    {
+      "id": "header-parts-before-files",
+      "criteria": ["AC4"],
+      "input": { "packageRoot": "/pkg", "cwd": "/work/my project" },
+      "expected": {
+        "firstLine": "# PDD Alpha conversation guidance",
+        "partOrder": ["title", "package", "project", "guide-first", "authority", "argv-prefix", "command-use", "files"],
+        "lines": ["Package root: /pkg", "Current project: /work/my project"],
+        "guideFirstPartContains": "Read the ENTIRE Prompting guide",
+        "authorityPart": "native project instructions stay in force; recipes and sessions are manual guidance; explicit workflow run or resume follows runner stages"
+      }
+    },
+    {
+      "id": "argv-pair-with-spaces-and-quotes",
+      "criteria": ["AC5"],
+      "given": "process.execPath is /opt/node 22/bin/node.",
+      "input": { "packageRoot": "/tmp/pdd-entry ' quoted/installed package", "cwd": "/work/project" },
+      "expected": {
+        "argvPrefixJson": ["/opt/node 22/bin/node", "/tmp/pdd-entry ' quoted/installed package/bin/pdd.mjs"],
+        "argvPrefixOnOneLine": true,
+        "shellPrefix": "'/opt/node 22/bin/node' '/tmp/pdd-entry '\\'' quoted/installed package/bin/pdd.mjs'"
+      }
+    },
+    {
+      "id": "shell-prefix-wins-over-other-pdd",
+      "criteria": ["AC5"],
+      "given": "PATH holds only a folder whose pdd prints a marker and exits with code 77. The package folder name holds a space and a single quote.",
+      "input": "For results with workflows true and with workflows false, run '<shellPrefix> --help' with /bin/sh.",
+      "expected": { "exitCode": 0, "stdout": "this package's root help" },
+      "effects": ["the other pdd does not run", "its marker does not appear"]
+    },
+    {
+      "id": "entry-file-not-required",
+      "criteria": ["AC5"],
+      "given": "Package /pkg holds only docs and skills. There is no bin folder.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expected": {
+        "returns": "string",
+        "argvPrefixSecondValue": "/pkg/bin/pdd.mjs"
+      }
+    },
+    {
+      "id": "complete-text-unchanged",
+      "criteria": ["AC6"],
+      "given": "The guide is 3 MiB of text with trailing spaces on some lines, CRLF line ends and no final newline.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expected": { "guideSectionText": "equal to the complete guide file text" },
+      "effects": ["no truncation, trimming or line-end change"]
+    },
+    {
+      "id": "cli-skill-missing-guide",
+      "criteria": ["AC7"],
+      "given": "The package has SKILL.md and references, but docs/prompting-guide.md is missing.",
+      "input": ["--skill"],
+      "expectedError": { "loadGuidance": "throws", "exitCode": 1 },
+      "effects": ["standard output is empty"]
+    },
+    {
+      "id": "missing-skill-file",
+      "criteria": ["AC7"],
+      "given": "The package has the guide, but skills/pdd/SKILL.md is missing.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expectedError": { "result": "throws" }
+    },
+    {
+      "id": "cli-session-missing-overview",
+      "criteria": ["AC7"],
+      "given": "Full package, but docs/workflows.md is missing.",
+      "input": ["session"],
+      "expectedError": { "loadGuidance": "throws", "exitCode": 1 },
+      "effects": ["standard output is empty", "no native launch"]
+    },
+    {
+      "id": "overview-not-needed-without-workflows",
+      "criteria": ["AC1", "AC7"],
+      "given": "Package has the guide, SKILL.md and references, but no docs/workflows.md and no .pdd folder.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": false },
+      "expected": { "returns": "string" }
+    },
+    {
+      "id": "cli-shortcut-missing-selected-entry",
+      "criteria": ["AC7"],
+      "given": "Full package, but .pdd/workflows/feature/WORKFLOW.md is missing. Other feature step files remain.",
+      "input": ["workflow", "feature"],
+      "expectedError": { "loadGuidance": "throws", "exitCode": 1 },
+      "effects": ["standard output is empty", "no native launch"]
+    },
+    {
+      "id": "recipe-folder-without-markdown",
+      "criteria": ["AC7"],
+      "given": ".pdd/workflows holds recipe folders with workflow.json files only.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true },
+      "expectedError": { "result": "throws" }
+    },
+    {
+      "id": "unknown-workflow-name-is-not-a-path",
+      "criteria": ["AC7"],
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true, "workflowName": "../bug" },
+      "expectedError": { "result": "throws" },
+      "effects": ["no result text", "no file outside the catalogued recipe folders is loaded"]
+    },
+    {
+      "id": "null-workflow-name-refused",
+      "criteria": ["AC7"],
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true, "workflowName": null },
+      "expectedError": { "result": "throws" }
+    },
+    {
+      "id": "symlinked-guide-refused",
+      "criteria": ["AC8"],
+      "given": "docs/prompting-guide.md is a symbolic link to a regular Markdown file.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expectedError": { "result": "throws" }
+    },
+    {
+      "id": "link-inside-references-refused",
+      "criteria": ["AC8"],
+      "given": "skills/pdd/references/extra.md is a symbolic link to a Markdown file outside the package. review.md is a regular file.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project" },
+      "expectedError": { "result": "throws" },
+      "effects": ["the link target is not read", "the link is not skipped with a partial result"]
+    },
+    {
+      "id": "non-markdown-link-in-recipe-refused",
+      "criteria": ["AC8"],
+      "given": ".pdd/workflows/bug/notes.txt is a symbolic link. All other recipe files are regular.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true },
+      "expectedError": { "result": "throws" }
+    },
+    {
+      "id": "no-effects-and-no-project-files",
+      "criteria": ["AC9"],
+      "given": "cwd /work/project holds AGENTS.md and CLAUDE.md. Full package.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": true },
+      "expected": { "returns": "string", "sectionsUnderCwd": [] },
+      "effects": ["no file created or changed in cwd or the package", "no child process", "no network call", "no environment change"]
+    },
+    {
+      "id": "stable-result",
+      "criteria": ["AC9"],
+      "given": "Two calls with the same input and unchanged package files, then a third call after one byte of the guide changes.",
+      "input": { "packageRoot": "/pkg", "cwd": "/work/project", "workflows": false },
+      "expected": { "firstEqualsSecond": true, "thirdEqualsFirst": false }
+    }
+  ]
+}

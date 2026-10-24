@@ -1,87 +1,243 @@
 # Local workflow runner
 
-`src/workflow-runner.mjs` owns sequential local workflows for the user's current Git project. It resolves a real same-repository GitHub issue, starts a fresh native coding-agent conversation for each agent stage, preserves observable file handoffs, asks for human choices, creates actual PRs and observes their merge. The assigned issue worktree and normal native user login and permissions remain with the supplied background stage adapter. No private Host, Runtime, company account, automatic merge or hidden credentials are used.
+Owns `src/workflow-runner.mjs`. Exports the async module functions `runWorkflow(options, ports)`, `resumeWorkflow(options, ports)` and `attachWorkflow(options, ports)`, and re-exports the frozen constant `WORKFLOW_STAGES` from `src/workflow-definitions.mjs` unchanged. [CLI dispatch](pdd-cli.prompt.md) calls them for `pdd workflow run|resume|attach`.
 
-## Public module functions and ports
+The runner takes one real GitHub issue through one workflow definition, in its own issue worktree. Each agent stage runs one fresh background native agent; the runner checks the handoff, files and tests itself before it accepts the stage. It waits for human decisions, creates real PRs and observes their merge. A local journal lets a later command continue the run. The foreground `run` or `resume` process is the **controller**: nothing advances after it exits. The runner never merges, never repeats an uncertain effect and never changes the person's login, permissions or global configuration.
 
-Export `WORKFLOW_STAGES` from the definitions module. Export async module functions:
+Inputs:
 
-- `runWorkflow({name,issue,agent,cwd,packageRoot}, ports)` begins any validated editable workflow with codex or claude. A still-active same-repo/name/issue run is reported rather than duplicated.
-- `resumeWorkflow({runId,cwd,packageRoot,decision}, ports)` loads a UUIDv4 run, retaining its saved workflow, provider, repository and issue. `decision` is absent, `approve` or `skip`; it is never a new provider or arbitrary input.
+- `runWorkflow({name, issue, agent, cwd, packageRoot}, ports)` starts a run. The [definition loader](workflow-definition-loader.prompt.md) selects `name`. The [GitHub helper](workflow-github.prompt.md) resolves `issue` in this repository and refuses PRs and other repositories. `agent` is `codex` or `claude`; absent or `null` means `codex`. `cwd` is in the source checkout.
+- `resumeWorkflow({runId, decision, cwd, packageRoot}, ports)` continues a saved run. `runId` is a UUIDv4. `decision` is absent, `approve` or `skip`; other values, also `null`, refuse. `cwd` is any checkout that shares the run's common Git directory.
+- `attachWorkflow({runId, cwd, packageRoot}, ports)` connects the terminal to the run's active stage agent.
+- `packageRoot` is the package path. `ports` supplies guidance, the stage transport and test seams ([ports](#ports)).
 
-Return `{exitCode,state,runId,stage,message}`. `state` is completed, waiting, failed or recovery_required. Exit zero for completed, two for an ordinary wait, and one for failure or uncertain effect. The CLI prints the single message including actual run/stage identity. Missing/malformed inputs fail before effects. Do not export a second integer/callback API or add a status command.
+A run's workflow, agent, issue and worktree never change after it starts.
 
-The approved foreground baseline remains historical. In this successor, background agent stages use the [Herdr stage port](workflow-stage-herdr.prompt.md); ordinary pdd session remains unchanged.
+Preservation: behavioral refinement. Keep the export names and binding kinds, option fields, result shape and exit mapping, saved-state locations, decision rules and every forbidden effect. Message wording, helpers, saved encodings and check order may vary, unless a rule states an order. A changed saved encoding makes earlier runs refuse on resume: safe, but it stops in-flight runs.
 
-Canonical base guidance uses `loadGuidance({packageRoot,cwd,workflows:false}) -> string`; append the actual docs/workflows.md overview and the exact saved resolved definition/Markdown, keeping the full canonical guide first. Snapshot the complete canonical base guidance and resolved recipe from the original source project before worktree allocation. After assignment, compose and save the exact stage context with its actual worktree cwd and SHA256 before a native effect. Recompute against the saved definition and guide source before further progress and refuse changed source rather than silently switching context. Never request a hardcoded bundled workflow name for custom workflows.
+## Result and exit codes
 
-Native ports are `runHerdrStage({runId,stageId,attemptId,agent,cwd,context,instructions,backend?,checkpoint})`, read-only `inspectHerdrStage({backend,cwd})`, active `attachHerdrStage({backend})`, and `closeHerdrStage({backend,acceptance})`. The native owner alone defines actual backend fields and Herdr operations. Awaited checkpoint snapshots are durably journaled before create/start/prompt and record returned actual backend IDs before stage delivery. A local UUID attempt identifies the runner attempt, never an invented native turn receipt. Submit one full guide-first current-stage request to a fresh owned ready native conversation with no prior prompt. Same-agent observed working to ready/settled is a transport candidate only. Main also requires the exact caller-bound closed handoff, unchanged input/currentness and pinned files, actual output hashes/ancestry and required real argv test results before acceptance. Idle alone, prose, a completed model turn or native lifecycle never certifies the stage.
+Each call resolves with `{exitCode, state, runId, stage, message}` and never rejects. States map to the shared [exit codes](public-boundary.prompt.md#exit-codes-and-output):
 
-Record acceptance with the exact backend/evidence and handoff digest before requesting owned settled-pane cleanup; fresh identity/quiescence must be checked by the native owner. Never close blocked, working, unknown or unrelated panes. Cleanup uncertainty retains the original accepted stage and stops before a new stage; it never resubmits a prompt. Interrupted/unknown delivery is inspection only and never automatically launches again. An explicit approve may continue the SAME original first dispatch only when the saved agent backend phase is start_intent or ready. Pass runHerdrStage the exact original run/stage/attempt/provider/cwd/context/instructions/backend/checkpoint; never allocate or start another agent. New intents retain instruction bytes; older intents may reconstruct only from saved fields and must match the original full prompt digest before this call. The native adapter owns proof of the exact existing workspace/tab/pane/terminal, only pre-prompt ready evidence, current server/agent/cwd identity and actual readiness under the shared guard. Blocked setup remains blocked with the original attach guidance; actual ready may checkpoint its first actual nativeSession and ready sequence, then durable prompt_intent before its ONE first prompt. Any prompt_intent, submitted, candidate or later backend stays inspection-only and never resends. No-decision resume remains read-only. Snapshot/source/currentness and all established checkpoint identity pins remain unchanged. A blocked stage pauses with its existing identity. The person may attach the exact active conversation; archived completed stages return finite archive information, never a new native conversation. The controller is the foreground pdd run/resume process: no daemon or promise of advancement after it exits.
+| `state` | `exitCode` | Meaning |
+| --- | --- | --- |
+| `completed` | 0 | Every listed stage is done or skipped. |
+| `waiting` | 2 | A person must decide, merge, finish agent setup or end an attachment. |
+| `failed` | 1 | A check refused the input, the saved state or a stage result. |
+| `recovery_required` | 1 | An effect may have happened, or an identity is not proved. Inspect first. |
 
-Stage requests carry exact run/stage/attempt, assigned cwd, issue, starting HEAD/fingerprint, unique absolute handoff path, accepted prior artifacts and reports, and current instructions. The agent must read the full guide before Story, complete real files, write the closed handoff and report the result. It must not launch future stages, terminate the controller, push/PR/merge, change permissions/login or overwrite unrelated work. Main owns progression. No foreground-native-exit action is required for background stage completion. Optional execFile uses argv arrays, no shell; preserve defaults of helper modules unless an executor was explicitly injected.
+`runId` is the new, supplied or original run ID; it is `null` when input checks fail, before a new ID exists, or when the saved journal cannot be read. `stage` is the current stage ID when known, else `null` (also after completion). `message` is one nonempty line that names the state, the run or that none started, the current stage and the next useful action. The CLI prints only this message.
 
-## Identity and local records
+**Errors become results.** In `runWorkflow` and `resumeWorkflow` any thrown error gives `failed`, but [stage guard](#attachment-and-the-stage-guard) contention gives `waiting`, because its holder is usually an attachment. In `attachWorkflow` every thrown error gives `recovery_required`. Bad inputs refuse this way before any effect, although the CLI parser normally refuses them first with exit code 2.
 
-Accept ISSUE as a positive decimal, owner/repo#number or HTTPS github.com/owner/repo/issues/number. Reject PR URLs, ambiguous paths, cross-repo issues and an issue number that is actually a PR. Resolve the current repo through normal Git/gh reads and bind its canonical owner/name to the actual origin. Use the normal GitHub user's `gh` authorization. Save canonical issue URL/number/title/body, repository, default branch, original source root, assigned worktree cwd, workflow, provider, resolved definition and UUIDv4 identity. Use [worktree assignment](workflow-worktree.prompt.md): allocateIssueWorktree({cwd,repository,issueNumber,runId,workflowName,baseRef},ports) returns ready/conflict/recovery_required and a real assignment; lookupIssueWorktree({cwd,runId},ports) finds that assignment read-only from either original or assigned checkout. A common-repo issue claim applies across workflow names. An allocation conflict may return no assignment. For an existing issue, read only the documented common-directory issue claim to discover its original run UUID, then use lookupIssueWorktree to validate that exact saved physical assignment. Claim discovery requires canonical ordinary metadata and never trusts the claim as a ready assignment or repairs/replays allocation. Check canonical repository/issue/commonDir and load the original journal under its controller lock before reporting that saved run; no second provider or workflow replaces it. Main never chooses another existing checkout, creates/deletes worktrees itself or touches the original working files. Validate actual assignment run/repo/issue/commonDir/root/gitDir/branch, execute every stage/check/artifact/PR in its immutable assigned worktree, and keep its journal in that worktree gitDir. Missing/ambiguous assignments or incomplete post-allocation journals refuse, never allocate another attempt automatically.
+## Start a run
 
-Keep append-only durable journal snapshots and artifacts under the actual absolute Git directory's `pdd/workflows/<UUID>/`, never a tracked product file or global config. Metadata directories and journal files must be canonical ordinary paths, never symlink redirects or multiply linked journal files; refuse before writing through an alias. Serialize active commands with an exclusive local lock; a concurrent live owner refuses. Resume acquires the assigned controller lock before reading its journal snapshot, checking the saved assignment or selecting progress; never act on a snapshot read before exclusion was acquired. A stale dead-owner lock can be recovered without restarting or killing a process; simultaneous recovery must never displace a live successor. An interrupted lock acquisition that cannot be proved stale refuses for inspection. Bind every snapshot to the saved repository/worktree, stage and current expected HEAD. Refuse changed definition source or canonical context, and retain the exact saved definition/Markdown/context snapshots. New runs use loader selection from the original project root before allocation; a complete local recipe overrides the bundle, including for arbitrary safe workflow names. Read durable JSONL incrementally with memory bounded by the current record rather than total journal size. Validate every historical sequence and run binding in order before returning the complete latest state; a large valid journal must not require one whole-file string. Preserve append-only bytes, terminal-newline completeness, malformed-history refusal and controller-lock ordering; do not compact, drop records or replace saved context. A malformed or torn journal refuses rather than inventing state.
+In this order:
 
-Before any native launch, push or PR create, flush its specific intent. After crash or unknown delivery, reconcile existing state; never blindly replay a native session, push or PR create. No-decision resume may inspect journal/artifacts and read existing PR/merge state, but cannot launch a new agent, push, create a PR or automatically advance into an effect. Explicit approve permits ordinary next progress, with the same guards; skip is confined to optional steps.
+1. Check `packageRoot`, the `loadGuidance` port and `agent`. Resolve the source checkout through Git, load the definition from its root and resolve the issue. Nothing is written.
+2. Create a UUIDv4 run ID. Save the **run snapshot** under the common Git directory: the definition with all its Markdown, the full base guidance and `docs/workflows.md`. Reason: stage instructions must not depend on files that change after the worktree exists.
+3. Ask the [worktree helper](workflow-worktree.prompt.md) to allocate the issue worktree from `refs/remotes/origin/<default branch>`. The assignment must name this run, repository, issue, workflow, source root and common directory, and pass the assignment check. A result other than `ready` gives `recovery_required` and starts nothing.
+4. Take the controller lock, create the journal in the worktree's Git directory, save the [stage context](#stage-request-and-context) and start [progression](#command-progression).
 
-## Stage progression
+The runner never creates, moves or deletes a worktree itself and never uses another checkout. It never touches the source checkout's working files, also dirty ones. Every stage, test, artifact and PR uses the assigned worktree.
+
+**One run per issue.** The helper's issue claim covers every workflow name in the common repository. On an allocation conflict the runner finds the [original run](#original-run-discovery), takes its controller lock, reads its journal and returns its run ID and stage: `recovery_required` when work is pending, else `waiting`. It starts nothing and keeps the original agent and workflow. A live original controller gives `failed` with the original run ID.
+
+**Accepted product decision:** starting a run authorizes the definition's agent stages, pushes and PRs under the person's own Git and GitHub access. Merge stages only observe.
+
+## Saved state and checks
+
+The [journal](#journal-snapshot-and-locks) is append-only and durable. The runner saves each intent before its effect. A torn, aliased or invalid journal or snapshot gives `failed` and is never repaired.
+
+- **Snapshot check.** The snapshot is intact and belongs to the run. The loader's current selection from the original source root equals the saved definition, and the base guidance and `docs/workflows.md` equal the saved text. So an edited recipe, guide, skill, reference or overview gives `failed`; the runner never switches to edited source. Checked at each resume and attach, before each agent stage and where a step below names it.
+- **Assignment check.** The saved assignment equals the helper's lookup and the actual worktree: path, Git directory, common directory, branch, and a HEAD that descends from the base commit. A symlinked `.git` refuses. Each resume also resolves the saved issue again, and the repository and default branch must be unchanged.
+- **Current input.** The assignment check holds, the worktree **fingerprint** equals the saved input fingerprint, and each **pinned file** (a file of the accepted proposal) keeps its accepted SHA-256. The fingerprint covers HEAD, the branch, staged and unstaged changes, and the content of untracked files that Git does not ignore. So a manual worktree change gives `failed`, except the [merged-prompt transition](#prs-and-merges). Checked before each stage and where a step below names it. While an agent attempt is pending, the command start checks only pinned files and that HEAD descends from the attempt's input HEAD, because the agent changes the worktree.
+
+**Exclusion.** One controller per run: a second live `run` or `resume` of it gets `failed`. Resume takes the controller lock before it reads the journal, so it never acts on a stale copy. **Accepted product decision:** no repository-wide limit. Distinct issues run independently with any number of unresolved stages; the runner keeps no repository admission state and leaves old admission files unchanged.
+
+## Command progression
+
+The figure owns the route of one command; the [decision table](#decision-table) owns each stage's guard.
 
 ```mermaid
 flowchart TD
-    C{Current step?} -->|Agent with advance| A[Record intent and launch fresh native]
-    A -->|Valid handoff and required tests| D[Record step complete]
-    A -->|Unknown or incomplete| U[Stop for inspection]
-    C -->|Human or optional choice absent| W[Wait]
-    C -->|PR with advance| P[Record intent then push and create]
-    P -->|Exact readback| D
-    P -->|Unknown| U
-    C -->|Merge| M{Exact PR merged?}
-    M -->|Yes| D
-    M -->|No| W
-    D -->|More stages and advance| C
-    D -->|Last stage| E[Completed]
+    S([run or resume]) --> P{Pending saved work?}
+    P -->|Yes| R[Reconcile that same work]
+    P -->|No| N{Stage left?}
+    R -->|Agent stage accepted and closed| N
+    R -->|Anything else| X([Stop with the reached state])
+    N -->|No| D([Completed])
+    N -->|Yes| G{May this stage act now?}
+    G -->|No| W([Waiting])
+    G -->|Yes| E[Act once and record the result]
+    E -->|Recorded and command may continue| N
+    E -->|Waiting, failed or uncertain| X
 ```
 
-Optional steps wait before execution. A flushed optional decision governs recovery even if interruption occurs before its stage completion record. Revalidate its saved input, apply a saved skip before any native/PR effect, and skip a matching merge; a later approve cannot resurrect that skipped step. A saved approval does not authorize effects on an inspection-only resume. Approve chooses the optional step; skip records its omission and continues under that explicit command. Human Story approval is a current decision, bound to the actual HEAD and independently authored prompt/Story/cases/test-plan file hashes. A skipped optional prompt PR causes its matching merge step to skip. Rejection or missing approval never becomes approval. Human/optional decisions made after input changes refuse. Only after an actual prompt PR merge may explicit approve at the following build boundary accept a clean user-prepared branch containing that exact merged commit, with all pinned contract artifacts unchanged. Record the old/new input binding; never checkout, reset or rewrite the base automatically.
+**Pending saved work** is an agent attempt, an accepted stage that waits for cleanup, or a PR with an unknown outcome. Reconciling a PR always stops: `waiting` when the original PR is proved and recorded, else `recovery_required`.
 
-## Agent handoff and verification
+**Command may continue** for a new run and for a resume with `approve` or `skip`. A resume without a decision never starts an agent stage, a test run or a PR. It stops after a merge observation: `completed` if that was the last stage, else `waiting`. A failed check ends any command with `failed`.
 
-Before launch, supply an absolute handoff path under the run artifact directory. The agent writes a regular JSON file with exactly `version:1`, `runId`, `stageId`, `issueUrl`, `inputRevision`, a nonempty `summary`, and `files:[{path,sha256,role}]`; optional `testCommands` is an array of argument arrays. Allowed roles are prompt, story, cases, implementation, tests, evidence and notes. Paths name regular files within the current project, not `.git`, symlinks or traversal. Verify their actual SHA256, not just reported names. Reject extra/malformed identity, duplicates, stale input or missing artifacts. Verify actual output HEAD and retain file hashes as a real handoff. Uncertain native delivery or exceptions cannot trigger a new launch. A saved attempt is inspected under its original identity; only an explicit advance may accept a fresh valid candidate for that same attempt. Unknown transport never becomes pass, and no resume resends its prompt.
+### Decision table
 
-Report protocol stages may retain their substantive handoff summary in the journal artifact without claiming executable evidence. Work stages still require project files. A proposal supplies its declared contract/independent-case roles plus the project's concrete native test argv plan. Bundled feature/bug proposals require prompt, Story and cases; the small-change proposal requires cases. Human approval (or explicit optional/advance decision for small changes) pins that input. Preserve pinned prompt/Story/cases through implementation. Reject output history that abandons the starting commit. After real tests, re-read and compare the exact closed handoff, recheck the pinned and output file hashes, and require unchanged test input HEAD/worktree fingerprint and retained starting ancestry. A test that mutates the execution input or handoff cannot certify that changed result. After a separate prompt PR merge, require the subsequent code branch to contain the exact recorded merged commit before further code PR publication, without forced checkout or silently changing bases. The verify stage runs that exact test plan with ordinary execFile and records actual command exit status. A missing command, nonzero exit or changed expectations refuses completion; neither an agent's prose nor native transport settlement stands in for running tests. Passing finite tests is not formal proof or prompt execution.
+| Stage state reached | No decision | `approve` | `skip` |
+| --- | --- | --- | --- |
+| Agent attempt, first prompt not sent | Inspect | Continue the same first dispatch | Inspect |
+| Agent attempt, other phase | Inspect | Inspect, then validate a settled candidate | Inspect |
+| Accepted stage, cleanup due | Wait | Close the original once | Wait |
+| PR outcome unknown | Reconcile | Reconcile; if not proved, one [unpublished-original attempt](#unpublished-original-attempt) | Reconcile |
+| Optional stage, no saved choice | Wait | Save `approve`, run it | Save `skip`, skip it |
+| Optional stage, saved `skip` | Skip it | Skip it | Skip it |
+| Optional stage, saved `approve` | Wait | Run it | Fail |
+| Human stage | Wait | Accept the current proposal | Fail |
+| Other agent or PR stage | Wait | Run it | Fail |
+| Merge stage | Observe | Observe | Fail |
 
-## GitHub PR effects and merge observations
+- **Inspect** is read-only: `blocked` gives `waiting` with the same attempt, a settled candidate gives `waiting` and asks for `approve`, any other state gives `recovery_required`, and an inspection error or identity mismatch gives `failed`.
+- **Fail** gives `failed` before any effect: only an optional stage may be skipped, and a saved `approve` never becomes a skip.
+- **Saved choice.** An optional choice is saved, with the current fingerprint, before the stage acts. It holds on every later command, also after an interruption, so a later `approve` never runs a saved skip. A skipped PR stage also skips the merge stage whose `prStage` names it. A choice saved for another input refuses.
+- **Human stage.** `approve` needs a recorded proposal with at least one pinned file and one test command. The runner rechecks those files and pins the proposal with the current fingerprint. There is no reject decision; silence never becomes approval.
+- **Next-advance proposal.** A proposal with approval `next-advance` is pinned only by `approve`, and only if it was recorded before this command started with no pending work. Until then the next agent or PR stage waits. Reason: the person must see a proposal before an approval accepts it.
+- **Decision use.** The first optional, human, agent or PR stage that a command reaches uses up its decision; reconciliation and merge observations do not. After that, optional stages without a saved choice and human stages wait; other stages go on. Unresolved: so one `approve` can validate a pending agent stage and also choose the next optional stage or accept the next human stage.
 
-PR stages require a clean committed non-default branch with commits beyond the saved default base, unchanged accepted input files and current repository/HEAD. A verified publication additionally requires a completed successful verify record bound to the exact current HEAD/worktree fingerprint and accepted argv plan, with actual zero-exit results for every command. Persist that verification binding with its accepted evidence and carry it into completion. A later agent edit, including a report stage writing files, cannot reuse earlier test results for changed source. Proposal publication keeps its independently accepted proposal semantics. Save branch, base, head commit and stable `pdd-workflow:<runId>:<stageId>` body marker before effects. Use ordinary non-force Git push to origin and `gh pr create --repo ... --base ... --head ... --title ... --body-file ...`. The run command authorizes its defined real PR stages; do not imply it merely prepares text. Do not create empty PRs, alter login/protection/config or merge.
+Behavior follows the definition fields (`kind`, `protocol`, `approval`, `optional`, `publication`, `prStage`, `requiresMerge`), never reserved stage IDs, so renamed and project stages get the same rules.
 
-Read back the actual PR and require exact repo, branch, base, head commit and marker. Unknown push/create delivery remains recovery_required; on resume use read-only remote-head/PR queries to find the same effect. Multiple matches, changed head/base/repo or unproved state refuses. For a saved pending PR only, explicit approve may authorize one bounded unpublished-original attempt after read-only reconciliation fails: revalidate current saved inputs and durably append `pr.unpublished_retry_intent` without replacing the saved intent, then call `publishWorkflowPr({cwd,intent,unpublishedOnly:true},ports)`. The helper must freshly prove both original PR lookups and exact saved remote head absent and validate the original binding before effects; any present or unreadable state refuses. A lost reply remains pending; no-decision resume only reconciles, and another attempt requires another explicit approval and fresh absence proof. This exception neither retries native stages nor invents historical push-phase or body-byte proof absent from legacy intents. Persist exact PR number/URL/head. A merge stage must compare the observed PR number and URL exactly with its saved original PR identity in addition to the intent binding. A replacement with the same marker/repository/head/base/SHA is not that original and refuses. It advances only when the original is actually merged with that same head; open remains waiting, closed unmerged refuses. Missing-decision resume may reconcile/observe but stops before any new mutating stage.
+## Agent stages
+
+**Delivery.** Each agent stage gets a new attempt ID and a unique handoff path. The runner saves the attempt with the exact [stage request](#stage-request-and-context) and prompt digest, then calls `runHerdrStage` once. It passes the latest closed backend of this run, so the transport may reuse its owned server but never that conversation. It saves each backend `checkpoint` durably before it returns. It refuses a checkpoint for another run, stage, attempt, cwd or agent, and one that changes an identity field that is already set.
+
+**Candidate.** A **candidate** is a `settled` transport result whose backend matches the run, stage, attempt, cwd, agent and prompt digest, with integer evidence `readySeq < workingSeq < settledSeq`. It is not acceptance. From delivery, `blocked` gives `waiting` and keeps the attempt; any other state, a mismatch or a transport error gives `recovery_required`.
+
+**Acceptance.** Under the stage guard, all of these must hold:
+
+1. No attachment started since the attempt was saved. Otherwise drop the candidate and give `waiting`; a later `approve` validates the same attempt afresh.
+2. A fresh inspection shows the same settled evidence (else `recovery_required`).
+3. The snapshot and assignment checks hold, the handoff passes the [handoff rules](#handoff-and-verification-rules), pinned files are unchanged and HEAD descends from the input HEAD.
+4. A `verify` stage's pinned tests pass.
+5. A second handoff read equals the first; files, ancestry and assignment still hold; the fingerprint is unchanged since step 3; a last inspection shows the same evidence.
+
+Then the runner saves the **acceptance** `{runId, stageId, attemptId, promptDigest, terminalId, evidenceDigest}`. `evidenceDigest` covers the backend, the handoff with test results, the raw handoff file digest, the output fingerprint and the pinned proposal. The output fingerprint becomes the saved input. A failure in steps 3 to 5 gives `failed` and keeps the attempt pending; a later `approve` validates it again against the worktree of that time and reruns `verify` tests.
+
+**Cleanup** follows acceptance at once, or later on `approve` for a pending cleanup. Under the guard, the runner checks current input, the handoff files and the saved digests. It closes a backend in phase `candidate` once with `closeHerdrStage`; the reply must be `closed` with the backend that the transport checkpointed. A backend already `closed` is recorded without a second close. Any other phase or reply gives `recovery_required`. Then the stage is done.
+
+**No resend.** The runner never starts a second attempt for a stage, never sends a second prompt and never closes again after an uncertain close. An attempt without a saved backend gives `recovery_required`. The one continuation: with `approve`, an attempt in phase `start_intent` or `ready` (first prompt not sent) continues the **same first dispatch**. The saved request bytes, or for an older attempt bytes rebuilt from saved fields, must give the saved prompt digest, else `failed` with no transport call. After the current-input check, `runHerdrStage` gets the same run, stage, attempt, agent, cwd, context, request and saved backend; the transport proves that the same agent is ready. Every other phase stays inspection-only.
+
+## PRs and merges
+
+A PR stage passes its [guards](#pr-guards), saves its intent and publishes once. A `verified` publication needs a [verification binding](#handoff-and-verification-rules) for the exact current input, so a later worktree change cannot reuse an older pass. A proved open or merged PR is recorded with its number, URL and head. A failed guard gives `failed`. An unknown outcome gives `recovery_required` and keeps the PR pending for read-only reconciliation of the same intent. No match, several matches or a changed match never permit another push or create, except the [unpublished-original attempt](#unpublished-original-attempt) after an explicit `approve`. The runner never force-pushes, creates an empty PR or changes branch protection.
+
+A merge stage only reads GitHub through its PR stage's saved intent. The observed PR must have the saved number and URL; another PR with the same marker, branch, base and head is not the original. A skipped PR stage skips the merge. Open gives `waiting`. Merged, with a merge commit of 40 to 64 lowercase hexadecimal digits, is recorded. Closed unmerged, merged without such a commit, or a failed read gives `failed`. Anything not proved, or another number or URL, gives `recovery_required`.
+
+A stage with `requiresMerge` waits until that merge commit is in HEAD's history, unless the merge was skipped. The runner does no checkout or base rewrite.
+
+**Merged-prompt transition.** After a prompt PR merges, the person updates the assigned branch with normal Git. At command start the runner adopts the changed worktree as input only with `approve`, no pending work, a current stage with `requiresMerge` whose merge commit is recorded, a clean worktree with no untracked file, unchanged pinned files, and the merge commit in HEAD's history. It saves the old and new input. A failed condition gives `failed`. Pending agent work blocks the transition, so an uncertain attempt cannot use it.
+
+## Attachment and the stage guard
+
+`attachWorkflow` connects the terminal to the exact active stage agent. It never starts a conversation, accepts a stage or advances the run. It takes no controller lock, so a person can attach while the controller waits.
+
+The **stage guard** is a per-run lock under the common Git directory, separate from the controller lock. The transport gets it as `withStageGuard(backend, action)`; the backend must name this run and worktree. With `runHerdrStage`, `inspectHerdrStage` and `closeHerdrStage`, the guard runs the snapshot check before `action`, plus the current-input check in phase `ready` or `prompt_intent`, so a first prompt never goes out on changed input. The runner holds the guard for a whole attachment and from acceptance through cleanup; the transport holds it per observation or delivery, never across its waiting loop. Nested use within one async call chain reenters; another process or call meets contention. Each attachment durably raises an attachment epoch, and acceptance refuses a candidate from an older epoch. So attachment and acceptance exclude each other, and interaction during an attachment always needs fresh validation.
+
+**Attach steps.** Look up the assignment read-only; not `ready` gives `recovery_required` and creates nothing. No live backend (none, `closed`, or a pending PR) means archived, and pending cleanup means accepted: both give `waiting` and attach nothing. Otherwise take the guard, read the journal again (acceptance may have won the guard), repeat those checks and the assignment and snapshot checks, raise the epoch and call `attachHerdrStage` inside the guard. Exit code 0 gives `waiting` (detached; the next resume inspects); any other code gives `recovery_required`.
+
+<details>
+<summary><strong>Required interface reference: ports</strong></summary>
+
+<a id="ports"></a>
+
+- `loadGuidance({packageRoot, cwd, workflows: false})` — required; resolves with nonempty base guidance, guide first.
+- `runHerdrStage`, `inspectHerdrStage` and `closeHerdrStage` — required before an agent stage starts; a pending attempt without `inspectHerdrStage` gives `recovery_required`. `attachHerdrStage` — required for attach. The [stage transport](workflow-stage-herdr.prompt.md) owns their requests, results, backend fields and phases. The runner passes `{withStageGuard, checkpoint}` as their ports, and only `{withStageGuard}` to attach.
+- `allocateIssueWorktree`, `lookupIssueWorktree` — optional; each defaults to the worktree helper's function.
+- `execFile(file, args, {cwd})` — optional; resolves with `{stdout, code?}`, and an integer `code` other than 0 fails. Default: Node `execFile`, UTF-8, no shell, 16 MiB output. When supplied, the helpers get it too; otherwise they keep their defaults.
+- `stdout`, `stderr` — optional, default the process streams; they receive each verify command's output after the tests.
+
+Other port fields are ignored.
+
+</details>
+
+<details>
+<summary><strong>Stage request and context composition</strong></summary>
+
+<a id="stage-request-and-context"></a>
+
+**Context**, guide first: the base guidance, with its `Current project: <source root>` line changed to `Original source project: <source root>` so the agent works in the worktree; then `Current assigned project: <worktree path>`, the full `docs/workflows.md`, the snapshot's name and digest, and each snapshot file under its `.pdd/workflows/<name>/<path>` header. The context and its SHA-256 are saved; each snapshot check recomposes and compares it.
+
+**Prompt digest:** SHA-256 of the context, two newlines, `# Current workflow stage`, a newline and the request. This is the exact prompt that the transport sends and reports.
+
+**Request:** instructions plus one JSON line between the lines `PDD_STAGE_INPUT_JSON` and `PDD_STAGE_INPUT_END`, with `runId`, `stageId`, `attemptId`, `protocol`, `requiredRoles`, `issue` (`{number, url, title, body}`), `inputRevision` (input HEAD), `inputFingerprint`, absolute `handoffPath`, `priorArtifacts` and `priorReports` (files, summaries, handoff paths and revisions of accepted stages) and `accepted` (pinned proposal or `null`). The instructions say: do only this stage, report and stop; read the entire supplied Prompting guide and summarize its method before any Story; work and commit on the assigned branch; use the saved recipe text, not a reloaded file; write the closed handoff by the protocol rules; PDD runs the tests. They forbid a later stage, push, PR create or merge, ending PDD, changing native login, permissions or global configuration, switching branch, forced checkout, reset, stash, overwriting unrelated work, and claiming a pass from an exit status or prose. Build the request only from saved fields, so it can be rebuilt for an older attempt.
+
+</details>
+
+<details>
+<summary><strong>Handoff, proposal and verification rules</strong></summary>
+
+<a id="handoff-and-verification-rules"></a>
+
+The [handoff artifacts](workflow-artifacts.prompt.md) helper owns the schema, containment and hashing. The runner supplies the expected `runId`, `stageId`, canonical issue URL, `inputRevision` (the attempt's input HEAD) and the stage's `requiredRoles`. Handoffs live at `<run directory>/artifacts/<stageId>-<UUID>.json`.
+
+- `report` may list no files; its summary is a report, not evidence.
+- `proposal` lists at least one file and a nonempty `testCommands`. The runner records the approval mode, the files with a required role and `testCommands`. A human stage or the next-advance rule **pins** them with the fingerprint of that moment.
+- `work` lists at least one file.
+- `verify` lists at least one file, and a listed `testCommands` must equal the pinned plan. The runner saves a test intent and the fingerprint, runs the pinned plan with `runWorkflowTestCommands` in the worktree, writes the output to `stdout` and `stderr`, and saves the results. A command that does not pass gives `failed`, and so does a fingerprint that the tests changed: a test that changes its own input cannot certify it. Agent prose or a native exit is never a pass, and passing finite tests is not formal proof.
+
+Accepting a `verify` stage saves the **verification binding**: output fingerprint, pinned plan and acceptance evidence digest. Verified publication needs the latest accepted `verify` stage with a binding fingerprint equal to the current input, a nonempty binding plan equal to the pinned plan, one result per command with exit code 0, and a binding digest equal to that stage's acceptance digest.
+
+</details>
+
+<details>
+<summary><strong>PR guards and the unpublished-original attempt</strong></summary>
+
+<a id="pr-guards"></a>
+
+In order: current input; the verification binding, for `verified`; each recorded merge commit that the stage depends on is in HEAD's history (its `requiresMerge` merge, else every recorded merge); `prepareWorkflowPr` with body file `<run directory>/pr-<stageId>.md` (the helper refuses a dirty tree, the default branch or no new commits, and writes the marker `pdd-workflow:<runId>:<stageId>`); current input again. Then save the intent and call `publishWorkflowPr` once. After a proved result, also one from reconciliation or the attempt below, check current input and record the PR. `publication: proposal` needs no binding.
+
+<a id="unpublished-original-attempt"></a>
+
+**Unpublished-original attempt.** Accepted product decision: an explicit `approve` may authorize one new publication of a pending PR whose original never reached GitHub, for example because its push failed at an authentication prompt. Reconciliation alone can never finish such a PR. Only a resume with `approve` on a pending PR makes the attempt, in this order:
+
+1. Read-only reconciliation of the saved intent returns `recovery_required`. A found original, also a closed one, never leads to an attempt.
+2. Current input holds again.
+3. Durably append a journal row with event `pr.unpublished_retry_intent`. The saved intent stays exactly as it was: the runner never replaces it or adds proof fields to it.
+4. Call `publishWorkflowPr({cwd, intent, unpublishedOnly: true}, ports)` once with that intent. The [GitHub helper](workflow-github.prompt.md) must freshly prove that no original PR and no saved remote head branch exist before it pushes; otherwise it pushes and creates nothing.
+
+A proved PR is recorded and gives `waiting`. A failure in step 2 or 4, or a lost reply, gives `recovery_required` and keeps the intent pending. A later resume without a decision only reconciles. Each further attempt needs another `approve` and repeats all four steps.
+
+</details>
+
+<details>
+<summary><strong>Original run discovery</strong></summary>
+
+<a id="original-run-discovery"></a>
+
+Use the conflict result's assignment if it has one. Otherwise read the helper's issue claim `<common dir>/pdd/worktree-assignments/issues/<number>.json` only to learn the original run ID. The claim must be a regular file in real directories, not a symlink, with exactly two hard links (it links the run intent), at most 64 KiB, complete, unchanged during the read and for this common directory, repository and issue. `lookupIssueWorktree` for its run must be `ready` with the same identities. Else `failed`; never treat the claim as an assignment, repair it or allocate again. An original with other identities gives `recovery_required`.
+
+</details>
+
+<details>
+<summary><strong>Journal, snapshot and locks</strong></summary>
+
+<a id="journal-snapshot-and-locks"></a>
+
+- **Snapshot:** `<common dir>/pdd/workflow-inputs/<runId>/input.jsonl`, one line with the run ID, source root, definition, base guidance, overview and their SHA-256. Written once, never overwritten or deleted, also for a run ID that allocation then refused.
+- **Journal:** `<worktree git dir>/pdd/workflows/<runId>/journal.jsonl`. `<worktree git dir>` is the issue worktree's own Git directory, not part of its working files; the [worktree helper](workflow-worktree.prompt.md#saved-records) owns both locations. Each row is one JSON line with a sequence number, an event label and the whole state. The state names the run (equal to the directory name), agent, definition, stages, assignment and a valid stage index. The run directory also holds `artifacts/` and PR body files.
+- **Journal reading.** Read rows in order, one at a time, so memory is bounded by the largest row, not the journal size. Reason: each row repeats the whole state, so a valid journal can outgrow the longest string Node can hold and must still resume. Every row must be complete JSON, have sequence number 1 or one more than the row before, carry the same number in its state and name the same run as earlier rows; only then is the last row current. A last line without a final newline is **torn**. Whitespace-only lines are allowed only after the last row. Size never justifies compacting the journal or dropping rows.
+- **Locks:** the controller lock in `<worktree git dir>/pdd/workflows/`; the stage guard and attachment epochs in `<common dir>/pdd/workflow-stage-guards/<runId>/`. A lock held by a live process, or not proved gone, refuses; a lock of a gone process is taken over without killing anything. An interrupted acquisition refuses until a person inspects it and is never cleared automatically.
+- **Files** are owner-only, canonical, not symlinks and singly linked, and opened without following symlinks. Each append is written completely, then the file and its directory are synced. A redirected or multiply linked file refuses before any write through it.
+
+</details>
 
 ## Dependencies
 
-- [Artifact handoffs](workflow-artifacts.prompt.md): required helper for closed handoff validation, regular contained files/hash checks and real native test argv. Caller retains HEAD/currentness, accepted source and journal decisions.
-- [GitHub effects](workflow-github.prompt.md): required helper for actual same-repository issue binding, prepared PR intent, publish and read-only original reconciliation. Caller durably saves intent before publish; helper never owns journal, stage advance or merge.
-- [Stage definitions](workflow-definitions.prompt.md): required orchestration input at authoring and runtime through `src/workflow-definitions.mjs`.
-- [Guidance](guidance.prompt.md): supplied loadGuidance port must actually load the full guide before Story and the selected bundled Markdown.
-- [Background stage](workflow-stage-herdr.prompt.md): the supplied four native stage functions own transport, exact native identity and verified owned cleanup; ordinary native-session remains separate.
-- Node built-ins provide filesystem durability, crypto UUID/hash and process argument execution; Git and gh must already be installed and signed in by the user. No dependency installation or model call is performed by unit tests.
-
-## Editable semantic protocol
-
-Use resolved stage protocol fields, never reserved stage IDs, to decide report/proposal/work/verify behavior. Proposal roles and native argv plan come from its handoff; approval mode is human or next-advance. The latter pauses before subsequent effects until an explicit current advance. Human stages accept the one current proposal. A verify protocol executes the accepted plan. requiresMerge binds work or PR to the referenced exact observed merge; a clean explicit advance may accept a user-prepared branch containing that recorded revision with pinned artifacts unchanged, never while native intent is pending. Preserve both corrected707 refusal boundaries for every renamed optional/PR/merge stage.
-
-Export `attachWorkflow({runId,cwd,packageRoot},ports)` for the CLI's `pdd workflow attach RUN_ID`. Resolve the original assignment/journal read-only using the common-repo run index; save no placeholder on a missing run. Attach only the current exact active saved backend after normal identity checks, not completed history or a different stage/session. Return the existing V1 result shape for finite archive/missing information; normal attach exit is not workflow success or advancement.
-
-Additional required dependencies: [editable definition loader](workflow-definition-loader.prompt.md), [issue worktree](workflow-worktree.prompt.md), [background native stage](workflow-stage-herdr.prompt.md). Each has one separate source owner; main consumes exact reviewed helper bytes without rewriting them.
-
-## Shared attach and acceptance exclusion
-
-The runner supplies native `ports.withStageGuard(backend, action)` using the actual assignment commonDir and runId. This is a shared exclusive filesystem guard distinct from the controller's command lock. Hold it for the whole foreground attachment or for fresh candidate/currentness/handoff/test validation through durable acceptance and cleanup, never throughout native polling. Same-call nested native inspection/cleanup may reenter through async-local ownership; concurrent processes or independent calls may not. Active guard contention pauses rather than displacing its owner. After acquiring the guard, reload the actual journal and revalidate assignment and saved inputs before selecting an active backend; a previously read pending stage may already be accepted or closed. Attach records a separate fsynced attachment epoch without racing the controller's journal sequence. A captured candidate predating attachment cannot be accepted; preserve and invalidate it, then require explicit fresh same-attempt inspection under the guard. New activity/input changes invalidate prior evidence. Do not supply a no-op guard.
-
-## Independent issue stages
-
-Do not cap active or unresolved native stages across a repository. Each running stage is a full Codex or Claude session on the person's computer. Distinct issues may retain independent unresolved stages concurrently; this does not promise tested throughput or automatic cleanup. Preserve one assigned run per issue and one active stage per run, controller and attachment exclusion, exact identity/currentness checks and uncertain-delivery refusal. Do not allocate or release repository admission slots. Historical admission metadata and claims may remain on disk; ignore them without clearing or rewriting live journals or claims.
+- [Prompting guide](../../docs/prompting-guide.md) — authoring and review method for this prompt.
+- [Public boundary](public-boundary.prompt.md) — shared command scope and exit codes. Local consequence: states map to exit codes 0, 2 and 1; the runner pushes and creates PRs but never merges. Uses: authoring, review.
+- [Stage definitions](workflow-definitions.prompt.md) — `WORKFLOW_STAGES`. Uses: generation, runtime.
+- [Definition loader](workflow-definition-loader.prompt.md) — `loadWorkflowDefinition({name, cwd, packageRoot})` returns the frozen definition with `stages`, `files` and `digest`, or throws; owns each stage field and selects the [bundled workflows](bundled-workflows.prompt.md). Uses: generation, runtime, testing.
+- [Guidance](guidance.prompt.md) — owner of the base guidance. Uses: runtime.
+- [Workflow guidance](../../docs/workflows.md) — part of every stage context. Uses: runtime.
+- [Issue worktrees](workflow-worktree.prompt.md) — allocation, lookup, the assignment and the issue claim. Uses: generation, runtime, testing.
+- [GitHub effects](workflow-github.prompt.md) — `resolveWorkflowIssue`, `prepareWorkflowPr`, `publishWorkflowPr`, `reconcileWorkflowPr` and their outcomes. Local consequence: save the intent before publication; after an unknown outcome, only reconcile, except the unpublished-original attempt with `unpublishedOnly: true`. Uses: generation, runtime.
+- [Handoff artifacts](workflow-artifacts.prompt.md) — `readWorkflowHandoff`, `assertWorkflowArtifacts`, `runWorkflowTestCommands`; the handoff schema. Uses: generation, runtime.
+- [Stage transport](workflow-stage-herdr.prompt.md) — the four stage ports, backend identity, delivery and launch flags. Uses: generation, runtime, testing.
+- [CLI dispatch](pdd-cli.prompt.md) — the caller; checks the result shape and prints `message`. Uses: authoring, testing.
+- Node built-ins — `child_process`, `util`, `crypto`, `fs` (synchronous exclusive and no-follow open, chunked read, fsync), `path`, `async_hooks` (`AsyncLocalStorage`), and `process.kill(pid, 0)` for lock owners. Uses: generation, runtime.
+- git (tool) — `rev-parse`, `symbolic-ref`, `diff --binary`, `ls-files --others --exclude-standard`, `merge-base --is-ancestor`, `status --porcelain`. Push, `gh`, Herdr, `codex` and `claude` run only through the helpers and the transport. Uses: runtime.

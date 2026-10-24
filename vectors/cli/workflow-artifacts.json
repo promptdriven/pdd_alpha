@@ -1,0 +1,227 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-artifacts.prompt.md",
+  "story": "story/cli/WORKFLOW-ARTIFACTS.md",
+  "cases": [
+    {
+      "id": "handoff-valid",
+      "criteria": ["AC1", "AC8"],
+      "given": "Base fixture for later cases. P is a project directory whose path is already its real path, with a real .git directory. Regular files prompts/task.prompt.md, story/task.md and cases/task.json exist; D1, D2 and D3 are the lowercase SHA-256 digests of their bytes. H is P/.git/pdd/run/handoff.json and holds input.handoff as JSON.",
+      "input": {
+        "call": "readWorkflowHandoff",
+        "request": {
+          "cwd": "P",
+          "handoffPath": "H",
+          "expected": { "runId": "run-1", "stageId": "prompt-story", "issueUrl": "https://github.com/example/project/issues/1", "inputRevision": "revision-1" },
+          "requiredRoles": ["prompt", "story", "cases"]
+        },
+        "handoff": {
+          "version": 1,
+          "runId": "run-1",
+          "stageId": "prompt-story",
+          "issueUrl": "https://github.com/example/project/issues/1",
+          "inputRevision": "revision-1",
+          "summary": "Draft contract and independent cases.",
+          "files": [
+            { "path": "prompts/task.prompt.md", "sha256": "D1", "role": "prompt" },
+            { "path": "story/task.md", "sha256": "D2", "role": "story" },
+            { "path": "cases/task.json", "sha256": "D3", "role": "cases" }
+          ],
+          "testCommands": [["node", "--test", "test/task.test.mjs"]]
+        }
+      },
+      "expected": { "resolves": true, "value": "deep-equal to input.handoff" },
+      "effects": ["no process starts, so testCommands are not run", "no file is written"]
+    },
+    {
+      "id": "report-only-empty-files",
+      "criteria": ["AC1"],
+      "given": "As handoff-valid, but the handoff has files [] and no testCommands key.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, with requiredRoles []" },
+      "expected": { "resolves": true, "value": "deep-equal to the handoff file", "valueHasKey": { "testCommands": false } }
+    },
+    {
+      "id": "linked-worktree-pointer",
+      "criteria": ["AC1", "AC3"],
+      "given": "As handoff-valid, but P/.git is a regular file containing 'gitdir: M' and a line end. M is a real directory outside P, and the same handoff is at M/handoff.json.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, with handoffPath M/handoff.json" },
+      "expected": { "resolves": true, "value": "deep-equal to the handoff file" }
+    },
+    {
+      "id": "uppercase-digest-accepted",
+      "criteria": ["AC1", "AC4"],
+      "given": "As handoff-valid, but the first file's sha256 is D1 written in uppercase.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid" },
+      "expected": { "resolves": true, "value": "deep-equal to the handoff file; files[0].sha256 stays uppercase" }
+    },
+    {
+      "id": "stale-input-revision-refused",
+      "criteria": ["AC2"],
+      "given": "As handoff-valid, but the handoff has inputRevision 'revision-0'. All files are unchanged.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "unknown-handoff-field-refused",
+      "criteria": ["AC2"],
+      "given": "As handoff-valid, but the handoff also has \"approved\": true.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "missing-required-role-refused",
+      "criteria": ["AC2"],
+      "given": "As handoff-valid, but files lists only the prompt and story entries.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, requiredRoles still prompt, story and cases" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "repeated-path-refused",
+      "criteria": ["AC2"],
+      "given": "As handoff-valid, but files lists the prompt entry twice.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, with requiredRoles []" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "extra-expected-key-refused",
+      "criteria": ["AC2"],
+      "given": "As handoff-valid.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, but expected also has \"attemptId\": \"a-1\"" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "empty-test-plan-in-handoff-refused",
+      "criteria": ["AC2", "AC5", "AC8"],
+      "given": "As handoff-valid, but the handoff has testCommands [].",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid" },
+      "expectedError": { "rejects": true, "class": "TypeError" },
+      "effects": ["no process starts"]
+    },
+    {
+      "id": "handoff-outside-metadata-refused",
+      "criteria": ["AC3"],
+      "given": "As handoff-valid, and the same valid handoff is also at P/model-handoff.json.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, with handoffPath P/model-handoff.json" },
+      "expectedError": { "rejects": true, "class": "TypeError" },
+      "effects": ["H and other locations are not used instead"]
+    },
+    {
+      "id": "symlinked-handoff-refused",
+      "criteria": ["AC3"],
+      "given": "As handoff-valid, but H is a symlink to P/model-handoff.json, which holds the valid handoff.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "handoff-path-dot-segment-refused",
+      "criteria": ["AC3"],
+      "given": "As handoff-valid.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid, with handoffPath P/.git/pdd/run/../run/handoff.json" },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "artifact-traversal-refused",
+      "criteria": ["AC4"],
+      "given": "As handoff-valid. P/b exists as a regular file.",
+      "input": { "call": "assertWorkflowArtifacts", "request": { "cwd": "P", "files": [{ "path": "a/../b", "sha256": "digest of P/b", "role": "evidence" }] } },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "git-segment-any-case-refused",
+      "criteria": ["AC4"],
+      "given": "As handoff-valid.",
+      "input": { "call": "assertWorkflowArtifacts", "request": { "cwd": "P", "files": [{ "path": "a/.GiT/config", "sha256": "any 64 hexadecimal digits", "role": "evidence" }] } },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "dot-github-path-allowed",
+      "criteria": ["AC4"],
+      "given": "As handoff-valid. P/.github/workflows/ci.yml is a regular file and D4 is the digest of its bytes.",
+      "input": { "call": "assertWorkflowArtifacts", "request": { "cwd": "P", "files": [{ "path": ".github/workflows/ci.yml", "sha256": "D4", "role": "tests" }] } },
+      "expected": { "resolves": true, "value": "undefined" }
+    },
+    {
+      "id": "symlinked-ancestor-refused",
+      "criteria": ["AC4"],
+      "given": "As handoff-valid. O is a directory outside P with file O/secret. P/linked-parent is a symlink to O. D5 is the digest of O/secret.",
+      "input": { "call": "assertWorkflowArtifacts", "request": { "cwd": "P", "files": [{ "path": "linked-parent/secret", "sha256": "D5", "role": "evidence" }] } },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "project-directory-through-symlink-refused",
+      "criteria": ["AC4"],
+      "given": "As handoff-valid. A is a symlink to P.",
+      "input": { "call": "assertWorkflowArtifacts", "request": { "cwd": "A", "files": "the three files of handoff-valid" } },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "changed-after-acceptance-refused",
+      "criteria": ["AC4"],
+      "given": "handoff-valid resolved. Then prompts/task.prompt.md is rewritten with different bytes.",
+      "input": { "call": "assertWorkflowArtifacts", "request": { "cwd": "P", "files": "the files from the resolved handoff" } },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "changed-during-read-refused",
+      "criteria": ["AC4"],
+      "given": "As handoff-valid, but ports.fs is the real filesystem except that reading prompts/task.prompt.md through its opened handle rewrites that file before returning the old bytes.",
+      "input": { "call": "readWorkflowHandoff", "request": "as handoff-valid", "ports": { "fs": "the changing port described in given" } },
+      "expectedError": { "rejects": true, "class": "TypeError" }
+    },
+    {
+      "id": "shell-launcher-refused-before-any-run",
+      "criteria": ["AC5", "AC8"],
+      "given": "P as in handoff-valid. ports.execFile counts its calls.",
+      "input": { "call": "runWorkflowTestCommands", "request": { "cwd": "P", "testCommands": [["node", "--test"], ["/bin/BASH", "-c", "echo PASS"]] } },
+      "expectedError": { "rejects": true, "class": "TypeError" },
+      "effects": ["execFile is never called, also not for the valid first command"]
+    },
+    {
+      "id": "missing-test-plan-refused",
+      "criteria": ["AC5"],
+      "given": "P as in handoff-valid. ports.execFile counts its calls.",
+      "input": { "call": "runWorkflowTestCommands", "request": { "cwd": "P" } },
+      "expectedError": { "rejects": true, "class": "TypeError" },
+      "effects": ["execFile is never called"]
+    },
+    {
+      "id": "literal-argv-without-shell",
+      "criteria": ["AC6", "AC7"],
+      "given": "P as in handoff-valid. ports.execFile is a callback-form port that records its arguments and calls back (null, 'observed output', '').",
+      "input": { "call": "runWorkflowTestCommands", "request": { "cwd": "P", "testCommands": [["node", "--test", "test/a file;literal.mjs"]] } },
+      "expected": {
+        "execFileCalls": [{ "file": "node", "args": ["--test", "test/a file;literal.mjs"], "options": { "cwd": "P" } }],
+        "passed": true,
+        "results": [{ "argv": ["node", "--test", "test/a file;literal.mjs"], "exitCode": 0, "stdout": "observed output", "stderr": "" }]
+      }
+    },
+    {
+      "id": "every-command-runs-after-failure",
+      "criteria": ["AC6", "AC7"],
+      "given": "P as in handoff-valid. Callback-form ports.execFile: for args ['fail'] it calls back with an error whose code is 7, stdout 'PASS is only text' and stderr 'actual failure'; for file 'missing-tool' it calls back with an error whose code is 'ENOENT'; otherwise it calls back (null, 'ok', '').",
+      "input": { "call": "runWorkflowTestCommands", "request": { "cwd": "P", "testCommands": [["node", "first"], ["node", "fail"], ["missing-tool"], ["node", "last"]] } },
+      "expected": {
+        "passed": false,
+        "resultExitCodes": [0, 7, null, 0],
+        "resultArgv": [["node", "first"], ["node", "fail"], ["missing-tool"], ["node", "last"]],
+        "results[1].stdout": "PASS is only text",
+        "results[2].stderr": "nonempty"
+      },
+      "effects": ["execFile is called four times, in the given order"]
+    },
+    {
+      "id": "promise-port-explicit-codes",
+      "criteria": ["AC7"],
+      "given": "P as in handoff-valid. Promise-form ports.execFile settles the four calls in turn with: resolve {stdout: 'zero'}; resolve {exitCode: 4, stdout: 'PASS'}; resolve {code: 3}; reject with an error whose code is 5.",
+      "input": { "call": "runWorkflowTestCommands", "request": { "cwd": "P", "testCommands": [["node", "--test"], ["node", "--test"], ["node", "--test"], ["node", "--test"]] } },
+      "expected": { "passed": false, "resultExitCodes": [0, 4, 3, 5] }
+    },
+    {
+      "id": "promise-port-abnormal-outcomes-record-null",
+      "criteria": ["AC7"],
+      "given": "P as in handoff-valid. Promise-form ports.execFile settles the six calls in turn with: resolve {exitCode: null}; resolve {signal: 'SIGTERM'}; resolve undefined; resolve {exitCode: -1}; resolve {code: 'ENOENT'}; reject with an error whose code is 0 and message 'rejected'.",
+      "input": { "call": "runWorkflowTestCommands", "request": { "cwd": "P", "testCommands": [["node", "--test"], ["node", "--test"], ["node", "--test"], ["node", "--test"], ["node", "--test"], ["node", "--test"]] } },
+      "expected": { "passed": false, "resultExitCodes": [null, null, null, null, null, null], "everyResultStderr": "nonempty" }
+    }
+  ]
+}

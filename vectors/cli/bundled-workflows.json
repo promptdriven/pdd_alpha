@@ -1,0 +1,200 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/bundled-workflows.prompt.md",
+  "story": "story/cli/BUNDLED-WORKFLOWS.md",
+  "cases": [
+    {
+      "id": "definition-headers",
+      "criteria": ["AC1"],
+      "input": { "read": ".pdd/workflows/<name>/workflow.json top-level fields", "names": ["feature", "bug", "small-change"] },
+      "expected": {
+        "feature": { "version": 1, "name": "feature", "overview": "WORKFLOW.md" },
+        "bug": { "version": 1, "name": "bug", "overview": "WORKFLOW.md" },
+        "small-change": { "version": 1, "name": "small-change", "overview": "WORKFLOW.md" }
+      }
+    },
+    {
+      "id": "stage-file-is-id-plus-md",
+      "criteria": ["AC1"],
+      "input": { "read": "every stage in the three bundled definitions", "compare": "file versus id + \".md\"" },
+      "expected": { "mismatches": [] }
+    },
+    {
+      "id": "small-change-folder-contents-exact",
+      "criteria": ["AC1"],
+      "input": { "read": "directory listing of .pdd/workflows/small-change" },
+      "expected": ["WORKFLOW.md", "change.md", "open-pr.md", "scope.md", "verify.md", "wait-merge.md", "workflow.json"],
+      "effects": ["no undeclared Markdown file in any bundled folder"]
+    },
+    {
+      "id": "feature-folder-entry-count",
+      "criteria": ["AC1"],
+      "input": { "read": "directory listing of .pdd/workflows/feature and .pdd/workflows/bug" },
+      "expected": { "feature": 14, "bug": 13 }
+    },
+    {
+      "id": "bundled-list-without-project-override",
+      "criteria": ["AC2"],
+      "given": "A project folder with no .pdd/workflows folder.",
+      "input": ["workflow", "list", "--json"],
+      "expected": {
+        "exitCode": 0,
+        "stdout": { "workflows": [{ "name": "bug", "source": "bundled" }, { "name": "feature", "source": "bundled" }, { "name": "small-change", "source": "bundled" }], "default": null }
+      }
+    },
+    {
+      "id": "feature-stage-order",
+      "criteria": ["AC3"],
+      "input": { "workflow": "feature", "read": "stage ids in order" },
+      "expected": ["understand", "visual", "prompt-story", "check", "try", "approve", "prompt-pr", "prompt-merge", "build", "verify", "code-pr", "code-merge"]
+    },
+    {
+      "id": "feature-stage-6-is-approve-human",
+      "criteria": ["AC3"],
+      "input": { "workflow": "feature", "read": "stage 6" },
+      "expected": { "id": "approve", "kind": "human", "file": "approve.md", "otherFields": {} }
+    },
+    {
+      "id": "feature-proposal-stage",
+      "criteria": ["AC3"],
+      "input": { "workflow": "feature", "read": "stage 3" },
+      "expected": { "id": "prompt-story", "kind": "agent", "otherFields": { "protocol": "proposal", "requiredRoles": ["prompt", "story", "cases"], "approval": "human" } }
+    },
+    {
+      "id": "feature-optional-stages",
+      "criteria": ["AC3"],
+      "input": { "workflow": "feature", "read": "ids of stages with optional true" },
+      "expected": ["visual", "try", "prompt-pr"]
+    },
+    {
+      "id": "feature-pr-and-merge-links",
+      "criteria": ["AC3", "AC7"],
+      "input": { "workflow": "feature", "read": "publication, prStage and requiresMerge of every stage that has one" },
+      "expected": {
+        "publication": { "prompt-pr": "proposal", "code-pr": "verified" },
+        "prStage": { "prompt-merge": "prompt-pr", "code-merge": "code-pr" },
+        "requiresMerge": { "build": "prompt-merge", "code-pr": "prompt-merge" }
+      },
+      "effects": ["prompt-merge has no optional field"]
+    },
+    {
+      "id": "bug-stage-order",
+      "criteria": ["AC4"],
+      "input": { "workflow": "bug", "read": "stage ids in order" },
+      "expected": ["reproduce", "prompt-story", "check", "try", "approve", "prompt-pr", "prompt-merge", "build", "verify", "code-pr", "code-merge"]
+    },
+    {
+      "id": "bug-first-stage-reproduce",
+      "criteria": ["AC4"],
+      "input": { "workflow": "bug", "read": "stage 1" },
+      "expected": { "id": "reproduce", "kind": "agent", "file": "reproduce.md", "otherFields": { "protocol": "report" } }
+    },
+    {
+      "id": "bug-shares-feature-tail",
+      "criteria": ["AC4"],
+      "input": { "compare": "bug stages 2 to 11 with feature stages 3 to 12, all fields" },
+      "expected": { "equal": true },
+      "effects": ["bug optional stages are exactly try and prompt-pr"]
+    },
+    {
+      "id": "small-change-has-three-agent-stages",
+      "criteria": ["AC5", "AC6"],
+      "input": { "workflow": "small-change", "read": "ids of agent stages and of optional stages" },
+      "expected": { "agentStages": ["scope", "change", "verify"], "optionalStages": [] }
+    },
+    {
+      "id": "small-change-scope-next-advance",
+      "criteria": ["AC5", "AC8"],
+      "input": { "workflow": "small-change", "read": "stage 1" },
+      "expected": { "id": "scope", "kind": "agent", "otherFields": { "protocol": "proposal", "requiredRoles": ["cases"], "approval": "next-advance" } }
+    },
+    {
+      "id": "small-change-pr-merge-and-absent-fields",
+      "criteria": ["AC5"],
+      "input": { "workflow": "small-change", "read": "stages 4 and 5, human stages and requiresMerge fields" },
+      "expected": {
+        "open-pr": { "kind": "pr", "otherFields": { "publication": "verified" } },
+        "wait-merge": { "kind": "merge", "otherFields": { "prStage": "open-pr" } },
+        "humanStages": [],
+        "stagesWithRequiresMerge": []
+      }
+    },
+    {
+      "id": "stage-counts",
+      "criteria": ["AC6"],
+      "input": { "read": "WORKFLOW_STAGES" },
+      "expected": {
+        "feature": { "steps": 12, "agentStages": 7, "mandatoryAgentStages": 5 },
+        "bug": { "steps": 11, "agentStages": 6, "mandatoryAgentStages": 5 },
+        "small-change": { "steps": 5, "agentStages": 3, "mandatoryAgentStages": 3 }
+      }
+    },
+    {
+      "id": "feature-skip-prompt-pr",
+      "criteria": ["AC7"],
+      "given": "A feature run waits at prompt-pr after the person approved at approve.",
+      "input": ["workflow", "resume", "RUN_ID", "--decision", "skip"],
+      "expected": { "recorded": { "prompt-pr": "skipped", "prompt-merge": "skipped" }, "nextStage": "build" },
+      "effects": ["no push and no PR create for prompt-pr", "build starts with no merge condition"]
+    },
+    {
+      "id": "feature-approve-prompt-pr-waits-for-merge",
+      "criteria": ["AC7"],
+      "given": "A feature run waits at prompt-pr after the person approved at approve.",
+      "input": ["workflow", "resume", "RUN_ID", "--decision", "approve"],
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "prompt-merge" },
+      "effects": ["exactly one PR created for prompt-pr", "no native launch for build"]
+    },
+    {
+      "id": "build-needs-merged-prompt-commit",
+      "criteria": ["AC7"],
+      "given": "A feature run observed the real merge of its prompt PR and waits at build. The assigned branch does not contain the merge commit.",
+      "input": ["workflow", "resume", "RUN_ID", "--decision", "approve"],
+      "expected": { "state": "waiting", "stage": "build" },
+      "effects": ["no native launch for build", "no checkout, reset or base rewrite"]
+    },
+    {
+      "id": "small-change-waits-after-scope",
+      "criteria": ["AC8"],
+      "given": "A Git project with a real issue 17 and no project workflow override.",
+      "input": ["workflow", "run", "small-change", "17"],
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "change" },
+      "effects": ["only the scope agent was launched", "no PR created"]
+    },
+    {
+      "id": "overview-step-lists",
+      "criteria": ["AC9"],
+      "input": { "read": "numbered link targets in each WORKFLOW.md" },
+      "expected": {
+        "feature": ["understand.md", "visual.md", "prompt-story.md", "check.md", "try.md", "approve.md", "prompt-pr.md", "prompt-merge.md", "build.md", "verify.md", "code-pr.md", "code-merge.md"],
+        "bug": ["reproduce.md", "prompt-story.md", "check.md", "try.md", "approve.md", "prompt-pr.md", "prompt-merge.md", "build.md", "verify.md", "code-pr.md", "code-merge.md"],
+        "small-change": ["scope.md", "change.md", "verify.md", "open-pr.md", "wait-merge.md"]
+      },
+      "effects": ["each WORKFLOW.md links ../../../docs/prompting-guide.md in its guide-first item"]
+    },
+    {
+      "id": "shared-paragraph-locations",
+      "criteria": ["AC10"],
+      "input": { "read": "which recipe files carry each shared step paragraph" },
+      "expected": {
+        "guideFirst": ["feature/WORKFLOW.md", "feature/understand.md", "feature/prompt-story.md", "bug/WORKFLOW.md", "bug/prompt-story.md", "small-change/WORKFLOW.md", "small-change/scope.md"],
+        "runnerBranch": ["feature/prompt-story.md", "feature/build.md", "bug/prompt-story.md", "bug/build.md", "small-change/change.md"],
+        "runnerPr": ["feature/prompt-pr.md", "feature/code-pr.md", "bug/prompt-pr.md", "bug/code-pr.md", "small-change/open-pr.md"],
+        "runnerMerge": ["feature/prompt-merge.md", "feature/code-merge.md", "bug/prompt-merge.md", "bug/code-merge.md", "small-change/wait-merge.md"]
+      }
+    },
+    {
+      "id": "no-agent-publication-or-merge",
+      "criteria": ["AC11"],
+      "input": { "read": "every recipe Markdown file in the three bundled folders" },
+      "expected": { "instructionsForRunnerAgentToPushOrCreatePr": 0, "instructionsToMergeOrEnableAutoMerge": 0 },
+      "effects": ["every pr step file says the runner, not the agent, publishes in a run", "every merge step file says the runner never merges"]
+    },
+    {
+      "id": "no-unavailable-commands-and-links-resolve",
+      "criteria": ["AC11"],
+      "input": { "read": "every recipe Markdown file in a clean extracted package" },
+      "expected": { "namedPddTryCheckOrApprovalCommands": 0, "namedPrivateServices": 0, "unresolvedRelativeLinks": 0 }
+    }
+  ]
+}
