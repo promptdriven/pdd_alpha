@@ -2,16 +2,16 @@
   "status": "draft",
   "prompt": "prompts/cli/workflow-worktree.prompt.md",
   "story": "story/cli/WORKFLOW-WORKTREE.md",
-  "given": "Shared starting state; each case's own given lists only the differences. /repo is the top level of an ordinary checkout and its own canonical real path. Its common Git directory is /repo/.git. origin is https://github.com/Acme/Project.git. The current branch is main, and local branch main is at commit 1111111111111111111111111111111111111111 (M). The folder /repo/.git/pdd does not exist. <UUID> stands for the lowercase UUIDv4 that the call generates, and <uuidShort> for its first 8 characters. The default command port runs real Git unless a case says otherwise. 'Saved run X' means an earlier allocation of run X returned ready and nothing changed after it.",
+  "given": "Shared starting state; each case's own given lists only the differences. /repo is the top level of an ordinary checkout and its own canonical real path. Its common Git directory is /repo/.git. origin is https://github.com/Acme/Project.git. The current branch is main, and local branch main is at commit 1111111111111111111111111111111111111111 (M). The folders /repo/.git/pdd and /repo.pdd-worktrees do not exist. <UUID> stands for the lowercase UUIDv4 that the call generates, and <uuidShort> for its first 8 characters. The default command port runs real Git unless a case says otherwise. 'Saved run X' means an earlier allocation of run X returned ready and nothing changed after it.",
   "cases": [
     {
       "id": "new-allocation-ready",
-      "criteria": ["AC1", "AC2", "AC5"],
+      "criteria": ["AC1", "AC2", "AC5", "AC12"],
       "given": "/repo has a modified tracked file source.txt and an untracked file notes.txt.",
       "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 101, "runId": "run-101", "workflowName": "feature", "baseRef": "main" } },
-      "expected": { "state": "ready", "assignment": { "version": 1, "runId": "run-101", "repository": "Acme/Project", "issueNumber": 101, "workflowName": "feature", "commonDir": "/repo/.git", "sourceRoot": "/repo", "worktreePath": "/repo/.git/pdd/worktrees/<UUID>", "gitDir": "/repo/.git/worktrees/<UUID>", "branch": "pdd/feature-101-<uuidShort>", "baseRef": "main", "baseSha": "1111111111111111111111111111111111111111" } },
+      "expected": { "state": "ready", "assignment": { "version": 1, "runId": "run-101", "repository": "Acme/Project", "issueNumber": 101, "workflowName": "feature", "commonDir": "/repo/.git", "sourceRoot": "/repo", "worktreePath": "/repo.pdd-worktrees/<UUID>", "gitDir": "/repo/.git/worktrees/<UUID>", "branch": "pdd/feature-101-<uuidShort>", "baseRef": "main", "baseSha": "1111111111111111111111111111111111111111" } },
       "effects": [
-        "exactly one git worktree add -b pdd/feature-101-<uuidShort> /repo/.git/pdd/worktrees/<UUID> 1111111111111111111111111111111111111111, run with cwd /repo",
+        "exactly one git worktree add -b pdd/feature-101-<uuidShort> /repo.pdd-worktrees/<UUID> 1111111111111111111111111111111111111111, run with cwd /repo",
         "before the add, /repo/.git/pdd/worktree-assignments/runs/run-101.json and /repo/.git/pdd/worktree-assignments/issues/101.json are one file with link count 2",
         "the run record holds the returned assignment as JSON and a final newline",
         "the new worktree holds the committed files of M, including the committed bytes of source.txt",
@@ -106,7 +106,7 @@
       "criteria": ["AC6"],
       "given": "The command port runs the real add, then rejects with an error that has no code.",
       "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 9, "runId": "run-9", "workflowName": "feature", "baseRef": "main" } },
-      "expected": { "state": "ready", "assignment": { "runId": "run-9", "worktreePath": "/repo/.git/pdd/worktrees/<UUID>" } },
+      "expected": { "state": "ready", "assignment": { "runId": "run-9", "worktreePath": "/repo.pdd-worktrees/<UUID>" } },
       "effects": [
         "a later lookupIssueWorktree for run-9 returns the same assignment with no git worktree add"
       ]
@@ -151,7 +151,7 @@
       "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-unknown" } },
       "expected": { "state": "recovery_required", "assignment": null },
       "effects": [
-        "/repo/.git/pdd still does not exist",
+        "/repo/.git/pdd and /repo.pdd-worktrees still do not exist",
         "only read-only Git subcommands run"
       ]
     },
@@ -322,6 +322,74 @@
       "expected": { "state": "ready", "assignment": "deep-equal to the assignment of the first allocation" },
       "effects": [
         "the lock stays"
+      ]
+    },
+    {
+      "id": "new-allocation-in-sibling-worktree-folder",
+      "criteria": ["AC1", "AC12"],
+      "given": "The primary checkout is /src/acme/Project instead of /repo, with common Git directory /src/acme/Project/.git and the same origin and main. /src/acme/Project.pdd-worktrees does not exist.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/src/acme/Project", "repository": "Acme/Project", "issueNumber": 120, "runId": "run-120", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "commonDir": "/src/acme/Project/.git", "sourceRoot": "/src/acme/Project", "worktreePath": "/src/acme/Project.pdd-worktrees/<UUID>", "gitDir": "/src/acme/Project/.git/worktrees/<UUID>" } },
+      "effects": [
+        "/src/acme/Project.pdd-worktrees is an ordinary folder that holds only <UUID>",
+        "the run record and the claim are under /src/acme/Project/.git/pdd/worktree-assignments",
+        "/src/acme/Project/.git/pdd/worktrees is not created",
+        "no part of the worktree path is .git"
+      ]
+    },
+    {
+      "id": "allocation-from-linked-checkout-uses-same-folder",
+      "criteria": ["AC12"],
+      "given": "Saved run run-42 for issue 42, allocated from /repo. Its worktree is /repo.pdd-worktrees/<UUID of run-42>.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "<worktreePath of run-42>", "repository": "Acme/Project", "issueNumber": 43, "runId": "run-43", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "commonDir": "/repo/.git", "sourceRoot": "<worktreePath of run-42>", "worktreePath": "/repo.pdd-worktrees/<UUID>", "gitDir": "/repo/.git/worktrees/<UUID>" } },
+      "effects": [
+        "the one git worktree add runs with cwd <worktreePath of run-42>",
+        "no folder <worktreePath of run-42>.pdd-worktrees is created",
+        "a later lookupIssueWorktree for run-43 from /repo returns the same assignment"
+      ]
+    },
+    {
+      "id": "earlier-layout-run-still-ready",
+      "criteria": ["AC13"],
+      "given": "Run run-301 for issue 301 was saved in the earlier layout. Its complete version 1 run record and claim name worktreePath /repo/.git/pdd/worktrees/<L> and gitDir /repo/.git/worktrees/<L>, where <L> is a lowercase UUIDv4, and a matching worktree was added there from base M. The worktree has a dirty file, and the runner journal /repo/.git/worktrees/<L>/pdd/workflows/run-301/journal.jsonl exists.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-301" } },
+      "expected": { "state": "ready", "assignment": { "runId": "run-301", "worktreePath": "/repo/.git/pdd/worktrees/<L>", "gitDir": "/repo/.git/worktrees/<L>" } },
+      "effects": [
+        "the assignment deep-equals the saved run record",
+        "a lookup from /repo/.git/pdd/worktrees/<L> and a repeat allocation of run-301 with its saved request return the same assignment",
+        "only read-only Git subcommands run, and no git worktree add",
+        "no file under /repo/.git/pdd/worktree-assignments changes",
+        "the journal and the dirty file keep their bytes",
+        "the worktree stays at /repo/.git/pdd/worktrees/<L>, and /repo.pdd-worktrees is not created"
+      ]
+    },
+    {
+      "id": "symbolic-link-worktree-folder-refused",
+      "criteria": ["AC12"],
+      "given": "/repo.pdd-worktrees is a symbolic link to a folder /elsewhere that holds one file keep.txt.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 304, "runId": "run-304", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "/elsewhere holds only keep.txt, with the same bytes",
+        "/repo.pdd-worktrees is still the same symbolic link",
+        "no run record for run-304",
+        "no claim for issue 304",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "outside-path-not-adopted",
+      "criteria": ["AC13"],
+      "given": "Saved run run-305 for issue 305. Then someone rewrote its run record file, which is also its claim, so that worktreePath is /elsewhere/<UUID of run-305>. All other fields are unchanged.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-305" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "a repeat allocation of run-305 with its saved request also returns recovery_required",
+        "only read-only Git subcommands run, and no git worktree add",
+        "the rewritten record keeps its bytes",
+        "the original worktree /repo.pdd-worktrees/<UUID of run-305> keeps its files",
+        "nothing is created at /elsewhere"
       ]
     },
     {

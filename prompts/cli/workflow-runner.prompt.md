@@ -85,7 +85,7 @@ flowchart TD
 | Agent attempt, first prompt not sent | Inspect | Continue the same first dispatch | Inspect |
 | Agent attempt, other phase | Inspect | Inspect, then validate a settled candidate | Inspect |
 | Accepted stage, cleanup due | Wait | Close the original once | Wait |
-| PR outcome unknown | Reconcile | Reconcile | Reconcile |
+| PR outcome unknown | Reconcile | Reconcile; if not proved, one [unpublished-original attempt](#unpublished-original-attempt) | Reconcile |
 | Optional stage, no saved choice | Wait | Save `approve`, run it | Save `skip`, skip it |
 | Optional stage, saved `skip` | Skip it | Skip it | Skip it |
 | Optional stage, saved `approve` | Wait | Run it | Fail |
@@ -124,7 +124,7 @@ Then the runner saves the **acceptance** `{runId, stageId, attemptId, promptDige
 
 ## PRs and merges
 
-A PR stage passes its [guards](#pr-guards), saves its intent and publishes once. A `verified` publication needs a [verification binding](#handoff-and-verification-rules) for the exact current input, so a later worktree change cannot reuse an older pass. A proved open or merged PR is recorded with its number, URL and head. A failed guard gives `failed`. An unknown outcome gives `recovery_required`, and then only read-only reconciliation of the same intent is allowed: no match, several matches or a changed match never permit another push or create. The runner never force-pushes, creates an empty PR or changes branch protection.
+A PR stage passes its [guards](#pr-guards), saves its intent and publishes once. A `verified` publication needs a [verification binding](#handoff-and-verification-rules) for the exact current input, so a later worktree change cannot reuse an older pass. A proved open or merged PR is recorded with its number, URL and head. A failed guard gives `failed`. An unknown outcome gives `recovery_required` and keeps the PR pending for read-only reconciliation of the same intent. No match, several matches or a changed match never permit another push or create, except the [unpublished-original attempt](#unpublished-original-attempt) after an explicit `approve`. The runner never force-pushes, creates an empty PR or changes branch protection.
 
 A merge stage only reads GitHub through its PR stage's saved intent. The observed PR must have the saved number and URL; another PR with the same marker, branch, base and head is not the original. A skipped PR stage skips the merge. Open gives `waiting`. Merged, with a merge commit of 40 to 64 lowercase hexadecimal digits, is recorded. Closed unmerged, merged without such a commit, or a failed read gives `failed`. Anything not proved, or another number or URL, gives `recovery_required`.
 
@@ -185,11 +185,22 @@ Accepting a `verify` stage saves the **verification binding**: output fingerprin
 </details>
 
 <details>
-<summary><strong>PR guards</strong></summary>
+<summary><strong>PR guards and the unpublished-original attempt</strong></summary>
 
 <a id="pr-guards"></a>
 
-In order: current input; the verification binding, for `verified`; each recorded merge commit that the stage depends on is in HEAD's history (its `requiresMerge` merge, else every recorded merge); `prepareWorkflowPr` with body file `<run directory>/pr-<stageId>.md` (the helper refuses a dirty tree, the default branch or no new commits, and writes the marker `pdd-workflow:<runId>:<stageId>`); current input again. Then save the intent and call `publishWorkflowPr` once. After a proved result, check current input and record the PR. `publication: proposal` needs no binding.
+In order: current input; the verification binding, for `verified`; each recorded merge commit that the stage depends on is in HEAD's history (its `requiresMerge` merge, else every recorded merge); `prepareWorkflowPr` with body file `<run directory>/pr-<stageId>.md` (the helper refuses a dirty tree, the default branch or no new commits, and writes the marker `pdd-workflow:<runId>:<stageId>`); current input again. Then save the intent and call `publishWorkflowPr` once. After a proved result, also one from reconciliation or the attempt below, check current input and record the PR. `publication: proposal` needs no binding.
+
+<a id="unpublished-original-attempt"></a>
+
+**Unpublished-original attempt.** Accepted product decision: an explicit `approve` may authorize one new publication of a pending PR whose original never reached GitHub, for example because its push failed at an authentication prompt. Reconciliation alone can never finish such a PR. Only a resume with `approve` on a pending PR makes the attempt, in this order:
+
+1. Read-only reconciliation of the saved intent returns `recovery_required`. A found original, also a closed one, never leads to an attempt.
+2. Current input holds again.
+3. Durably append a journal row with event `pr.unpublished_retry_intent`. The saved intent stays exactly as it was: the runner never replaces it or adds proof fields to it.
+4. Call `publishWorkflowPr({cwd, intent, unpublishedOnly: true}, ports)` once with that intent. The [GitHub helper](workflow-github.prompt.md) must freshly prove that no original PR and no saved remote head branch exist before it pushes; otherwise it pushes and creates nothing.
+
+A proved PR is recorded and gives `waiting`. A failure in step 2 or 4, or a lost reply, gives `recovery_required` and keeps the intent pending. A later resume without a decision only reconciles. Each further attempt needs another `approve` and repeats all four steps.
 
 </details>
 
@@ -208,7 +219,8 @@ Use the conflict result's assignment if it has one. Otherwise read the helper's 
 <a id="journal-snapshot-and-locks"></a>
 
 - **Snapshot:** `<common dir>/pdd/workflow-inputs/<runId>/input.jsonl`, one line with the run ID, source root, definition, base guidance, overview and their SHA-256. Written once, never overwritten or deleted, also for a run ID that allocation then refused.
-- **Journal:** `<worktree git dir>/pdd/workflows/<runId>/journal.jsonl`, one JSON row per line with a gapless sequence number from 1, an event label and the whole state; the last row is current. The state names the run (equal to the directory name), agent, definition, stages, assignment and a valid stage index. The run directory also holds `artifacts/` and PR body files.
+- **Journal:** `<worktree git dir>/pdd/workflows/<runId>/journal.jsonl`. `<worktree git dir>` is the issue worktree's own Git directory, not part of its working files; the [worktree helper](workflow-worktree.prompt.md#saved-records) owns both locations. Each row is one JSON line with a sequence number, an event label and the whole state. The state names the run (equal to the directory name), agent, definition, stages, assignment and a valid stage index. The run directory also holds `artifacts/` and PR body files.
+- **Journal reading.** Read rows in order, one at a time, so memory is bounded by the largest row, not the journal size. Reason: each row repeats the whole state, so a valid journal can outgrow the longest string Node can hold and must still resume. Every row must be complete JSON, have sequence number 1 or one more than the row before, carry the same number in its state and name the same run as earlier rows; only then is the last row current. A last line without a final newline is **torn**. Whitespace-only lines are allowed only after the last row. Size never justifies compacting the journal or dropping rows.
 - **Locks:** the controller lock in `<worktree git dir>/pdd/workflows/`; the stage guard and attachment epochs in `<common dir>/pdd/workflow-stage-guards/<runId>/`. A lock held by a live process, or not proved gone, refuses; a lock of a gone process is taken over without killing anything. An interrupted acquisition refuses until a person inspects it and is never cleared automatically.
 - **Files** are owner-only, canonical, not symlinks and singly linked, and opened without following symlinks. Each append is written completely, then the file and its directory are synced. A redirected or multiply linked file refuses before any write through it.
 
@@ -223,9 +235,9 @@ Use the conflict result's assignment if it has one. Otherwise read the helper's 
 - [Guidance](guidance.prompt.md) — owner of the base guidance. Uses: runtime.
 - [Workflow guidance](../../docs/workflows.md) — part of every stage context. Uses: runtime.
 - [Issue worktrees](workflow-worktree.prompt.md) — allocation, lookup, the assignment and the issue claim. Uses: generation, runtime, testing.
-- [GitHub effects](workflow-github.prompt.md) — `resolveWorkflowIssue`, `prepareWorkflowPr`, `publishWorkflowPr`, `reconcileWorkflowPr` and their outcomes. Local consequence: save the intent before publication; only reconcile after an unknown outcome. Uses: generation, runtime.
+- [GitHub effects](workflow-github.prompt.md) — `resolveWorkflowIssue`, `prepareWorkflowPr`, `publishWorkflowPr`, `reconcileWorkflowPr` and their outcomes. Local consequence: save the intent before publication; after an unknown outcome, only reconcile, except the unpublished-original attempt with `unpublishedOnly: true`. Uses: generation, runtime.
 - [Handoff artifacts](workflow-artifacts.prompt.md) — `readWorkflowHandoff`, `assertWorkflowArtifacts`, `runWorkflowTestCommands`; the handoff schema. Uses: generation, runtime.
 - [Stage transport](workflow-stage-herdr.prompt.md) — the four stage ports, backend identity, delivery and launch flags. Uses: generation, runtime, testing.
 - [CLI dispatch](pdd-cli.prompt.md) — the caller; checks the result shape and prints `message`. Uses: authoring, testing.
-- Node built-ins — `child_process`, `util`, `crypto`, `fs` (synchronous exclusive and no-follow open, fsync), `path`, `async_hooks` (`AsyncLocalStorage`), and `process.kill(pid, 0)` for lock owners. Uses: generation, runtime.
+- Node built-ins — `child_process`, `util`, `crypto`, `fs` (synchronous exclusive and no-follow open, chunked read, fsync), `path`, `async_hooks` (`AsyncLocalStorage`), and `process.kill(pid, 0)` for lock owners. Uses: generation, runtime.
 - git (tool) — `rev-parse`, `symbolic-ref`, `diff --binary`, `ls-files --others --exclude-standard`, `merge-base --is-ancestor`, `status --porcelain`. Push, `gh`, Herdr, `codex` and `claude` run only through the helpers and the transport. Uses: runtime.

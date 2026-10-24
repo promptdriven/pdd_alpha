@@ -221,6 +221,114 @@
       "given": "Both lookups return [P]. While the first command waits, the caller sets intent.headSha to dddddddddddddddddddddddddddddddddddddddd and intent.repository to Other/Repo on the object it passed.",
       "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" } },
       "expected": { "state": "open", "pr": { "repository": "Acme/Project", "number": 42, "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } }
+    },
+    {
+      "id": "recovery-both-absent-publishes-once",
+      "criteria": ["AC12"],
+      "given": "The earlier push failed at a login prompt and the person approved the same PR intent again. git ls-remote exits with code 2 and prints nothing. Both PR lookups return no rows until gh pr create succeeds. After that, both return [P].",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "open", "pr": { "repository": "Acme/Project", "number": 42, "url": "https://github.com/Acme/Project/pull/42", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "mergeCommit": null } },
+      "effects": [
+        "both gh pr list lookups run before git ls-remote",
+        "git ls-remote runs once, with argv [\"ls-remote\", \"--exit-code\", \"--refs\", \"origin\", \"refs/heads/topic/feature\"], before git push",
+        "exactly two writes, in this order: the git push and gh pr create argv of publish-first-publication",
+        "a gh pr list read runs after gh pr create",
+        "the supplied intent object is unchanged and has no added field"
+      ]
+    },
+    {
+      "id": "recovery-existing-exact-pr-refused",
+      "criteria": ["AC13"],
+      "given": "Both PR lookups return [P].",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git ls-remote", "no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-remote-head-at-saved-sha-refused",
+      "criteria": ["AC13"],
+      "given": "An earlier push reached origin but its reply was lost. git ls-remote exits with code 0 and prints 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/heads/topic/feature\\n', which is the saved headSha.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["git ls-remote runs once", "no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-remote-head-other-sha-refused",
+      "criteria": ["AC13"],
+      "given": "git ls-remote exits with code 0 and prints 'dddddddddddddddddddddddddddddddddddddddd\\trefs/heads/topic/feature\\n'.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-remote-exit-2-with-output-refused",
+      "criteria": ["AC13"],
+      "given": "git ls-remote exits with code 2 and prints only '\\n'.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-remote-read-unavailable-refused",
+      "criteria": ["AC13"],
+      "given": "git ls-remote exits with code 128 and prints nothing, as when authentication fails.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-unreadable-lookup-refused",
+      "criteria": ["AC13"],
+      "given": "gh pr list exits with code 1.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git ls-remote", "no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-changed-head-not-failed",
+      "criteria": ["AC13"],
+      "given": "HEAD is now dddddddddddddddddddddddddddddddddddddddd on topic/feature. The same input without the flag gives failed, as in publish-changed-head-fails.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git ls-remote", "no git push", "no gh pr create"]
+    },
+    {
+      "id": "recovery-body-changed-during-remote-read",
+      "criteria": ["AC13"],
+      "given": "While git ls-remote waits, /repo/.git/pdd/pr-prompt.md changes to 'Changed authored text\\nImplement selected feature\\n\\n<!-- pdd-workflow:run-123:prompt -->\\n'. The new text still satisfies the Marker rule. Then git ls-remote exits with code 2 and prints nothing.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git push", "no gh pr create", "no body file write"]
+    },
+    {
+      "id": "recovery-lost-push-never-creates",
+      "criteria": ["AC13"],
+      "given": "git ls-remote exits with code 2 and prints nothing. The branch then reaches origin, but the git push command port rejects with an error whose code is ETIMEDOUT. No PR row appears.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": true },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["git push runs exactly once", "no gh pr create"]
+    },
+    {
+      "id": "recovery-flag-string-refused",
+      "criteria": ["AC14"],
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": "true" },
+      "expected": { "state": "failed", "pr": null },
+      "effects": ["no command runs"]
+    },
+    {
+      "id": "recovery-flag-null-refused",
+      "criteria": ["AC14"],
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" }, "unpublishedOnly": null },
+      "expected": { "state": "failed", "pr": null },
+      "effects": ["no command runs"]
+    },
+    {
+      "id": "reconcile-never-reads-remote-branch",
+      "criteria": ["AC12"],
+      "given": "Both PR lookups return no rows.",
+      "input": { "cwd": "/repo", "intent": { "repository": "Acme/Project", "runId": "run-123", "stageId": "prompt", "headBranch": "topic/feature", "baseBranch": "main", "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "marker": "pdd-workflow:run-123:prompt", "title": "Implement selected feature", "bodyFile": "/repo/.git/pdd/pr-prompt.md" } },
+      "expected": { "state": "recovery_required", "pr": null },
+      "effects": ["no git ls-remote", "no git push", "no gh pr create"]
     }
   ]
 }

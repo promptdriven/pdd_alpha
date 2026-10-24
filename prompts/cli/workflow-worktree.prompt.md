@@ -10,7 +10,7 @@ Both functions resolve to `{ state, assignment, message }` and never reject. `as
 - `conflict`: the request is invalid, names another repository, or collides with a saved run, an issue claim, a branch or a path. No claim or worktree was added. Lookup never returns it.
 - `recovery_required`: the identity is missing, incomplete, changed, unreadable or uncertain. Inspect this same run. Never allocate again.
 
-Forbidden effects: any change to the person's checkout (switch, reset, stash, or its dirty and untracked files); releasing a claim; rewriting or deleting a record; removing, unlocking, repairing or pruning a worktree; a second add; a fetch; any network, GitHub or native agent call.
+Forbidden effects: any change to the person's checkout (switch, reset, stash, or its dirty and untracked files); releasing a claim; rewriting or deleting a record; removing, moving, unlocking, repairing or pruning a worktree; a second add; a fetch; any network, GitHub or native agent call.
 
 Preservation: behavioral refinement. Keep the exports, their binding kind and every observable rule here. Messages, private helpers, timeouts, buffer sizes and unstated check order may vary.
 
@@ -48,13 +48,17 @@ flowchart TD
 
 **Fresh identity.** A new allocation generates a lowercase UUIDv4 and derives its [names](#saved-records) from it. An existing branch with that name, or anything at the intended worktree path or Git directory (a symbolic link too), returns `conflict`. Never reuse the current worktree or adopt another worktree, branch or folder.
 
+**Worktree location.** A new worktree lives outside Git metadata, in the **worktree folder** `<parent>/<name>.pdd-worktrees`. Here `<parent>/<name>` is the canonical top level of the **primary checkout**, the first entry of `git worktree list`. That entry must be a non-bare checkout with the caller's common directory and origin repository, and must equal its own real top level. So every linked checkout uses the same folder. No part of the folder's path may be `.git`, in any letter case, because ordinary project loaders and test discovery must not treat issue source as Git metadata. Allocation creates a missing folder. A primary checkout that does not qualify, or a folder that is a symbolic link, not a folder or at another real path, falls under the failure rule, and nothing is written through it.
+
+**Saved worktree path.** A saved `worktreePath` must be `<worktree folder>/<UUID>`, with the folder derived again and present as an ordinary canonical folder, or the earlier layout `<commonDir>/pdd/worktrees/<UUID>`. The same version 1 record accepts both. Any other path returns `recovery_required` and is never adopted. New allocations use only the worktree folder. A saved run keeps its path and Git directory for life: verification checks them in place and never migrates or rebinds them.
+
 **Immutable run index.** Each run has its own record file, created exclusively and never rewritten. So parallel allocations for different issues all persist, without a shared index file to read and replace.
 
 **Durable intent before add.** Write the run record, and fsync the file and its folder. Then create the issue claim as a hard link to that file, and fsync the claim folder. The link is atomic, so it serializes a contested issue across processes and linked checkouts. Add only after both read back as one unchanged record. If another run linked the claim first, return `conflict` and keep this run's record. If another call created this run's record first, return `recovery_required`.
 
 **One add only.** Run `git worktree add -b <branch> <worktreePath> <baseSha>` from `sourceRoot` once in the life of a run. Whatever it returns, even a failure or no reply, verify next. The real matching state proves `ready` after a lost reply. No later call adds again, even when the worktree is missing.
 
-**Read-only verify.** Return `ready` only when every [identity check](#identity-checks) passes. Lookup runs only this step, from any checkout that shares the common directory. This step creates or changes no file or folder, not even `pdd`. It runs only the Git subcommands `rev-parse`, `remote get-url`, `symbolic-ref`, `merge-base` and `worktree list`. A partial record or a missing claim stays as found.
+**Read-only verify.** Return `ready` only when every [identity check](#identity-checks) passes. Lookup runs only this step, from any checkout that shares the common directory. This step creates or changes no file or folder, not even `pdd` or the worktree folder. It runs only the Git subcommands `rev-parse`, `remote get-url`, `symbolic-ref`, `merge-base` and `worktree list`. A partial record or a missing claim stays as found.
 
 **Later work and locks.** Later commits and dirty files in the worktree do not block `ready`. A protective lock with no reason, or with another reason, does not block it either. Git's `initializing` lock means that the checkout may be incomplete, even when the path, branch, HEAD and Git directory match. So that state stays `recovery_required` until the original add finishes.
 
@@ -62,13 +66,14 @@ flowchart TD
 <details>
 <summary><strong>Saved records: locations, branch name, fields and file forms</strong></summary>
 
-All items live under the common Git directory, so every linked checkout sees the same ones.
+The records and each worktree's Git directory, which holds the runner's journal, live under the common Git directory, so every linked checkout sees the same ones. The worktree follows the **Worktree location** rule.
 
 | Item | Location |
 | --- | --- |
 | Run record | `<commonDir>/pdd/worktree-assignments/runs/<runId>.json` |
 | Issue claim | `<commonDir>/pdd/worktree-assignments/issues/<issueNumber>.json` |
-| Worktree | `<commonDir>/pdd/worktrees/<UUID>` |
+| Worktree, new | `<worktree folder>/<UUID>` |
+| Worktree, earlier layout | `<commonDir>/pdd/worktrees/<UUID>` |
 | Its Git directory | `<commonDir>/worktrees/<UUID>` |
 | Branch | `pdd/<safeName>-<issueNumber>-<uuidShort>` |
 
@@ -78,7 +83,7 @@ The run record is one JSON object and a final newline. Its fields are exactly `v
 
 The claim is a hard link to the run record: one file with link count 2. The runner reads the claim to find the original `runId` of a claimed issue, so keep its location, content and link count.
 
-The metadata folders `pdd`, `pdd/worktree-assignments`, its `runs` and `issues`, and `pdd/worktrees` must be ordinary folders at canonical paths, never symbolic links. Allocation creates missing ones. A record is read only as an ordinary file with the expected link count, without following a symbolic link.
+The metadata folders `pdd`, `pdd/worktree-assignments` and its `runs` and `issues` must be ordinary folders at canonical paths, never symbolic links. Allocation creates missing ones. A record is read only as an ordinary file with the expected link count, without following a symbolic link.
 
 </details>
 
@@ -86,7 +91,7 @@ The metadata folders `pdd`, `pdd/worktree-assignments`, its `runs` and `issues`,
 <details>
 <summary><strong>Identity checks for a ready result</strong></summary>
 
-- The run record has exactly the fields above, with valid values. Its `runId`, `commonDir` and repository (ignoring case) match the request and the caller's checkout. Its `worktreePath`, `gitDir` and `branch` are the names derived from one UUID.
+- The run record has exactly the fields above, with valid values. Its `runId`, `commonDir` and repository (ignoring case) match the request and the caller's checkout. Its `worktreePath` passes the **Saved worktree path** rule, and its `worktreePath`, `gitDir` and `branch` are the names derived from one UUID.
 - The claim is the same file (same device and inode, link count 2) with equal content.
 - `sourceRoot` is still a checkout with the same common directory and origin repository.
 - `worktreePath`, `gitDir` and `<commonDir>/worktrees` are ordinary canonical folders, and `worktreePath/.git` is an ordinary file with link count 1.

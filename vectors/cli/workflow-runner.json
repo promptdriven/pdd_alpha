@@ -170,6 +170,87 @@
       "effects": ["no further push, no further PR create", "open-pr recorded with PR number 23", "no agent stage started"]
     },
     {
+      "id": "approve-pending-pr-originals-absent-publishes-once",
+      "criteria": ["AC13", "AC9"],
+      "given": "The open-pr intent of a small-change run was saved, but its push failed at an authentication prompt before it reached GitHub; that command returned recovery_required. The person has fixed authentication. GitHub shows no PR with the saved marker or head branch, and the saved remote head branch does not exist.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "wait-merge" },
+      "effects": [
+        "reconcileWorkflowPr runs first with the saved intent",
+        "a pr.unpublished_retry_intent journal row is appended before the push",
+        "publishWorkflowPr called once with the saved intent and unpublishedOnly true",
+        "the original PR lookups and the saved remote head branch are read freshly before the push",
+        "exactly one push and one PR create in this command",
+        "open-pr recorded with the saved intent unchanged and the saved head",
+        "no agent stage started"
+      ]
+    },
+    {
+      "id": "approve-pending-pr-original-present-refused",
+      "criteria": ["AC13", "AC7"],
+      "given": "As in approve-pending-pr-originals-absent-publishes-once, but one of these holds: the saved remote head branch exists; a PR that does not match the saved intent carries the saved marker; or a PR lookup or the remote head read fails.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "stage": "open-pr" },
+      "effects": ["a pr.unpublished_retry_intent row appended before the publishWorkflowPr call", "no push, no PR create", "the saved PR intent unchanged and still pending", "no agent stage started"]
+    },
+    {
+      "id": "no-decision-or-skip-on-pending-pr-only-reconciles",
+      "criteria": ["AC5", "AC6", "AC13"],
+      "given": "As in approve-pending-pr-originals-absent-publishes-once: authentication is fixed, and no original PR and no saved remote head branch exist.",
+      "input": [
+        { "call": "resumeWorkflow", "options": { "runId": "the run" } },
+        { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "skip" } }
+      ],
+      "expected": [
+        { "state": "recovery_required", "exitCode": 1, "stage": "open-pr" },
+        { "state": "recovery_required", "exitCode": 1, "stage": "open-pr" }
+      ],
+      "effects": [
+        "reconcileWorkflowPr runs in each command",
+        "publishWorkflowPr not called",
+        "no pr.unpublished_retry_intent row appended",
+        "no push, no PR create",
+        "the saved PR intent unchanged and still pending"
+      ]
+    },
+    {
+      "id": "lost-reply-during-attempt-stays-pending",
+      "criteria": ["AC13", "AC7"],
+      "given": "As in approve-pending-pr-originals-absent-publishes-once, but during the attempt the push and the PR create succeed (PR 23) and the create reply is lost.",
+      "input": [
+        { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+        { "call": "resumeWorkflow", "options": { "runId": "the run" } }
+      ],
+      "expected": [
+        { "state": "recovery_required", "exitCode": 1, "stage": "open-pr" },
+        { "state": "waiting", "exitCode": 2, "stage": "wait-merge" }
+      ],
+      "effects": [
+        "first resume: one push and one PR create; the saved intent stays pending",
+        "second resume: no push, no PR create; reconciliation records PR 23 for open-pr",
+        "no agent stage started"
+      ]
+    },
+    {
+      "id": "second-attempt-needs-new-approve",
+      "criteria": ["AC13"],
+      "given": "As in approve-pending-pr-originals-absent-publishes-once, but authentication was still broken, so the attempt's push failed before it reached GitHub and that resume returned recovery_required. The person then fixes authentication. No original PR and no saved remote head branch exist.",
+      "input": [
+        { "call": "resumeWorkflow", "options": { "runId": "the run" } },
+        { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } }
+      ],
+      "expected": [
+        { "state": "recovery_required", "exitCode": 1, "stage": "open-pr" },
+        { "state": "waiting", "exitCode": 2, "stage": "wait-merge" }
+      ],
+      "effects": [
+        "first resume: no push, no PR create, no new pr.unpublished_retry_intent row",
+        "second resume: a new pr.unpublished_retry_intent row, fresh absence reads, then one push and one PR create",
+        "the saved PR intent unchanged throughout",
+        "no agent stage started"
+      ]
+    },
+    {
       "id": "failing-pinned-test-refuses-verify",
       "criteria": ["AC8"],
       "given": "R1 waits at change. The change stage writes valid files with a wrong value; the pinned test argv exits 1.",
@@ -282,6 +363,35 @@
       "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
       "expected": { "state": "failed", "exitCode": 1, "runId": null },
       "effects": ["journal not repaired or rewritten", "no agent stage started"]
+    },
+    {
+      "id": "large-valid-journal-resumes",
+      "criteria": ["AC14"],
+      "given": "A project workflow with two optional report stages, first and second. The run waits at first with no saved choice. Its journal then holds many more complete, valid rows for the same run with gapless sequence numbers, so the file is larger than the longest string Node can hold.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "skip" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "second", "runId": "the run" },
+      "effects": [
+        "first recorded as skipped",
+        "no agent stage started",
+        "every earlier journal byte unchanged; new rows only appended after them",
+        "saved stage context unchanged"
+      ]
+    },
+    {
+      "id": "earlier-journal-row-invalid-refused",
+      "criteria": ["AC14", "AC12"],
+      "given": "R1's journal ends with a complete, valid last row and a final newline, but an earlier part is invalid: a malformed JSON line, a row whose sequence number is out of order, a row that names another run ID, or a whitespace-only line between two rows.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "runId": null },
+      "effects": ["journal not repaired or rewritten", "no agent stage started", "no push, no PR create"]
+    },
+    {
+      "id": "whitespace-after-last-row-accepted",
+      "criteria": ["AC14", "AC5"],
+      "given": "R1 waits at change with no pending work. An earlier journal row holds long multi-byte UTF-8 text, and whitespace-only lines follow the last row.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "change", "runId": "R1" },
+      "effects": ["no agent stage started", "journal not rewritten"]
     },
     {
       "id": "distinct-issues-run-independently",

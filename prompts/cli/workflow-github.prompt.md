@@ -10,8 +10,10 @@ branch as one pull request (PR), through the person's installed `git` and `gh`
 and normal login. Each call takes a checkout folder `cwd` and an issue
 selector, new intent fields or a saved intent. It returns an issue binding, a
 prepared intent, or an outcome with state `open`, `merged`, `closed`,
-`recovery_required` or `failed`. The runner owns the journal, locks, stage
-state, the durable save of each intent and the decision to publish.
+`recovery_required` or `failed`. Publish also takes an optional
+`unpublishedOnly` flag for one approved [recovery](#recovery-mode) attempt.
+The runner owns the journal, locks, stage state, the durable save of each
+intent and each decision to publish.
 
 Preservation: behavioral refinement. Keep the export names and binding kind,
 input fields, result shapes, states, refusal codes, write commands and effects
@@ -24,8 +26,8 @@ may vary. Callers other than the runner are not known.
   a shell, in the supplied `cwd` with the inherited environment unchanged.
 - Copy the input before the first await, so later changes to the caller's
   object do not change the call. Reason: the runner saved this exact intent.
-- Never launch an agent, fetch, switch accounts, copy credentials, merge, retry
-  a write or advance a workflow. Use only the `origin` remote.
+- Never launch an agent, fetch, switch accounts, copy credentials, merge,
+  retry a write on its own or advance a workflow. Use only the `origin` remote.
 - `resolveWorkflowIssue` and `prepareWorkflowPr` reject with an `Error` whose
   `message` and `code` are both `workflow_github_<reason>`, with the reasons
   named below. The error never contains command output, remote data or
@@ -133,14 +135,20 @@ flowchart TD
     L -->|No PR| C{Local source and push URL still match?}
     L -->|Not proved| R([recovery_required])
     C -->|No| F
-    C -->|Yes| W{Push, then create, both succeed?}
+    C -->|Yes| M{Recovery mode?}
+    M -->|No| W{Push, then create, both succeed?}
+    M -->|Yes| H{Remote branch absent and Recheck passes?}
+    H -->|No or unknown| R
+    H -->|Yes| W
     W -->|No or unknown| R
     W -->|Yes| B{Read-back finds one exact PR?}
     B -->|Yes| S
     B -->|No| R
 ```
 
-`publishWorkflowPr({ cwd, intent }, ports)` follows the whole figure.
+`publishWorkflowPr({ cwd, intent, unpublishedOnly }, ports)` follows the whole
+figure. "Recovery mode?" is Yes only when `unpublishedOnly` is `true`. That
+mode also changes some endings, as [Recovery mode](#recovery-mode) states.
 `reconcileWorkflowPr({ cwd, intent }, ports)` follows only the lookup: one
 exact PR gives its PR state, and every other answer, including an invalid
 intent or Repository check, gives `recovery_required`. Reconcile never returns
@@ -173,10 +181,43 @@ intent or Repository check, gives `recovery_required`. Reconcile never returns
   evidence. After both writes, return the result of the same lookup.
 - **No resend.** This module keeps no journal and cannot prove the caller's
   save. After `recovery_required`, the caller uses only `reconcileWorkflowPr`
-  with the same saved intent. A missing PR after an uncertain write is not
-  permission to publish again.
+  with the same saved intent, except for one [Recovery mode](#recovery-mode)
+  call per new approval. A missing PR alone is not permission to publish again.
 - Reconcile runs only Git and `gh` reads. It never reads or writes the body
   file, pushes, creates or merges.
+
+### Recovery mode
+
+`unpublishedOnly: true` asks to publish the same saved intent once more after
+an uncertain attempt, for example a push that failed at a login prompt. The
+runner sends it only after the person approves the same pending PR intent
+again. This module cannot check that approval, so the flag only adds checks.
+It is not evidence that the earlier writes failed.
+
+- **Flag.** A missing or `false` flag gives ordinary publication. A value that
+  is not a boolean, including `null`, gives `failed` before any command runs.
+- **Endings.** In this mode every refusal gives `recovery_required` with `pr`
+  `null`, never `failed`: that state says no write started, and the earlier
+  writes are unknown. A lookup that finds any PR, even an exact one, also gives
+  `recovery_required` with no remote read or write; read-only reconcile
+  reports that PR.
+- **Same intent.** Use the saved intent unchanged. It records no result of the
+  earlier push or create, so prove their absence and never infer it.
+- **Remote absence.** Only after both lookups find no PR and the Local source
+  still matches, run `git ls-remote --exit-code --refs origin
+  refs/heads/<headBranch>` once. Only exit code 2 with completely empty
+  `stdout` proves absence. Any other result gives `recovery_required`,
+  including a listed head at the saved `headSha`: it can be an earlier push
+  whose reply was lost.
+- **Recheck.** The remote read can wait, for example for a login. After it,
+  repeat the checkout checks, the HEAD match and the Repository check. The
+  body text and the push URL output must equal what this call read before.
+  Any difference gives `recovery_required`. The intent holds no body text or
+  digest, so this proves the current safe file and its marker, not the text
+  of the first attempt.
+- **One attempt.** Then the Writes, Uncertain writes and Read-back rules apply
+  once. These reads show what was absent before the push. They do not lock
+  out another writer.
 
 <details>
 <summary>Exact PR match, state mapping and outcome shape</summary>
@@ -256,6 +297,7 @@ not another authority or transport.
   body-file checks, I/O and worktree containment.
 - `git`, the person's installed Git — runtime: reads with
   `remote get-url`, `rev-parse`, `symbolic-ref`, `check-ref-format`, `status`,
-  `ls-files`, `rev-list` and `log`; the one write is `push` to `origin`.
+  `ls-files`, `rev-list` and `log`, and `ls-remote` in Recovery mode; the one
+  write is `push` to `origin`.
 - `gh`, the GitHub CLI with the person's login — runtime: reads with
   `repo view`, `api` and `pr list`; the one write is `pr create`.
