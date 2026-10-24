@@ -1,0 +1,299 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-runner.prompt.md",
+  "story": "story/cli/WORKFLOW-RUNNER.md",
+  "notes": "R1 names the run ID that the first case returns. Stand-in ports: the stage transport settles each prompted stage with a valid handoff unless a case says otherwise; GitHub resolves issue 17 in example/project with default branch main. Expected values come from the prompt, not from running the module.",
+  "cases": [
+    {
+      "id": "new-small-change-run-pauses-at-next-advance",
+      "criteria": ["AC1", "AC3", "AC6"],
+      "given": "Source checkout with one untracked file of the person's own. Bundled small-change definition. No run exists for issue 17.",
+      "input": { "call": "runWorkflow", "options": { "name": "small-change", "issue": "17", "agent": "claude" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "change", "runId": "a new UUIDv4 (R1)" },
+      "effects": [
+        "run snapshot with full guide bytes exists before allocateIssueWorktree is called",
+        "exactly one agent stage started (scope), with cwd equal to the assigned worktree",
+        "the scope stage is accepted and its backend closed once",
+        "source checkout files and git status unchanged",
+        "no push, no PR create"
+      ]
+    },
+    {
+      "id": "resume-without-decision-starts-nothing",
+      "criteria": ["AC5"],
+      "given": "R1 waits at change; no pending work.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "change", "runId": "R1" },
+      "effects": ["no agent stage started", "no test command run", "no push, no PR create"]
+    },
+    {
+      "id": "approve-runs-mandatory-stages-to-merge-wait",
+      "criteria": ["AC6", "AC8", "AC9"],
+      "given": "R1 waits at change. The change and verify stages write valid handoffs; the pinned test argv exits 0 and changes nothing.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "wait-merge", "runId": "R1" },
+      "effects": [
+        "the scope proposal is pinned before change starts",
+        "agent stages change and verify each started exactly once",
+        "the runner itself runs the pinned test argv once, without a shell",
+        "exactly one push and one PR create, after the PR intent is saved",
+        "no merge command"
+      ]
+    },
+    {
+      "id": "original-pr-merged-completes",
+      "criteria": ["AC1", "AC5", "AC9"],
+      "given": "R1 waits at wait-merge. GitHub shows the saved PR number and URL merged with the saved head and a 40-digit lowercase merge commit.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1" } },
+      "expected": { "state": "completed", "exitCode": 0, "stage": null, "runId": "R1" },
+      "effects": ["no merge command", "no agent stage started", "no push, no PR create"]
+    },
+    {
+      "id": "null-decision-is-not-absent",
+      "criteria": ["AC2"],
+      "given": "The same refusal applies to any decision other than approve or skip, such as reject.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "00000000-0000-4000-8000-000000000001", "decision": null } },
+      "expected": { "state": "failed", "exitCode": 1, "runId": null, "stage": null },
+      "effects": ["no file created or changed", "no worktree lookup", "no agent stage", "no GitHub call"]
+    },
+    {
+      "id": "unsupported-agent-refused-before-git",
+      "criteria": ["AC2"],
+      "input": { "call": "runWorkflow", "options": { "name": "small-change", "issue": "17", "agent": "gpt" } },
+      "expected": { "state": "failed", "exitCode": 1, "runId": null, "stage": null },
+      "effects": ["no Git or GitHub call", "no snapshot, worktree or journal created", "no agent stage"]
+    },
+    {
+      "id": "duplicate-run-returns-original",
+      "criteria": ["AC4"],
+      "given": "R1 (agent claude) waits at change with no pending work; its controller has exited.",
+      "input": { "call": "runWorkflow", "options": { "name": "small-change", "issue": "17", "agent": "codex" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "change", "runId": "R1" },
+      "effects": ["no agent stage started", "no second worktree", "R1 keeps agent claude"]
+    },
+    {
+      "id": "duplicate-run-while-original-controller-live",
+      "criteria": ["AC4", "AC12"],
+      "given": "The controller of R1 is still running its first stage.",
+      "input": { "call": "runWorkflow", "options": { "name": "small-change", "issue": "17", "agent": "codex" } },
+      "expected": { "state": "failed", "exitCode": 1, "runId": "R1" },
+      "effects": ["exactly one worktree add in total", "no second agent stage", "R1's pending attempt unchanged"]
+    },
+    {
+      "id": "unknown-run-id-creates-nothing",
+      "criteria": ["AC12"],
+      "given": "No run has ID 00000000-0000-4000-8000-000000000000; lookup reports recovery_required.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "00000000-0000-4000-8000-000000000000" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "runId": "00000000-0000-4000-8000-000000000000", "stage": null },
+      "effects": ["no journal directory created for that ID", "a later genuine run for issue 17 still starts"]
+    },
+    {
+      "id": "skip-of-mandatory-stage-refused",
+      "criteria": ["AC6"],
+      "given": "R1 waits at change; no pending work.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "skip" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "change", "runId": "R1" },
+      "effects": ["no agent stage started", "saved stage index unchanged"]
+    },
+    {
+      "id": "human-stage-waits-without-approve",
+      "criteria": ["AC5", "AC6"],
+      "given": "A feature run waits at the human stage approve with a recorded proposal (prompt, Story, cases and test argv).",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the feature run" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "approve" },
+      "effects": ["no proposal pinned", "no agent stage started"]
+    },
+    {
+      "id": "saved-skip-survives-interruption",
+      "criteria": ["AC6"],
+      "given": "A feature run at the optional PR stage prompt-pr. The journal ends right after the saved skip choice for prompt-pr. The build stage transport reports blocked.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the feature run", "decision": "approve" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "build" },
+      "effects": [
+        "prompt-pr recorded as skipped",
+        "prompt-merge recorded as skipped",
+        "no push, no PR create",
+        "build has no merge-ancestry requirement because its merge was skipped"
+      ]
+    },
+    {
+      "id": "saved-approve-cannot-become-skip",
+      "criteria": ["AC6"],
+      "given": "A feature run at the optional stage visual. A saved approve choice exists for visual, with the current fingerprint, and no attempt was saved.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the feature run", "decision": "skip" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "visual" },
+      "effects": ["visual not recorded as skipped", "no agent stage started"]
+    },
+    {
+      "id": "uncertain-delivery-never-relaunched",
+      "criteria": ["AC7"],
+      "given": "The scope delivery returned recovery_required after a prompt_intent checkpoint; the run returned recovery_required. Inspection still reports recovery_required.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "stage": "scope" },
+      "effects": ["runHerdrStage not called again", "inspectHerdrStage called with the original attempt ID", "no new attempt ID saved"]
+    },
+    {
+      "id": "unsent-first-dispatch-continues-same-attempt",
+      "criteria": ["AC7"],
+      "given": "The scope attempt is saved in phase start_intent; agent setup blocked before the first prompt. The person finished setup, and the same agent is now ready.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "change" },
+      "effects": [
+        "runHerdrStage called with the saved attempt ID, context, request bytes and backend",
+        "exactly one prompt delivered for scope in total",
+        "the accepted scope backend keeps the original terminal identity",
+        "change not started, because the next-advance proposal was recorded in this command"
+      ]
+    },
+    {
+      "id": "changed-first-dispatch-request-refused",
+      "criteria": ["AC7"],
+      "given": "The scope attempt is saved in phase start_intent, but its saved request bytes no longer give the saved prompt digest.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "scope" },
+      "effects": ["no transport call"]
+    },
+    {
+      "id": "uncertain-cleanup-never-repeated",
+      "criteria": ["AC7"],
+      "given": "The scope stage is accepted; the close reply was lost and the backend phase is close_intent.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "stage": "scope" },
+      "effects": ["closeHerdrStage not called again", "no prompt sent", "the saved acceptance is kept"]
+    },
+    {
+      "id": "lost-pr-reply-reconciled-without-resend",
+      "criteria": ["AC5", "AC7", "AC9"],
+      "given": "The open-pr intent was saved, push succeeded and PR 23 was created, but the create reply was lost; that command returned recovery_required.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "wait-merge" },
+      "effects": ["no further push, no further PR create", "open-pr recorded with PR number 23", "no agent stage started"]
+    },
+    {
+      "id": "failing-pinned-test-refuses-verify",
+      "criteria": ["AC8"],
+      "given": "R1 waits at change. The change stage writes valid files with a wrong value; the pinned test argv exits 1.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "verify" },
+      "effects": ["test results with a nonzero exit code are saved", "verify not accepted or closed", "no push, no PR create"]
+    },
+    {
+      "id": "test-that-changes-its-input-refused",
+      "criteria": ["AC8"],
+      "given": "R1 waits at change. The pinned test exits 0 but rewrites a tracked source file.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "verify" },
+      "effects": ["verify not accepted or closed", "no push, no PR create"]
+    },
+    {
+      "id": "work-stage-changes-pinned-cases",
+      "criteria": ["AC8"],
+      "given": "R1 waits at change. The change stage also edits the pinned cases file.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "change" },
+      "effects": ["change not accepted", "verify not started"]
+    },
+    {
+      "id": "manual-worktree-change-refused",
+      "criteria": ["AC8"],
+      "given": "R1 waits at change. The person edits a tracked file in the assigned worktree.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "change" },
+      "effects": ["no agent stage started", "saved input unchanged"]
+    },
+    {
+      "id": "verified-pr-refuses-later-change",
+      "criteria": ["AC9"],
+      "given": "A project workflow with a report stage after verify and before a verified PR stage. Verify passed; the report stage then committed a source change.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "the verified PR stage" },
+      "effects": ["no push, no PR create", "the earlier verify results stay saved"]
+    },
+    {
+      "id": "replacement-pr-not-accepted",
+      "criteria": ["AC9"],
+      "given": "R1 waits at wait-merge with PR 23 saved. GitHub now shows PR 24 with the same marker, branch, base and head, merged.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "stage": "wait-merge", "runId": "R1" },
+      "effects": ["wait-merge not recorded", "no merge command"]
+    },
+    {
+      "id": "closed-unmerged-pr-fails",
+      "criteria": ["AC9"],
+      "given": "R1 waits at wait-merge. GitHub shows the saved PR 23 closed without merge.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1" } },
+      "expected": { "state": "failed", "exitCode": 1, "stage": "wait-merge", "runId": "R1" },
+      "effects": ["wait-merge not recorded", "no push, no PR create, no merge command"]
+    },
+    {
+      "id": "merged-revision-missing-waits",
+      "criteria": ["AC10"],
+      "given": "A feature run recorded the prompt-merge commit. The assigned branch does not contain that commit, and the worktree is unchanged.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the feature run", "decision": "approve" } },
+      "expected": { "state": "waiting", "exitCode": 2, "stage": "build" },
+      "effects": ["no agent stage started", "no checkout, reset or rebase"]
+    },
+    {
+      "id": "pending-attempt-blocks-merged-transition",
+      "criteria": ["AC10", "AC7"],
+      "given": "A feature run has an uncertain build attempt after prompt-merge was recorded. The person then commits a new change on the assigned branch.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the feature run", "decision": "approve" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "stage": "build" },
+      "effects": ["saved input fingerprint unchanged", "no merged-base transition recorded", "no agent stage started"]
+    },
+    {
+      "id": "attachment-invalidates-earlier-candidate",
+      "criteria": ["AC11"],
+      "given": "The scope agent settled while the person was attached; the controller returned waiting without acceptance. The person has detached.",
+      "input": [
+        { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+        { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } }
+      ],
+      "expected": [
+        { "state": "waiting", "exitCode": 2, "stage": "scope" },
+        { "state": "waiting", "exitCode": 2, "stage": "change" }
+      ],
+      "effects": [
+        "first resume: candidate dropped, no close",
+        "second resume: the same attempt validated afresh and closed once",
+        "one agent stage started in total"
+      ]
+    },
+    {
+      "id": "attach-with-no-live-stage",
+      "criteria": ["AC11"],
+      "given": "R1 waits at change; the scope backend is closed and no attempt is pending.",
+      "input": { "call": "attachWorkflow", "options": { "runId": "R1" } },
+      "expected": { "state": "waiting", "exitCode": 2, "runId": "R1", "stage": "change" },
+      "effects": ["attachHerdrStage not called", "no conversation started", "attachment epoch unchanged"]
+    },
+    {
+      "id": "edited-recipe-refused",
+      "criteria": ["AC12"],
+      "given": "A project workflow run waits at its work stage. The person then edits that stage's Markdown in the source checkout.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "the run", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1 },
+      "effects": ["no agent stage started", "saved stage context still holds the original Markdown"]
+    },
+    {
+      "id": "torn-journal-refused",
+      "criteria": ["AC12"],
+      "given": "R1's journal ends with a partial row and no final newline.",
+      "input": { "call": "resumeWorkflow", "options": { "runId": "R1", "decision": "approve" } },
+      "expected": { "state": "failed", "exitCode": 1, "runId": null },
+      "effects": ["journal not repaired or rewritten", "no agent stage started"]
+    },
+    {
+      "id": "distinct-issues-run-independently",
+      "criteria": ["AC12", "AC7"],
+      "given": "Issues 21 to 25 each start a small-change run; each first stage delivery returns recovery_required.",
+      "input": { "call": "runWorkflow", "options": { "name": "small-change", "issue": "21 to 25, one call each", "agent": "codex" } },
+      "expected": { "state": "recovery_required", "exitCode": 1, "stage": "scope" },
+      "effects": [
+        "five distinct run IDs and five distinct worktrees",
+        "no repository admission directory created",
+        "resuming one of them, with or without approve, starts no stage"
+      ]
+    }
+  ]
+}

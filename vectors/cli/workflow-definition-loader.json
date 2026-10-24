@@ -1,0 +1,514 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-definition-loader.prompt.md",
+  "story": "story/cli/WORKFLOW-DEFINITION-LOADER.md",
+  "cases": [
+    {
+      "id": "bundled-definition-loads",
+      "criteria": ["AC1", "AC3", "AC5", "AC7", "AC9"],
+      "given": "Base definition B: workflow.json is { version 1, name 'label-fix', overview 'WORKFLOW.md', stages: 'agree' (agent, protocol proposal, requiredRoles ['cases'], approval next-advance, file agree.md); 'change' (agent, protocol work, file change.md); 'check' (agent, protocol verify, file check.md); 'open' (pr, publication verified, file open.md); 'wait' (merge, prStage 'open', file wait.md) }. Every declared Markdown file exists as an ordinary short UTF-8 file. B is in <package>/.pdd/workflows/label-fix/. The project <project> has no .pdd folder. Both roots are canonical real directories.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "name": "label-fix",
+        "version": 1,
+        "root": "<package>/.pdd/workflows/label-fix",
+        "stages[].id": ["agree", "change", "check", "open", "wait"],
+        "stages[].kind": ["agent", "agent", "agent", "pr", "merge"],
+        "stages[].optional": [false, false, false, false, false],
+        "stages[1].requiredRoles": [],
+        "stages[0].requiredRoles": ["cases"],
+        "stages[3] has requiredRoles": false,
+        "files[].path": ["agree.md", "change.md", "check.md", "open.md", "wait.md", "workflow.json", "WORKFLOW.md"],
+        "digest": "64 lowercase hexadecimal characters",
+        "frozen": "the result and every nested object and array; an assignment or push in strict-mode code throws TypeError and changes nothing"
+      },
+      "effects": ["no file written in either root", "no child process", "no network access"]
+    },
+    {
+      "id": "project-override-wins",
+      "criteria": ["AC1", "AC8"],
+      "given": "Base definition B in the package. A complete valid copy of B in <project>/.pdd/workflows/label-fix/, where change.md holds 'Project change rules.' and a line feed.",
+      "input": [
+        {
+          "call": "loadWorkflowDefinition",
+          "name": "label-fix",
+          "cwd": "<project>",
+          "packageRoot": "<package>"
+        },
+        {
+          "call": "listWorkflowDefinitions",
+          "cwd": "<project>",
+          "packageRoot": "<package>"
+        }
+      ],
+      "expected": {
+        "load.root": "<project>/.pdd/workflows/label-fix",
+        "load.files[path=change.md].content": "Project change rules.\n",
+        "load.files[path=change.md].sha256": "d08b7aba2347990dc5dd5fd4e854b1c5ec9af90081c2f3e9dff47fe04debb6ea",
+        "list": [
+          { "name": "label-fix", "source": "project" }
+        ]
+      },
+      "effects": ["no bundled file content in the snapshot"]
+    },
+    {
+      "id": "project-without-workflows-folder-uses-bundled",
+      "criteria": ["AC1"],
+      "given": "Base definition B in the package. <project>/.pdd is a real directory with no workflows folder.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "root": "<package>/.pdd/workflows/label-fix"
+      }
+    },
+    {
+      "id": "symbolic-link-root-is-resolved",
+      "criteria": ["AC1", "AC6"],
+      "given": "<link> is a symbolic link to the real project directory <project>, which holds a valid copy of B in .pdd/workflows/label-fix/. The package also has B.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<link>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "root": "<project>/.pdd/workflows/label-fix"
+      }
+    },
+    {
+      "id": "unknown-name-refused",
+      "criteria": ["AC1"],
+      "given": "Base definition B in the package. Neither root has a 'team-review' entry.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "team-review",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "invalid-project-entry-never-falls-back",
+      "criteria": ["AC2", "AC6"],
+      "given": "Base definition B in the package. Each variant puts a different entry at <project>/.pdd/workflows/label-fix and is loaded in its own call.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": [
+          "an empty real directory (no workflow.json)",
+          "a real directory whose workflow.json is the text '{'",
+          "a copy of B without check.md",
+          "a regular file instead of a directory",
+          "a symbolic link to the bundled <package>/.pdd/workflows/label-fix"
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      },
+      "effects": ["no snapshot returned", "the bundled definition is not used"]
+    },
+    {
+      "id": "name-of-64-characters-loads",
+      "criteria": ["AC4"],
+      "given": "A copy of B in the package whose folder name and JSON name are both N, where N is 'a' followed by 63 'b' characters (64 characters).",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "N (64 characters)",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "name": "N (64 characters)",
+        "version": 1
+      }
+    },
+    {
+      "id": "invalid-requested-names-refused",
+      "criteria": ["AC4", "AC9"],
+      "given": "Each name is tried in its own call. Read access to both roots is observed.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "name variants": [
+          "../outside",
+          "/absolute",
+          "Bad",
+          "bad_name",
+          "a--b",
+          "a-",
+          "1abc",
+          "",
+          "a followed by 64 'b' characters (65 characters)",
+          null
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      },
+      "effects": ["no file read in either root"]
+    },
+    {
+      "id": "closed-top-level-refusals",
+      "criteria": ["AC5"],
+      "given": "Each variant changes B, or the 'notes-only' definition of case sixty-four-report-stages-load, and is put in the project with all declared Markdown present. Each is loaded in its own call.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": [
+          "add top-level field \"secret\": true",
+          "set version to 2",
+          "set JSON name to 'other-name'",
+          "remove overview",
+          "set stages to an empty array",
+          "make workflow.json a JSON array",
+          "notes-only: add a 65th report stage 'r65'"
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "null-field-refused",
+      "criteria": ["AC5"],
+      "given": "B in the project, with \"requiredRoles\": null on the 'change' work stage.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "stage-field-refusals",
+      "criteria": ["AC5", "AC9"],
+      "given": "Each variant changes one stage of B in the project. Each is loaded in its own call.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": [
+          "add \"argv\": [\"sh\", \"-c\", \"touch ran\"] to 'change'",
+          "set 'change' kind to 'shell'",
+          "set 'change' optional to the string 'false'",
+          "add \"approval\": \"human\" to 'change'",
+          "add \"publication\": \"verified\" to 'change'",
+          "set 'agree' requiredRoles to ['cases', 'cases']",
+          "set 'agree' requiredRoles to ['design']",
+          "set 'agree' approval to 'implicit'",
+          "give 'check' the id 'change' (duplicate)",
+          "give 'check' the id 'Check'"
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      },
+      "effects": ["no command runs", "no file named ran is created"]
+    },
+    {
+      "id": "sixty-four-report-stages-load",
+      "criteria": ["AC5", "AC7"],
+      "given": "Package definition 'notes-only': overview WORKFLOW.md and 64 agent stages 'r1' to 'r64', each with protocol report and file step.md. There is no proposal.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "notes-only",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "stages.length": 64,
+        "files[].path": ["step.md", "workflow.json", "WORKFLOW.md"]
+      }
+    },
+    {
+      "id": "optional-true-refused-on-fixed-stages",
+      "criteria": ["AC5", "AC7"],
+      "given": "Each variant sets optional to true on one stage of B, loaded in its own call. For the human variant, 'agree' uses approval human and a human stage 'accept' follows it.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": ["verify stage 'check'", "proposal stage 'agree'", "merge stage 'wait'", "human stage 'accept'"]
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "proposal-and-human-order-refused",
+      "criteria": ["AC7"],
+      "given": "Each variant changes B and is loaded in its own call.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": [
+          "add a second proposal stage 'agree-again' after 'agree'",
+          "remove requiredRoles from 'agree'",
+          "insert a human stage 'accept' after 'agree' while approval stays next-advance",
+          "set 'agree' approval to human and add no human stage",
+          "set 'agree' approval to human and insert human stage 'accept' after 'change'",
+          "set 'agree' approval to human, insert 'accept' after 'agree' and a second human stage 'accept-again' after 'accept'",
+          "move 'change' before 'agree'"
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "verified-pr-after-later-work-refused",
+      "criteria": ["AC7"],
+      "given": "B with an extra work stage 'polish' (file polish.md) between 'check' and 'open'. A second variant makes 'polish' optional.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": ["polish required", "polish optional"]
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "later-verify-restores-verified-pr",
+      "criteria": ["AC7"],
+      "given": "B with work stage 'polish' and then verify stage 'recheck' (file recheck.md) between 'check' and 'open'.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "stages[].id": ["agree", "change", "check", "polish", "recheck", "open", "wait"]
+      }
+    },
+    {
+      "id": "report-after-verify-passes-order-check",
+      "criteria": ["AC7"],
+      "given": "B with a report stage 'summarize' (file summarize.md, requiredRoles ['notes']) between 'check' and 'open'. The runner, not the loader, refuses stale verification at run time.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "stages[4].id": "open",
+        "stages[4].publication": "verified"
+      }
+    },
+    {
+      "id": "proposal-pr-with-merge-dependency-loads",
+      "criteria": ["AC5", "AC7"],
+      "given": "Project definition 'full-change': 'agree' (proposal, requiredRoles ['prompt', 'story', 'cases'], approval human); 'accept' (human); 'contract-pr' (pr, publication proposal, optional true); 'contract-merge' (merge, prStage 'contract-pr', optional false); 'change' (work, requiresMerge 'contract-merge'); 'check' (verify); 'open' (pr, publication verified, requiresMerge 'contract-merge'); 'wait' (merge, prStage 'open'). Each stage file is '<id>.md'.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "full-change",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "stages[1].kind": "human",
+        "stages[2].optional": true,
+        "stages[3].optional": false,
+        "stages[4].requiresMerge": "contract-merge",
+        "stages[6].requiresMerge": "contract-merge"
+      }
+    },
+    {
+      "id": "merge-and-dependency-references-refused",
+      "criteria": ["AC7"],
+      "given": "Each variant changes B or 'full-change' and is loaded in its own call.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": [
+          "B: add a second merge 'wait-again' with prStage 'open'",
+          "B: set 'wait' prStage to 'change'",
+          "B: move 'wait' before 'open'",
+          "B: remove prStage from 'wait'",
+          "B: set 'change' requiresMerge to 'wait' (a later merge)",
+          "B: set 'change' requiresMerge to 'check' (not a merge)",
+          "full-change: add requiresMerge 'contract-merge' to verify stage 'check'",
+          "full-change: insert report stage 'review' after 'contract-merge' with requiresMerge 'contract-merge'"
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "unsafe-instruction-paths-refused",
+      "criteria": ["AC6", "AC9"],
+      "given": "Each variant sets the 'change' file of B in the project to one value, loaded in its own call. A file exists wherever the path could resolve.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "file variants": [
+          "../outside.md",
+          "/absolute.md",
+          "steps/../change.md",
+          "steps\\change.md",
+          ".git/config.md",
+          "./change.md",
+          "steps//change.md",
+          "change.txt",
+          "change.MD",
+          ""
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      },
+      "effects": ["no file outside the workflow directory is read"]
+    },
+    {
+      "id": "unsafe-files-refused",
+      "criteria": ["AC6"],
+      "given": "Each variant changes one file of B in the project, loaded in its own call.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": [
+          "change.md is a symbolic link to a regular file in the package",
+          "change.md has a second hard link alias.md in the same directory",
+          "change.md is 262,145 bytes",
+          "change.md holds the bytes FF FE 41, which are not valid UTF-8",
+          "the 'change' file is steps/change.md, and steps is a symbolic link to a real directory"
+        ]
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "file-of-exactly-256-kib-loads",
+      "criteria": ["AC6"],
+      "given": "B in the project, where change.md is exactly 262,144 bytes of ASCII text.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "files[path=change.md].content length": 262144
+      }
+    },
+    {
+      "id": "snapshot-over-2-mib-refused",
+      "criteria": ["AC6"],
+      "given": "Project definition 'big-notes' with 9 report stages 'r1' to 'r9' and files r1.md to r9.md. Each file is exactly 262,144 bytes, so the files total more than 2,097,152 bytes.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "big-notes",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expectedError": {
+        "thrown": true
+      }
+    },
+    {
+      "id": "digest-follows-bytes-not-location",
+      "criteria": ["AC3"],
+      "given": "Step 1: B only in the package; load it as L1. Step 2: load again as L2 with no change. Step 3: copy B byte for byte into the project; load as L3. Step 4: change one ASCII letter in the project change.md; load as L4.",
+      "input": {
+        "call": "loadWorkflowDefinition",
+        "name": "label-fix",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": {
+        "L2 deeply equals L1": true,
+        "L3.digest equals L1.digest": true,
+        "L3.root equals L1.root": false,
+        "L4.digest equals L3.digest": false,
+        "L3.files[path=change.md].content after step 4": "unchanged"
+      }
+    },
+    {
+      "id": "list-union-sorted-with-source",
+      "criteria": ["AC8"],
+      "given": "The package has valid definitions 'zeta' and 'label-fix'. The project has valid definitions 'alpha' and 'zeta'.",
+      "input": {
+        "call": "listWorkflowDefinitions",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": [
+        { "name": "alpha", "source": "project" },
+        { "name": "label-fix", "source": "bundled" },
+        { "name": "zeta", "source": "project" }
+      ]
+    },
+    {
+      "id": "list-ignores-non-candidates",
+      "criteria": ["AC8"],
+      "given": "The package has valid B. The project .pdd/workflows holds a regular file README.md, a directory Bad_Name and a directory .cache, each with arbitrary content.",
+      "input": {
+        "call": "listWorkflowDefinitions",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": [
+        { "name": "label-fix", "source": "bundled" }
+      ]
+    },
+    {
+      "id": "list-empty-without-workflow-folders",
+      "criteria": ["AC8"],
+      "given": "Neither root has a .pdd folder.",
+      "input": {
+        "call": "listWorkflowDefinitions",
+        "cwd": "<project>",
+        "packageRoot": "<package>"
+      },
+      "expected": []
+    },
+    {
+      "id": "list-refuses-when-one-candidate-is-invalid",
+      "criteria": ["AC2", "AC8"],
+      "given": "The package has valid B. The project has directory 'team-review' whose workflow.json is malformed. A second variant instead has a symbolic link 'team-review' to a valid definition elsewhere.",
+      "input": {
+        "call": "listWorkflowDefinitions",
+        "cwd": "<project>",
+        "packageRoot": "<package>",
+        "variants": ["malformed directory", "symbolic link"]
+      },
+      "expectedError": {
+        "thrown": true
+      },
+      "effects": ["no partial list is returned"]
+    }
+  ]
+}

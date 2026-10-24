@@ -1,0 +1,179 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-list.prompt.md",
+  "story": "story/cli/WORKFLOW-LIST.md",
+  "cases": [
+    {
+      "id": "json-definition-catalog",
+      "criteria": ["AC1"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "feature", "source": "bundled" }, { "name": "team-review", "source": "project" }], "default": null }, { "json": true }] },
+      "expected": { "parsedOutput": { "workflows": [{ "name": "feature", "source": "bundled" }, { "name": "team-review", "source": "project" }], "default": null } }
+    },
+    {
+      "id": "json-keeps-supplied-order",
+      "criteria": ["AC1"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "zeta", "source": "project" }, { "name": "alpha", "source": "bundled" }], "default": null }, { "json": true }] },
+      "expected": { "parsedOutput": { "workflows": [{ "name": "zeta", "source": "project" }, { "name": "alpha", "source": "bundled" }], "default": null } }
+    },
+    {
+      "id": "json-empty-catalog",
+      "criteria": ["AC1"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [], "default": null }, { "json": true }] },
+      "expected": { "parsedOutput": { "workflows": [], "default": null } }
+    },
+    {
+      "id": "json-legacy-entries",
+      "criteria": ["AC1"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "bug", "file": ".pdd/workflows/bug/WORKFLOW.md" }], "default": null }, { "json": true }] },
+      "expected": { "parsedOutput": { "workflows": [{ "name": "bug", "file": ".pdd/workflows/bug/WORKFLOW.md" }], "default": null } }
+    },
+    {
+      "id": "human-definition-entries",
+      "criteria": ["AC2", "AC3"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "feature", "source": "bundled" }, { "name": "team-review", "source": "project" }], "default": null }, { "json": false }] },
+      "expected": {
+        "lineCount": 3,
+        "lines": [
+          { "includes": ["feature", "bundled"] },
+          { "includes": ["team-review", "project"] },
+          { "states": "listing starts no work", "includes": ["pdd workflow run NAME ISSUE"] }
+        ]
+      }
+    },
+    {
+      "id": "human-file-shown-for-legacy-entry",
+      "criteria": ["AC2"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "bug", "file": ".pdd/workflows/bug/WORKFLOW.md" }], "default": null }, { "json": false }] },
+      "expected": { "lineCount": 2, "lines": [{ "includes": ["bug", ".pdd/workflows/bug/WORKFLOW.md"] }, { "states": "listing starts no work" }] }
+    },
+    {
+      "id": "human-keeps-supplied-order",
+      "criteria": ["AC2"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "zeta", "source": "project" }, { "name": "alpha", "source": "bundled" }], "default": null }, { "json": false }] },
+      "expected": { "lineCount": 3, "lines": [{ "includes": ["zeta"] }, { "includes": ["alpha"] }, { "states": "listing starts no work" }] }
+    },
+    {
+      "id": "human-empty-catalog",
+      "criteria": ["AC3"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [], "default": null }, { "json": false }] },
+      "expected": { "lineCount": 2, "lines": [{ "states": "no workflow definitions found" }, { "states": "listing starts no work", "includes": ["pdd workflow run NAME ISSUE"] }] }
+    },
+    {
+      "id": "human-when-options-omitted",
+      "criteria": ["AC2"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "feature", "source": "bundled" }], "default": null }] },
+      "expected": { "isJson": false, "lineCount": 2, "lines": [{ "includes": ["feature", "bundled"] }, { "states": "listing starts no work" }] }
+    },
+    {
+      "id": "formatter-no-trailing-newline-no-effects",
+      "criteria": ["AC4"],
+      "input": { "call": "formatLocalWorkflows", "args": [{ "workflows": [{ "name": "feature", "source": "bundled" }], "default": null }, { "json": true }] },
+      "expected": { "endsWithNewline": false },
+      "effects": ["no filesystem access", "no child process"]
+    },
+    {
+      "id": "legacy-absent-metadata-folder",
+      "criteria": ["AC6"],
+      "given": "The cwd folder has no .pdd entry.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [], "default": null },
+      "effects": ["no .pdd folder is created"]
+    },
+    {
+      "id": "legacy-sorted-entries",
+      "criteria": ["AC5"],
+      "given": "POSIX paths. Folders .pdd/workflows/small-change and .pdd/workflows/bug each hold a regular WORKFLOW.md.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [{ "name": "bug", "file": ".pdd/workflows/bug/WORKFLOW.md" }, { "name": "small-change", "file": ".pdd/workflows/small-change/WORKFLOW.md" }], "default": null }
+    },
+    {
+      "id": "legacy-metadata-is-a-file",
+      "criteria": ["AC6"],
+      "given": "<project>/.pdd is a regular file.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [], "default": null }
+    },
+    {
+      "id": "legacy-workflows-folder-is-symlink",
+      "criteria": ["AC6"],
+      "given": "<project>/.pdd/workflows is a symbolic link to an outside folder that holds bug/WORKFLOW.md.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [], "default": null },
+      "effects": ["the outside folder is not listed"]
+    },
+    {
+      "id": "legacy-symlink-recipe-folder-skipped",
+      "criteria": ["AC7"],
+      "given": "POSIX paths. .pdd/workflows/bug is a real folder with a regular WORKFLOW.md. .pdd/workflows/linked is a symbolic link to an outside folder with a regular WORKFLOW.md.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [{ "name": "bug", "file": ".pdd/workflows/bug/WORKFLOW.md" }], "default": null }
+    },
+    {
+      "id": "legacy-workflow-md-must-be-regular-file",
+      "criteria": ["AC7"],
+      "given": "POSIX paths. In .pdd/workflows: good/WORKFLOW.md is a regular file; empty/ has no WORKFLOW.md; linkfile/WORKFLOW.md is a symbolic link to a regular file; dirfile/WORKFLOW.md is a folder.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [{ "name": "good", "file": ".pdd/workflows/good/WORKFLOW.md" }], "default": null }
+    },
+    {
+      "id": "legacy-name-rule-boundaries",
+      "criteria": ["AC5", "AC7"],
+      "given": "POSIX paths. Each folder below holds a regular WORKFLOW.md: 9lives, a.b_c-1, a name of 64 letters a, a name of 65 letters a, Upper, .hidden, -dash, _under.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": {
+        "workflows": [
+          { "name": "9lives", "file": ".pdd/workflows/9lives/WORKFLOW.md" },
+          { "name": "a.b_c-1", "file": ".pdd/workflows/a.b_c-1/WORKFLOW.md" },
+          { "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "file": ".pdd/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/WORKFLOW.md" }
+        ],
+        "default": null
+      }
+    },
+    {
+      "id": "legacy-permission-error-on-workflows-folder",
+      "criteria": ["AC8"],
+      "given": "The stat port succeeds for <project>/.pdd as a real directory and throws an error with code EACCES for <project>/.pdd/workflows.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>", "stat": "<port described in given>" }] },
+      "expectedError": { "code": "EACCES" },
+      "effects": ["no catalog is returned"]
+    },
+    {
+      "id": "legacy-read-error-propagates",
+      "criteria": ["AC8"],
+      "given": "The stat port reports .pdd and .pdd/workflows as real directories. The readDir port throws an error with code EIO.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>", "stat": "<port described in given>", "readDir": "<port described in given>" }] },
+      "expectedError": { "code": "EIO" }
+    },
+    {
+      "id": "legacy-recipe-file-error-no-partial-catalog",
+      "criteria": ["AC8"],
+      "given": "Folders bug and feature are real directories. The stat port reports bug/WORKFLOW.md as a regular file and throws an error with code EACCES for feature/WORKFLOW.md.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>", "stat": "<port described in given>", "readDir": "<port described in given>" }] },
+      "expectedError": { "code": "EACCES" },
+      "effects": ["no catalog that lists only bug is returned"]
+    },
+    {
+      "id": "legacy-reads-metadata-only",
+      "criteria": ["AC9"],
+      "given": "POSIX paths. .pdd/workflows/bug/WORKFLOW.md is a regular file.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [{ "name": "bug", "file": ".pdd/workflows/bug/WORKFLOW.md" }], "default": null },
+      "effects": ["WORKFLOW.md content is not read", "no file or folder is created", "no child process"]
+    },
+    {
+      "id": "legacy-lists-markdown-only-folder",
+      "criteria": ["AC5", "AC9"],
+      "given": "POSIX paths. .pdd/workflows/notes holds only a regular WORKFLOW.md and no workflow.json.",
+      "input": { "call": "listLocalWorkflows", "args": [{ "cwd": "<project>" }] },
+      "expected": { "workflows": [{ "name": "notes", "file": ".pdd/workflows/notes/WORKFLOW.md" }], "default": null }
+    },
+    {
+      "id": "workflow-list-has-no-legacy-fallback",
+      "criteria": ["AC9"],
+      "given": "The same project as legacy-lists-markdown-only-folder. The CLI runs in that project.",
+      "input": ["workflow", "list", "--json"],
+      "expectedError": { "exitCode": 1 },
+      "effects": ["no stdout output", "notes is not reported as a runnable definition", "legacy Markdown discovery is not used as a fallback"]
+    }
+  ]
+}

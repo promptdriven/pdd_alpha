@@ -1,0 +1,338 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/workflow-worktree.prompt.md",
+  "story": "story/cli/WORKFLOW-WORKTREE.md",
+  "given": "Shared starting state; each case's own given lists only the differences. /repo is the top level of an ordinary checkout and its own canonical real path. Its common Git directory is /repo/.git. origin is https://github.com/Acme/Project.git. The current branch is main, and local branch main is at commit 1111111111111111111111111111111111111111 (M). The folder /repo/.git/pdd does not exist. <UUID> stands for the lowercase UUIDv4 that the call generates, and <uuidShort> for its first 8 characters. The default command port runs real Git unless a case says otherwise. 'Saved run X' means an earlier allocation of run X returned ready and nothing changed after it.",
+  "cases": [
+    {
+      "id": "new-allocation-ready",
+      "criteria": ["AC1", "AC2", "AC5"],
+      "given": "/repo has a modified tracked file source.txt and an untracked file notes.txt.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 101, "runId": "run-101", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "version": 1, "runId": "run-101", "repository": "Acme/Project", "issueNumber": 101, "workflowName": "feature", "commonDir": "/repo/.git", "sourceRoot": "/repo", "worktreePath": "/repo/.git/pdd/worktrees/<UUID>", "gitDir": "/repo/.git/worktrees/<UUID>", "branch": "pdd/feature-101-<uuidShort>", "baseRef": "main", "baseSha": "1111111111111111111111111111111111111111" } },
+      "effects": [
+        "exactly one git worktree add -b pdd/feature-101-<uuidShort> /repo/.git/pdd/worktrees/<UUID> 1111111111111111111111111111111111111111, run with cwd /repo",
+        "before the add, /repo/.git/pdd/worktree-assignments/runs/run-101.json and /repo/.git/pdd/worktree-assignments/issues/101.json are one file with link count 2",
+        "the run record holds the returned assignment as JSON and a final newline",
+        "the new worktree holds the committed files of M, including the committed bytes of source.txt",
+        "no fetch",
+        "source.txt and notes.txt in /repo keep their bytes, and git status --porcelain in /repo is unchanged",
+        "the current branch of /repo is still main, with no switch, reset or stash"
+      ]
+    },
+    {
+      "id": "branch-name-mapped-and-cut-to-40",
+      "criteria": ["AC1"],
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 12, "runId": "run-12", "workflowName": "Release.Candidate__Very_Long_Workflow_Name_For_Testing_X", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "workflowName": "Release.Candidate__Very_Long_Workflow_Name_For_Testing_X", "branch": "pdd/release-candidate-very-long-workflow-nam-12-<uuidShort>" } }
+    },
+    {
+      "id": "two-issues-in-parallel-processes",
+      "criteria": ["AC2", "AC3"],
+      "input": { "parallelProcesses": [
+        { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 201, "runId": "run-201", "workflowName": "feature", "baseRef": "main" } },
+        { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 202, "runId": "run-202", "workflowName": "feature", "baseRef": "main" } }
+      ] },
+      "expected": { "states": ["ready", "ready"], "differentInEachAssignment": ["worktreePath", "gitDir", "branch"] },
+      "effects": [
+        "the runs folder holds exactly run-201.json and run-202.json",
+        "the issues folder holds exactly 201.json and 202.json",
+        "a later commit in the worktree of issue 201 does not change the files of issue 202 or /repo"
+      ]
+    },
+    {
+      "id": "same-issue-race-across-workflow-names",
+      "criteria": ["AC3"],
+      "input": { "parallelProcesses": [
+        { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 203, "runId": "run-203-a", "workflowName": "feature", "baseRef": "main" } },
+        { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 203, "runId": "run-203-b", "workflowName": "bug", "baseRef": "main" } }
+      ] },
+      "expected": { "statesInAnyOrder": ["ready", "conflict"], "conflictAssignment": null },
+      "effects": [
+        "exactly one git worktree add in total",
+        "git worktree list shows /repo and one new worktree",
+        "issues/203.json holds the runId of the ready run"
+      ]
+    },
+    {
+      "id": "same-issue-from-linked-checkout",
+      "criteria": ["AC3"],
+      "given": "Saved run run-7 for issue 7 with workflow feature.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "<worktreePath of run-7>", "repository": "Acme/Project", "issueNumber": 7, "runId": "run-7-other", "workflowName": "small-change", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "no git worktree add",
+        "issues/7.json still holds run-7",
+        "no run record for run-7-other"
+      ]
+    },
+    {
+      "id": "same-run-repeat-read-only",
+      "criteria": ["AC4"],
+      "given": "Saved run run-11 for issue 11 with workflow feature and base main.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 11, "runId": "run-11", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": "deep-equal to the assignment of the first allocation" },
+      "effects": [
+        "only the Git subcommands rev-parse, remote get-url, symbolic-ref, merge-base and worktree list run",
+        "no file under /repo/.git/pdd/worktree-assignments changes",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "same-run-after-base-moved",
+      "criteria": ["AC4"],
+      "given": "Saved run run-208 for issue 208 with base main at M. Then main gets a new commit N.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 208, "runId": "run-208", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "baseSha": "1111111111111111111111111111111111111111" } },
+      "effects": [
+        "the worktree files still match M",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "saved-run-other-issue-refused",
+      "criteria": ["AC4"],
+      "given": "Saved run run-11 for issue 11 with workflow feature and base main.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 12, "runId": "run-11", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "no git worktree add",
+        "no claim for issue 12",
+        "the run-11 record is unchanged"
+      ]
+    },
+    {
+      "id": "lost-add-reply-proves-ready",
+      "criteria": ["AC6"],
+      "given": "The command port runs the real add, then rejects with an error that has no code.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 9, "runId": "run-9", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "runId": "run-9", "worktreePath": "/repo/.git/pdd/worktrees/<UUID>" } },
+      "effects": [
+        "a later lookupIssueWorktree for run-9 returns the same assignment with no git worktree add"
+      ]
+    },
+    {
+      "id": "add-rejected-with-code-zero",
+      "criteria": ["AC6", "AC11"],
+      "given": "The command port rejects every git worktree add with code 0 and does not run it.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 10, "runId": "run-10", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "runs/run-10.json and issues/10.json stay",
+        "no worktree folder is removed or created",
+        "a later lookup and a repeat allocation of run-10 also return recovery_required, run no git worktree add and leave runs/run-10.json with the same bytes"
+      ]
+    },
+    {
+      "id": "other-run-after-failed-add-conflicts",
+      "criteria": ["AC3", "AC6"],
+      "given": "The case add-rejected-with-code-zero happened before.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 10, "runId": "run-10-new", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "no git worktree add",
+        "issues/10.json still holds run-10"
+      ]
+    },
+    {
+      "id": "process-stopped-before-add",
+      "criteria": ["AC6"],
+      "given": "An allocation process for run-204, issue 204, saved its run record and claim and then exited just before git worktree add.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-204" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "no git worktree add",
+        "runs/run-204.json keeps its bytes"
+      ]
+    },
+    {
+      "id": "lookup-missing-run-creates-nothing",
+      "criteria": ["AC7"],
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-unknown" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "/repo/.git/pdd still does not exist",
+        "only read-only Git subcommands run"
+      ]
+    },
+    {
+      "id": "lookup-from-issue-worktree-after-commits",
+      "criteria": ["AC7"],
+      "given": "Saved run run-15 for issue 15. Its worktree has one new commit on its branch and one dirty file.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "<worktreePath of run-15>", "runId": "run-15" } },
+      "expected": { "state": "ready", "assignment": "deep-equal to the assignment of the first allocation" },
+      "effects": [
+        "the commit and the dirty file in that worktree stay",
+        "only read-only Git subcommands run"
+      ]
+    },
+    {
+      "id": "lookup-changed-branch",
+      "criteria": ["AC7"],
+      "given": "Saved run run-15 for issue 15. Its worktree then switched to a new branch named unowned.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-15" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "no git worktree add",
+        "the worktree stays on branch unowned"
+      ]
+    },
+    {
+      "id": "missing-claim-not-repaired",
+      "criteria": ["AC7"],
+      "given": "Run run-16 for issue 16 has a run record, and someone deleted issues/16.json.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 16, "runId": "run-16", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "issues/16.json still does not exist",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "lookup-invalid-run-id",
+      "criteria": ["AC7"],
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "../run-15" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "nothing is created"
+      ]
+    },
+    {
+      "id": "issue-number-as-string-refused",
+      "criteria": ["AC8"],
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": "7", "runId": "run-7s", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "no Git call",
+        "nothing is created"
+      ]
+    },
+    {
+      "id": "run-id-of-161-characters-refused",
+      "criteria": ["AC8"],
+      "given": "runId is the letter r repeated 161 times. The same request with 160 letters is valid.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 30, "runId": "<161 times r>", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "no Git call"
+      ]
+    },
+    {
+      "id": "foreign-repository-refused",
+      "criteria": ["AC8"],
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Other/Project", "issueNumber": 1, "runId": "run-1", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "no claim file for issue 1",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "repository-case-difference-accepted",
+      "criteria": ["AC8"],
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "acme/project", "issueNumber": 32, "runId": "run-32", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "ready", "assignment": { "repository": "acme/project" } }
+    },
+    {
+      "id": "revision-expression-base-refused",
+      "criteria": ["AC8"],
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 1, "runId": "run-1b", "workflowName": "feature", "baseRef": "main~0" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "no run record",
+        "no claim file for issue 1",
+        "no git worktree add",
+        "no fetch"
+      ]
+    },
+    {
+      "id": "non-github-origin-refused",
+      "criteria": ["AC8"],
+      "given": "origin is https://gitlab.com/Acme/Project.git.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 33, "runId": "run-33", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "no run record",
+        "no claim",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "symbolic-link-metadata-folder-refused",
+      "criteria": ["AC8"],
+      "given": "/repo/.git/pdd is a symbolic link to an empty folder /outside.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 34, "runId": "run-34", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "/outside stays empty",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "existing-branch-collision",
+      "criteria": ["AC9"],
+      "given": "Just before the branch check, someone creates a branch with the generated name, pointing at M.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 207, "runId": "run-207", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "the colliding branch still points at M",
+        "no run record for run-207",
+        "no git worktree add"
+      ]
+    },
+    {
+      "id": "unowned-folder-at-intended-path",
+      "criteria": ["AC9"],
+      "given": "Just before the add runs, someone creates the intended worktree folder with a file foreign.txt in it.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 206, "runId": "run-206", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "foreign.txt keeps its bytes",
+        "a later lookup and a repeat allocation of run-206 also return recovery_required with no git worktree add"
+      ]
+    },
+    {
+      "id": "initializing-lock-not-ready",
+      "criteria": ["AC10"],
+      "given": "The add for run-209 is still checking out files. git worktree list shows its path, branch and HEAD, locked with the reason initializing.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-209" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "the lock file still holds initializing",
+        "no second git worktree add",
+        "no saved file changes"
+      ]
+    },
+    {
+      "id": "interrupted-initializing-stays-uncertain",
+      "criteria": ["AC10"],
+      "given": "The add for run-210 was killed while locked with the reason initializing.",
+      "input": { "function": "allocateIssueWorktree", "args": { "cwd": "/repo", "repository": "Acme/Project", "issueNumber": 210, "runId": "run-210", "workflowName": "feature", "baseRef": "main" } },
+      "expected": { "state": "recovery_required", "assignment": null },
+      "effects": [
+        "the lock stays",
+        "no unlock, repair, prune or second add"
+      ]
+    },
+    {
+      "id": "protective-lock-stays-ready",
+      "criteria": ["AC10"],
+      "given": "Saved run run-211. Then the person ran git worktree lock --reason 'keep this' on its worktree.",
+      "input": { "function": "lookupIssueWorktree", "args": { "cwd": "/repo", "runId": "run-211" } },
+      "expected": { "state": "ready", "assignment": "deep-equal to the assignment of the first allocation" },
+      "effects": [
+        "the lock stays"
+      ]
+    },
+    {
+      "id": "missing-input-resolves",
+      "criteria": ["AC11"],
+      "input": { "function": "allocateIssueWorktree", "args": null },
+      "expected": { "state": "conflict", "assignment": null },
+      "effects": [
+        "the promise resolves and does not reject",
+        "no Git call"
+      ]
+    }
+  ]
+}
