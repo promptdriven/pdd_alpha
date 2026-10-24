@@ -1,0 +1,227 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/command-catalog.prompt.md",
+  "story": "story/cli/COMMAND-CATALOG.md",
+  "cases": [
+    {
+      "id": "module-exports-only-four-constants",
+      "criteria": ["AC1"],
+      "given": "A fresh Node process with file, environment, network and child-process access observed.",
+      "input": { "action": "import src/command-catalog.mjs", "observe": "sorted export names" },
+      "expected": ["BUNDLED_WORKFLOW_NAMES", "PUBLIC_COMMAND_IDS", "PUBLIC_COMMAND_MANIFEST", "PUBLIC_COMMAND_ROUTES"],
+      "effects": ["no default export", "no exported function or class", "no file read", "no environment read", "no network access", "no child process", "no other module imported"]
+    },
+    {
+      "id": "route-ids-in-order",
+      "criteria": ["AC1"],
+      "input": { "export": "PUBLIC_COMMAND_IDS" },
+      "expected": ["workflow.run", "workflow.resume", "workflow.attach", "workflow.feature", "workflow.bug", "workflow.small-change", "session", "help", "version", "skill", "completion", "workflow.list"]
+    },
+    {
+      "id": "workflow-run-route",
+      "criteria": ["AC2", "AC4"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "workflow.run" } },
+      "expected": {
+        "prefix": ["workflow", "run"],
+        "local": "workflow-run",
+        "operands": [{ "name": "name", "type": "workflow-name" }, { "name": "issue", "type": "issue" }],
+        "options": [{ "name": "--agent", "kind": "value", "choices": ["codex", "claude"] }]
+      },
+      "effects": ["no operand type starts with choice:"]
+    },
+    {
+      "id": "workflow-resume-route-has-no-agent",
+      "criteria": ["AC2"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "workflow.resume" } },
+      "expected": {
+        "prefix": ["workflow", "resume"],
+        "local": "workflow-resume",
+        "operands": [{ "name": "run-id", "type": "uuid" }],
+        "options": [{ "name": "--decision", "kind": "value", "choices": ["approve", "skip"] }]
+      }
+    },
+    {
+      "id": "workflow-attach-route-has-no-options",
+      "criteria": ["AC2"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "workflow.attach" } },
+      "expected": {
+        "prefix": ["workflow", "attach"],
+        "local": "workflow-attach",
+        "operands": [{ "name": "run-id", "type": "uuid" }],
+        "options": []
+      }
+    },
+    {
+      "id": "session-route",
+      "criteria": ["AC2", "AC7"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "session" } },
+      "expected": {
+        "prefix": ["session"],
+        "local": "session",
+        "operands": [{ "name": "request", "type": "text", "optional": true, "repeat": true }],
+        "options": [{ "name": "--agent", "kind": "value", "choices": ["codex", "claude"] }]
+      }
+    },
+    {
+      "id": "recipe-shortcut-routes",
+      "criteria": ["AC2", "AC3"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "hasKey": "workflowName" }, "observe": "id, prefix, local, workflowName and operands of each, in order" },
+      "expected": [
+        { "id": "workflow.feature", "prefix": ["workflow", "feature"], "local": "session", "workflowName": "feature", "operands": [{ "name": "request", "type": "text", "optional": true, "repeat": true }] },
+        { "id": "workflow.bug", "prefix": ["workflow", "bug"], "local": "session", "workflowName": "bug", "operands": [{ "name": "request", "type": "text", "optional": true, "repeat": true }] },
+        { "id": "workflow.small-change", "prefix": ["workflow", "small-change"], "local": "session", "workflowName": "small-change", "operands": [{ "name": "request", "type": "text", "optional": true, "repeat": true }] }
+      ]
+    },
+    {
+      "id": "bundled-workflow-names",
+      "criteria": ["AC3"],
+      "input": { "export": "BUNDLED_WORKFLOW_NAMES" },
+      "expected": ["feature", "bug", "small-change"]
+    },
+    {
+      "id": "session-route-has-no-workflow-name-key",
+      "criteria": ["AC3", "AC7"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "session" }, "observe": "sorted own keys" },
+      "expected": ["forms", "id", "local", "operands", "options", "prefix"]
+    },
+    {
+      "id": "local-discovery-routes",
+      "criteria": ["AC2"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "ids": ["help", "version", "skill"] }, "observe": "id, prefix, local, operands and options of each, in order" },
+      "expected": [
+        { "id": "help", "prefix": ["help"], "local": "help", "operands": [], "options": [] },
+        { "id": "version", "prefix": ["--version"], "local": "version", "operands": [], "options": [] },
+        { "id": "skill", "prefix": ["--skill"], "local": "skill", "operands": [], "options": [] }
+      ]
+    },
+    {
+      "id": "completion-route-shell-choice",
+      "criteria": ["AC2"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "completion" } },
+      "expected": {
+        "prefix": ["completion"],
+        "local": "completion",
+        "operands": [{ "name": "shell", "type": "choice:bash,zsh" }],
+        "options": []
+      }
+    },
+    {
+      "id": "workflow-list-json-flag-has-no-choices",
+      "criteria": ["AC2", "AC7"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "select": { "id": "workflow.list" }, "observe": "prefix, local, operands, and sorted own keys of the only option" },
+      "expected": {
+        "prefix": ["workflow", "list"],
+        "local": "workflow-list",
+        "operands": [],
+        "optionKeys": ["kind", "name"],
+        "option": { "name": "--json", "kind": "flag" }
+      }
+    },
+    {
+      "id": "optional-repeat-only-on-request",
+      "criteria": ["AC7"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "route ID and operand name of every operand that has an optional or repeat key" },
+      "expected": [
+        { "id": "workflow.feature", "operand": "request" },
+        { "id": "workflow.bug", "operand": "request" },
+        { "id": "workflow.small-change", "operand": "request" },
+        { "id": "session", "operand": "request" }
+      ]
+    },
+    {
+      "id": "agent-choices-same-everywhere",
+      "criteria": ["AC7"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "IDs of routes that declare --agent, and the distinct choices lists of those declarations" },
+      "expected": {
+        "ids": ["workflow.run", "workflow.feature", "workflow.bug", "workflow.small-change", "session"],
+        "distinctChoices": [["codex", "claude"]]
+      }
+    },
+    {
+      "id": "manifest-forms-in-order",
+      "criteria": ["AC5"],
+      "input": { "export": "PUBLIC_COMMAND_MANIFEST", "observe": "form of each record, in order" },
+      "expected": [
+        "pdd workflow run NAME ISSUE [--agent codex|claude]",
+        "pdd workflow resume RUN_ID [--decision approve|skip]",
+        "pdd workflow attach RUN_ID",
+        "pdd workflow feature [--agent codex|claude] [request text]",
+        "pdd workflow bug [--agent codex|claude] [request text]",
+        "pdd workflow small-change [--agent codex|claude] [request text]",
+        "pdd session [--agent codex|claude] [request text]",
+        "pdd",
+        "pdd --help",
+        "pdd -h",
+        "pdd help",
+        "pdd --version",
+        "pdd --skill",
+        "pdd completion bash|zsh",
+        "pdd workflow list [--json]"
+      ]
+    },
+    {
+      "id": "manifest-shares-route-form-records",
+      "criteria": ["AC5"],
+      "input": { "export": "PUBLIC_COMMAND_MANIFEST", "observe": "each record is the identical object found at the same position in the concatenation of every route's forms, in route order" },
+      "expected": true
+    },
+    {
+      "id": "form-words-begin-with-prefix",
+      "criteria": ["AC5"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "for each route other than help: every form starts with pdd and its following words begin with the route prefix" },
+      "expected": true
+    },
+    {
+      "id": "preview-label-on-runner-routes-only",
+      "criteria": ["AC6"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "IDs of routes with a form description that starts with \"PREVIEW: \"" },
+      "expected": ["workflow.run", "workflow.resume", "workflow.attach"]
+    },
+    {
+      "id": "no-preview-label-elsewhere",
+      "criteria": ["AC6"],
+      "input": { "export": "PUBLIC_COMMAND_MANIFEST", "observe": "forms of the records outside the three runner routes whose description contains PREVIEW" },
+      "expected": []
+    },
+    {
+      "id": "exported-arrays-frozen",
+      "criteria": ["AC8"],
+      "input": { "observe": "Object.isFrozen of each of the four exported arrays" },
+      "expected": { "PUBLIC_COMMAND_ROUTES": true, "PUBLIC_COMMAND_IDS": true, "PUBLIC_COMMAND_MANIFEST": true, "BUNDLED_WORKFLOW_NAMES": true }
+    },
+    {
+      "id": "nested-records-frozen",
+      "criteria": ["AC8"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "Object.isFrozen of every route, its prefix, operands, options and forms arrays, and every operand, option and form record" },
+      "expected": true
+    },
+    {
+      "id": "route-field-write-refused",
+      "criteria": ["AC8"],
+      "given": "Strict-mode code, as in any ES module.",
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "action": "assign the string workflow.start to the id of the first route" },
+      "expectedError": { "class": "TypeError" },
+      "effects": ["the first route id stays workflow.run", "PUBLIC_COMMAND_IDS is unchanged"]
+    },
+    {
+      "id": "added-route-refused",
+      "criteria": ["AC8", "AC9"],
+      "given": "Strict-mode code, as in any ES module.",
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "action": "push a route with id runtime and prefix [\"runtime\"]" },
+      "expectedError": { "class": "TypeError" },
+      "effects": ["PUBLIC_COMMAND_ROUTES still has 12 routes", "no route has the id runtime"]
+    },
+    {
+      "id": "excluded-commands-have-no-route",
+      "criteria": ["AC9"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "IDs of routes whose prefix is [\"run\"], [\"verify\"], [\"try\"], [\"lint\"], [\"runtime\"], [\"doctor\"], [\"status\"], [\"workflow\", \"status\"] or [\"workflow\", \"new\"]" },
+      "expected": []
+    },
+    {
+      "id": "no-route-for-workflow-group-alone",
+      "criteria": ["AC2", "AC9"],
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "IDs of routes whose prefix is exactly [\"workflow\"]" },
+      "expected": []
+    }
+  ]
+}

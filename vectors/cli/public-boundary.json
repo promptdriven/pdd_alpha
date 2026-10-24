@@ -1,0 +1,224 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/public-boundary.prompt.md",
+  "story": "story/cli/PUBLIC-BOUNDARY.md",
+  "cases": [
+    {
+      "id": "excluded-command-refused",
+      "criteria": ["AC1"],
+      "input": ["verify"],
+      "expectedError": { "exitCode": 2, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no guidance, metadata or project file read", "no native launch", "no runner call", "no child process", "no network call"]
+    },
+    {
+      "id": "excluded-command-with-help-refused",
+      "criteria": ["AC1"],
+      "input": ["runtime", "discover", "--help"],
+      "expectedError": { "exitCode": 2, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no help text printed", "no child process", "no network call"]
+    },
+    {
+      "id": "native-flag-not-forwarded",
+      "criteria": ["AC1", "AC7"],
+      "input": ["session", "--dangerously-skip-permissions"],
+      "expectedError": { "exitCode": 2, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no native launch", "no guidance read"]
+    },
+    {
+      "id": "invalid-runner-words-refused-before-runner",
+      "criteria": ["AC1"],
+      "given": "A package root that does not exist, so any guidance read would fail with exit code 1.",
+      "input": ["workflow", "run", "../unknown", "1"],
+      "expectedError": { "exitCode": 2, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no runner call", "no Git, GitHub or Herdr call", "no guidance read"]
+    },
+    {
+      "id": "root-help-local",
+      "criteria": ["AC2"],
+      "given": "An empty project folder and an empty HOME.",
+      "input": [],
+      "expected": { "exitCode": 0, "stdout": "nonempty", "stderr": "empty" },
+      "effects": ["project folder still empty", "HOME still empty", "no child process", "no network call", "no runner call"]
+    },
+    {
+      "id": "version-line",
+      "criteria": ["AC2", "AC8"],
+      "input": ["--version"],
+      "expected": { "exitCode": 0, "stdout": "pdd <version field of package.json>", "stderr": "empty" },
+      "effects": ["no file created"]
+    },
+    {
+      "id": "workflow-list-json-local",
+      "criteria": ["AC2"],
+      "given": "An empty project folder with no .pdd/workflows folder, and the complete bundled package.",
+      "input": ["workflow", "list", "--json"],
+      "expected": { "exitCode": 0, "stdout": { "parsesAsJson": true, "default": null }, "stderr": "empty" },
+      "effects": ["project folder still empty", "no native launch", "no runner call", "no network call"]
+    },
+    {
+      "id": "completion-prints-only",
+      "criteria": ["AC2"],
+      "given": "An empty HOME.",
+      "input": ["completion", "zsh"],
+      "expected": { "exitCode": 0, "stdout": "nonempty", "stderr": "empty" },
+      "effects": ["no shell configuration file created or changed", "HOME still empty"]
+    },
+    {
+      "id": "missing-guide-skill",
+      "criteria": ["AC3"],
+      "given": "The package has no docs/prompting-guide.md.",
+      "input": ["--skill"],
+      "expectedError": { "exitCode": 1, "stdout": "empty", "stderr": "nonempty" }
+    },
+    {
+      "id": "missing-guide-session-no-launch",
+      "criteria": ["AC3"],
+      "given": "The package has no docs/prompting-guide.md, and codex is on PATH.",
+      "input": ["session"],
+      "expectedError": { "exitCode": 1, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no native launch"]
+    },
+    {
+      "id": "unreadable-version-metadata",
+      "criteria": ["AC3"],
+      "given": "The package.json at the package root has no version field.",
+      "input": ["--version"],
+      "expectedError": { "exitCode": 1, "stdout": "empty", "stderr": "nonempty" }
+    },
+    {
+      "id": "invalid-project-definition",
+      "criteria": ["AC3"],
+      "given": "The project has .pdd/workflows/feature/workflow.json with malformed JSON.",
+      "input": ["workflow", "list"],
+      "expectedError": { "exitCode": 1, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no fallback to the bundled feature definition"]
+    },
+    {
+      "id": "rejected-word-not-echoed",
+      "criteria": ["AC4", "AC1"],
+      "input": ["token-ab12cd34ef"],
+      "expectedError": { "exitCode": 2, "stdout": "empty", "stderr": { "nonempty": true, "doesNotContain": ["token-ab12cd34ef"] } }
+    },
+    {
+      "id": "native-exit-passthrough",
+      "criteria": ["AC5"],
+      "given": "The native codex on PATH exits with code 9.",
+      "input": ["workflow", "bug"],
+      "expected": { "exitCode": 9 }
+    },
+    {
+      "id": "native-agent-missing",
+      "criteria": ["AC5"],
+      "given": "No claude executable is on PATH.",
+      "input": ["session", "--agent", "claude"],
+      "expectedError": { "exitCode": 127, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["no install attempt", "no switch to codex"]
+    },
+    {
+      "id": "native-signal-exit",
+      "criteria": ["AC5"],
+      "given": "The native codex ends by SIGINT.",
+      "input": ["session"],
+      "expected": { "exitCode": 130 }
+    },
+    {
+      "id": "runner-waiting",
+      "criteria": ["AC6"],
+      "given": "The runner replies with state waiting, exit code 2 and one message.",
+      "input": ["workflow", "run", "feature", "42"],
+      "expected": { "exitCode": 2, "stdout": "the runner message once, then a newline", "stderr": "empty" }
+    },
+    {
+      "id": "runner-recovery-required",
+      "criteria": ["AC6"],
+      "given": "The runner replies with state recovery_required, exit code 1 and one message.",
+      "input": ["workflow", "resume", "a1234567-1234-4123-8123-123456789abc"],
+      "expected": { "exitCode": 1, "stdout": "the runner message once, then a newline" }
+    },
+    {
+      "id": "runner-unconfirmed-reply",
+      "criteria": ["AC6"],
+      "given": "The runner throws an error for this call.",
+      "input": ["workflow", "attach", "a1234567-1234-4123-8123-123456789abc"],
+      "expectedError": { "exitCode": 1, "stdout": "empty", "stderr": "nonempty" },
+      "effects": ["runner called exactly once", "no retry"]
+    },
+    {
+      "id": "full-access-session-keeps-person-context",
+      "criteria": ["AC7"],
+      "given": "A native codex on PATH that reports its argv, cwd, stdin and one environment variable, then exits 0. An empty HOME.",
+      "input": ["session", "--agent", "codex", "Help; $(touch must-not-exist)"],
+      "expected": { "exitCode": 0, "nativeStarts": 1, "launchMode": "full access, with the flags that the native session prompt defines", "requestReachesAgentAsText": true, "cwd": "the project folder", "environment": "unchanged", "stdin": "inherited" },
+      "effects": ["file must-not-exist not created", "HOME still empty", "project folder unchanged", "no global native configuration written", "no trust entry written to disk"]
+    },
+    {
+      "id": "flag-like-request-after-double-dash",
+      "criteria": ["AC7"],
+      "given": "A native claude on PATH that reports its argv, then exits 0.",
+      "input": ["workflow", "feature", "--agent", "claude", "--", "--model", "other"],
+      "expected": { "exitCode": 0, "request": "--model other", "nativeArgvHasSeparateModelFlag": false }
+    },
+    {
+      "id": "manifest-facts",
+      "criteria": ["AC8"],
+      "input": { "inspect": "package.json" },
+      "expected": {
+        "name": "pdd",
+        "type": "module",
+        "license": "MIT",
+        "private": true,
+        "bin": { "pdd": "bin/pdd.mjs" },
+        "engines": { "node": ">=22.16.0" },
+        "scripts": { "test": "node --test test/*.test.mjs examples/ticket-status/test/*.test.mjs" },
+        "scriptKeys": ["test"],
+        "filesSet": ["README.md", "LICENSE", "CONTRIBUTING.md", "AGENTS.md", "bin/", "src/", "prompts/cli/", "docs/", "skills/", ".pdd/workflows/", "examples/"],
+        "absentFields": ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "bundleDependencies"]
+      }
+    },
+    {
+      "id": "lock-matches-manifest",
+      "criteria": ["AC8"],
+      "input": { "inspect": "package-lock.json" },
+      "expected": {
+        "lockfileVersion": 3,
+        "requires": true,
+        "packageKeys": [""],
+        "rootEntryEqualsManifest": ["name", "version", "license", "bin", "engines"]
+      }
+    },
+    {
+      "id": "packed-file-set",
+      "criteria": ["AC9"],
+      "input": { "run": ["npm", "pack", "--ignore-scripts", "--dry-run", "--json"] },
+      "expected": {
+        "includes": ["package.json", "bin/pdd.mjs", "src/pdd-cli.mjs", "src/workflow-definition-loader.mjs", "docs/prompting-guide.md", "docs/workflows.md", "skills/pdd/SKILL.md", ".pdd/workflows/feature/WORKFLOW.md", ".pdd/workflows/feature/workflow.json", ".pdd/workflows/bug/WORKFLOW.md", ".pdd/workflows/small-change/WORKFLOW.md", "examples/ticket-status/README.md"],
+        "excludesPrefixes": ["test/", ".github/"],
+        "excludes": ["package-lock.json"]
+      },
+      "effects": ["no archive written", "no package script run"]
+    },
+    {
+      "id": "clean-consumer-install",
+      "criteria": ["AC9"],
+      "given": "The packed archive, an empty consumer folder, an empty HOME and npm set to offline.",
+      "input": { "run": ["npm", "install", "--prefix", "<consumer>", "<archive>", "--ignore-scripts", "--offline"] },
+      "expected": { "binExists": "node_modules/.bin/pdd", "versionExitCode": 0, "versionStdout": "pdd <version field of package.json>" },
+      "effects": ["no dependency downloaded", "no network call"]
+    },
+    {
+      "id": "ci-workflow-checks",
+      "criteria": ["AC10"],
+      "input": { "inspect": ".github/workflows/ci.yml" },
+      "expected": {
+        "triggers": ["pull_request", "push to main", "workflow_dispatch"],
+        "permissions": { "contents": "read" },
+        "runsOn": "ubuntu-latest",
+        "timeoutMinutes": 10,
+        "nodeVersion": "22",
+        "commandsInOrder": ["npm ci --ignore-scripts", "npm test", "node bin/pdd.mjs --help", "npm pack --ignore-scripts --dry-run"],
+        "concurrency": { "perWorkflowAndRef": true, "cancelInProgress": true }
+      },
+      "effects": ["no secret used"]
+    }
+  ]
+}

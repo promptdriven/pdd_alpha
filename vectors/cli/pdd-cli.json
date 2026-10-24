@@ -1,0 +1,268 @@
+{
+  "status": "draft",
+  "prompt": "prompts/cli/pdd-cli.prompt.md",
+  "story": "story/cli/PDD-CLI.md",
+  "cases": [
+    {
+      "id": "unknown-recipe-refused-before-guidance",
+      "criteria": ["AC1"],
+      "given": "packageRoot \"/absent\", so any guidance read would fail with exit code 1. nativeSession fails if called.",
+      "input": ["workflow", "unknown"],
+      "expectedError": { "exitCode": 2, "stdout": "", "stderrEmpty": false },
+      "effects": ["no guidance read", "no native launch"]
+    },
+    {
+      "id": "resume-agent-option-refused",
+      "criteria": ["AC1"],
+      "given": "workflowRunner.resumeWorkflow records calls.",
+      "input": ["workflow", "resume", "a1234567-1234-4123-8123-123456789abc", "--agent", "claude"],
+      "expectedError": { "exitCode": 2, "stdout": "", "stderrEmpty": false, "runnerCallCount": 0 },
+      "effects": ["no runner call", "no stage transport loaded"]
+    },
+    {
+      "id": "root-help",
+      "criteria": ["AC2", "AC12"],
+      "given": "packageRoot \"/missing/package\", cwd \"/missing/project\". The runner, stage transport and definition loader are stubs that fail on any property access. nativeSession fails if called.",
+      "input": [],
+      "expected": {
+        "exitCode": 0,
+        "stderr": "",
+        "help": { "title": true, "formsListed": "all", "previewNotice": true, "guideBeforeStory": true, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
+      },
+      "effects": ["no runner, transport, loader or native access", "no file read or write"]
+    },
+    {
+      "id": "workflow-group-help",
+      "criteria": ["AC2"],
+      "given": "Same stubs as root-help.",
+      "input": ["workflow", "--help"],
+      "expected": {
+        "exitCode": 0,
+        "stderr": "",
+        "help": { "formsListed": "only forms that start with pdd workflow", "previewNotice": true, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
+      },
+      "effects": ["no runner, transport, loader or native access"]
+    },
+    {
+      "id": "exact-run-help",
+      "criteria": ["AC2"],
+      "given": "Same stubs as root-help.",
+      "input": ["workflow", "run", "--help"],
+      "expected": {
+        "exitCode": 0,
+        "stderr": "",
+        "help": { "formsListed": "only forms that start with pdd workflow run", "runFormLabeledPreview": true, "formLineIndent": "two spaces", "previewNotice": true, "pushAndPrWarning": true }
+      },
+      "effects": ["no runner, transport, loader or native access"]
+    },
+    {
+      "id": "session-help-has-no-preview-notice",
+      "criteria": ["AC2"],
+      "given": "nativeSession fails if called.",
+      "input": ["session", "--help"],
+      "expected": {
+        "exitCode": 0,
+        "stderr": "",
+        "help": { "formsListed": "only forms that start with pdd session", "previewNotice": false, "pushAndPrWarning": true }
+      },
+      "effects": ["no native launch"]
+    },
+    {
+      "id": "version-from-metadata",
+      "criteria": ["AC3"],
+      "given": "packageRoot holds package.json with version \"9.9.9-test\".",
+      "input": ["--version"],
+      "expected": { "exitCode": 0, "stdout": "pdd 9.9.9-test\n", "stderr": "" }
+    },
+    {
+      "id": "version-empty-string-refused",
+      "criteria": ["AC3"],
+      "given": "packageRoot holds package.json with version \"\".",
+      "input": ["--version"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false }
+    },
+    {
+      "id": "skill-writes-guidance",
+      "criteria": ["AC4"],
+      "given": "packageRoot holds a complete guide, skill and references. G is loadGuidance({ packageRoot, cwd }) for it, without recipes.",
+      "input": ["--skill"],
+      "expected": { "exitCode": 0, "stdout": "G followed by one newline", "stderr": "" },
+      "effects": ["no native launch", "no runner or loader loaded"]
+    },
+    {
+      "id": "skill-missing-guide",
+      "criteria": ["AC4"],
+      "given": "packageRoot has a skill and references but no docs/prompting-guide.md.",
+      "input": ["--skill"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false }
+    },
+    {
+      "id": "session-default-agent-all-recipes",
+      "criteria": ["AC5"],
+      "given": "Complete packageRoot, cwd \"/chosen project\". nativeSession records its input and resolves 0.",
+      "input": ["session", "Draft", "a", "prompt"],
+      "expected": {
+        "exitCode": 0,
+        "stdout": "",
+        "nativeCalls": [ { "agent": "codex", "cwd": "/chosen project", "request": "Draft a prompt", "contextLoadedWith": { "workflows": true, "workflowName": "absent" } } ]
+      },
+      "effects": ["no runner call", "no stage transport loaded"]
+    },
+    {
+      "id": "recipe-shortcut-selected-agent-and-literal-request",
+      "criteria": ["AC5"],
+      "given": "Complete packageRoot, cwd \"/chosen project\". nativeSession records its input and resolves 17.",
+      "input": ["workflow", "feature", "--agent", "claude", "--", "--not-a-flag"],
+      "expected": {
+        "exitCode": 17,
+        "nativeCalls": [ { "agent": "claude", "cwd": "/chosen project", "request": "--not-a-flag", "contextLoadedWith": { "workflows": true, "workflowName": "feature" } } ]
+      },
+      "effects": ["exactly one native launch", "no runner call"]
+    },
+    {
+      "id": "session-missing-guidance-no-launch",
+      "criteria": ["AC5"],
+      "given": "packageRoot has no docs/prompting-guide.md. nativeSession fails if called.",
+      "input": ["session"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false },
+      "effects": ["no native launch"]
+    },
+    {
+      "id": "run-input-and-ports",
+      "criteria": ["AC6", "AC7"],
+      "given": "cwd \"/assigned invoker\", packageRoot \"/package\". workflowStages holds four stub functions. workflowRunner.runWorkflow records (input, ports) and resolves { exitCode: 2, state: \"waiting\", runId: \"a1234567-1234-4123-8123-123456789abc\", stage: \"human-review\", message: \"waiting R human-review\" }.",
+      "input": ["workflow", "run", "my-team-workflow", "octo/repo#12", "--agent", "claude"],
+      "expected": {
+        "exitCode": 2,
+        "stdout": "waiting R human-review\n",
+        "stderr": "",
+        "runnerCalls": [ { "function": "runWorkflow", "input": { "name": "my-team-workflow", "issue": "octo/repo#12", "agent": "claude", "cwd": "/assigned invoker", "packageRoot": "/package" } } ],
+        "portKeys": ["loadGuidance", "launchNativeSession", "runHerdrStage", "inspectHerdrStage", "attachHerdrStage", "closeHerdrStage", "stdout", "stderr"],
+        "transportPortsAreTheInjectedFunctions": true,
+        "portStreamsAreTheCaptureStreams": true
+      },
+      "effects": ["exactly one runner call", "no stage transport function called by this module"]
+    },
+    {
+      "id": "run-default-agent-recovery-required",
+      "criteria": ["AC6", "AC7"],
+      "given": "No nativeSession dependency. workflowRunner.runWorkflow resolves { exitCode: 1, state: \"recovery_required\", runId: \"a1234567-1234-4123-8123-123456789abc\", stage: \"change\", message: \"recovery_required R\" }.",
+      "input": ["workflow", "run", "small-change", "1"],
+      "expected": {
+        "exitCode": 1,
+        "stdout": "recovery_required R\n",
+        "runnerCalls": [ { "function": "runWorkflow", "input": { "name": "small-change", "issue": "1", "agent": "codex" } } ],
+        "launchNativeSessionPortIsTheRealLauncher": true
+      }
+    },
+    {
+      "id": "resume-without-decision-has-no-decision-key",
+      "criteria": ["AC6", "AC7"],
+      "given": "cwd \"/chosen\", packageRoot \"/absent-guide\". workflowRunner.resumeWorkflow resolves { exitCode: 0, state: \"completed\", runId: \"a1234567-1234-4123-8123-123456789abc\", stage: \"wait-merge\", message: \"completed R\" }.",
+      "input": ["workflow", "resume", "a1234567-1234-4123-8123-123456789abc"],
+      "expected": {
+        "exitCode": 0,
+        "stdout": "completed R\n",
+        "runnerCalls": [ { "function": "resumeWorkflow", "input": { "runId": "a1234567-1234-4123-8123-123456789abc", "cwd": "/chosen", "packageRoot": "/absent-guide" } } ],
+        "inputKeysAbsent": ["decision", "agent", "context"]
+      }
+    },
+    {
+      "id": "resume-with-skip-passes-decision",
+      "criteria": ["AC6"],
+      "given": "workflowRunner.resumeWorkflow resolves a valid waiting result with exitCode 2.",
+      "input": ["workflow", "resume", "a1234567-1234-4123-8123-123456789abc", "--decision", "skip"],
+      "expected": {
+        "exitCode": 2,
+        "runnerCalls": [ { "function": "resumeWorkflow", "input": { "runId": "a1234567-1234-4123-8123-123456789abc", "decision": "skip" } } ]
+      }
+    },
+    {
+      "id": "attach-input-and-ports",
+      "criteria": ["AC6", "AC7"],
+      "given": "cwd \"/lookup\", packageRoot \"/pkg\". workflowStages holds four stub functions. workflowRunner.attachWorkflow records (input, ports) and resolves { exitCode: 2, state: \"waiting\", runId: \"a1234567-1234-4123-8123-123456789abc\", stage: \"check\", message: \"waiting R\" }.",
+      "input": ["workflow", "attach", "a1234567-1234-4123-8123-123456789abc"],
+      "expected": {
+        "exitCode": 2,
+        "stdout": "waiting R\n",
+        "runnerCalls": [ { "function": "attachWorkflow", "input": { "runId": "a1234567-1234-4123-8123-123456789abc", "cwd": "/lookup", "packageRoot": "/pkg" } } ],
+        "attachHerdrStagePortIsTheInjectedFunction": true
+      },
+      "effects": ["no conversation started by this module", "no journal read by this module"]
+    },
+    {
+      "id": "runner-unknown-state-is-failure",
+      "criteria": ["AC8"],
+      "given": "workflowRunner.runWorkflow counts calls and resolves { exitCode: 0, state: \"invented\", message: \"no\" }.",
+      "input": ["workflow", "run", "feature", "42"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false, "runnerCallCount": 1 }
+    },
+    {
+      "id": "runner-exit-code-above-255-is-failure",
+      "criteria": ["AC8"],
+      "given": "workflowRunner.runWorkflow resolves { exitCode: 256, state: \"completed\", runId: null, stage: null, message: \"done\" }.",
+      "input": ["workflow", "run", "feature", "42"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false, "runnerCallCount": 1 }
+    },
+    {
+      "id": "runner-throws-no-retry",
+      "criteria": ["AC8"],
+      "given": "workflowRunner.resumeWorkflow counts calls and throws.",
+      "input": ["workflow", "resume", "a1234567-1234-4123-8123-123456789abc"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false, "runnerCallCount": 1 },
+      "effects": ["no second runner call"]
+    },
+    {
+      "id": "incomplete-stage-transport-prevents-runner-call",
+      "criteria": ["AC8"],
+      "given": "workflowStages holds runHerdrStage, inspectHerdrStage and attachHerdrStage but no closeHerdrStage. workflowRunner.attachWorkflow counts calls.",
+      "input": ["workflow", "attach", "a1234567-1234-4123-8123-123456789abc"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false, "runnerCallCount": 0 },
+      "effects": ["no runner call"]
+    },
+    {
+      "id": "list-json-delegates-once",
+      "criteria": ["AC9"],
+      "given": "cwd \"/project\", packageRoot \"/installed\". workflowDefinitions.listWorkflowDefinitions records its input and returns [{ name: \"feature\", source: \"bundled\" }, { name: \"team-review\", source: \"project\" }]. workflowRunner fails if called.",
+      "input": ["workflow", "list", "--json"],
+      "expected": {
+        "exitCode": 0,
+        "stdoutJson": { "workflows": [ { "name": "feature", "source": "bundled" }, { "name": "team-review", "source": "project" } ], "default": null },
+        "loaderCalls": [ { "cwd": "/project", "packageRoot": "/installed" } ]
+      },
+      "effects": ["no runner call", "no native launch"]
+    },
+    {
+      "id": "list-loader-failure-no-fallback",
+      "criteria": ["AC9"],
+      "given": "workflowDefinitions.listWorkflowDefinitions throws. The project also holds .pdd/workflows/bug/WORKFLOW.md.",
+      "input": ["workflow", "list"],
+      "expectedError": { "exitCode": 1, "stdout": "", "stderrEmpty": false },
+      "effects": ["no Markdown-only fallback listing"]
+    },
+    {
+      "id": "completion-written-unchanged",
+      "criteria": ["AC10"],
+      "given": "S is renderCompletion(\"bash\").",
+      "input": ["completion", "bash"],
+      "expected": { "exitCode": 0, "stdout": "S exactly, with no added newline", "stderr": "" },
+      "effects": ["no runner, loader or native access"]
+    },
+    {
+      "id": "entry-help-offline-empty-folder",
+      "criteria": ["AC11", "AC12"],
+      "given": "Process run of the executable entry (prompts/cli/bin-entry.prompt.md): node bin/pdd.mjs with these words, in a new empty folder that is also HOME, with PATH empty.",
+      "input": ["workflow", "attach", "--help"],
+      "expected": { "processStatus": 0, "stderr": "", "help": { "previewNotice": true } },
+      "effects": ["folder stays empty", "no network", "no child process"]
+    },
+    {
+      "id": "entry-preserves-native-exit-status",
+      "criteria": ["AC5", "AC11"],
+      "given": "Process run of the executable entry: node bin/pdd.mjs with these words, from an empty project folder. PATH holds a fake codex that exits 7.",
+      "input": ["session"],
+      "expected": { "processStatus": 7 },
+      "effects": ["fake codex started once"]
+    }
+  ]
+}
