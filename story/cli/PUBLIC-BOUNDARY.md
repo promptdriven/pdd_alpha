@@ -19,7 +19,7 @@ The owning prompt is the [public boundary](../../prompts/cli/public-boundary.pro
 - **AC7:** Under the full-access decision, a session starts the native agent once in full-access mode, as the native session prompt defines. The cwd, environment and stdin are the person's own. No global native configuration, trust entry or file in HOME or the project is written. Request text, including shell metacharacters and flag-like words after `--`, reaches the agent as text. It is not run by a shell and is not passed as a native flag.
 - **AC8:** `package.json` and `package-lock.json` show every fact in the prompt's manifest rules: bin `pdd`, the exact `files` set, engines, `private: true`, the `test` script, no lifecycle script and no dependency field. The lock file root matches the manifest.
 - **AC9:** The packed archive contains the CLI, the guide, the skill, the bundled recipes with their `workflow.json` files and the example. It contains no `test/` or `.github/` path. Installing it into a clean folder with scripts off and no network gives a working `pdd` command.
-- **AC10:** The CI workflow runs on pull requests, pushes to `main` and manual dispatch, with read-only contents permission. It runs the prompt's four commands in order, with `npm ci --ignore-scripts` first.
+- **AC10:** The CI workflow runs on pull requests, pushes to `main` and manual dispatch, with read-only contents permission. Before `npm ci --ignore-scripts`, a step checks `bash` and makes `zsh` available, as the rule "Shell test prerequisites" says. Then it runs the prompt's four commands in order, with `npm ci --ignore-scripts` first.
 
 ## Cases and evidence
 

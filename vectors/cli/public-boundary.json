@@ -219,6 +219,21 @@
         "concurrency": { "perWorkflowAndRef": true, "cancelInProgress": true }
       },
       "effects": ["no secret used"]
+    },
+    {
+      "id": "ci-shell-test-prerequisites",
+      "criteria": ["AC10"],
+      "input": { "inspect": ".github/workflows/ci.yml", "observe": "the steps between setup-node and npm ci --ignore-scripts" },
+      "expected": {
+        "stepCount": 1,
+        "checksBashOnPath": true,
+        "printsBashVersion": true,
+        "installsZsh": "only when zsh is not on PATH, with apt-get and no recommended packages",
+        "checksZshAfterInstall": true,
+        "printsZshVersion": true,
+        "runsBefore": "npm ci --ignore-scripts"
+      },
+      "effects": ["no secret used", "no package script run"]
     }
   ]
 }

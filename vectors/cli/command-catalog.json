@@ -172,16 +172,20 @@
       "expected": true
     },
     {
-      "id": "preview-label-on-runner-routes-only",
+      "id": "no-description-has-preview-or-unproven-notice",
       "criteria": ["AC6"],
-      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "IDs of routes with a form description that starts with \"PREVIEW: \"" },
-      "expected": ["workflow.run", "workflow.resume", "workflow.attach"]
+      "input": { "export": "PUBLIC_COMMAND_MANIFEST", "observe": "forms of all fifteen records whose description contains PREVIEW in any letter case, or says that a real workflow PR is not yet proven" },
+      "expected": []
     },
     {
-      "id": "no-preview-label-elsewhere",
+      "id": "runner-descriptions-keep-their-facts",
       "criteria": ["AC6"],
-      "input": { "export": "PUBLIC_COMMAND_MANIFEST", "observe": "forms of the records outside the three runner routes whose description contains PREVIEW" },
-      "expected": []
+      "input": { "export": "PUBLIC_COMMAND_ROUTES", "observe": "for workflow.run, workflow.resume and workflow.attach: whether the description begins with a release label, and the facts it states" },
+      "expected": {
+        "workflow.run": { "beginsWithLabel": false, "facts": ["runs a validated project or bundled workflow for a GitHub issue", "may push branches and create real PRs"] },
+        "workflow.resume": { "beginsWithLabel": false, "facts": ["inspects or continues a saved workflow", "an omitted decision only reads and reconciles"] },
+        "workflow.attach": { "beginsWithLabel": false, "facts": ["attaches to the saved active background stage", "archived stages return information"] }
+      }
     },
     {
       "id": "exported-arrays-frozen",

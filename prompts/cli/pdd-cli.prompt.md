@@ -33,19 +33,16 @@ Then dispatch on the plan's `local` value. Each command calls its owner at most 
 
 `renderHelp(prefix)` takes an array of words, default `[]`, and reads only `PUBLIC_COMMAND_MANIFEST` from the [command catalog](command-catalog.prompt.md). Help exits 0 with empty stderr, even when the package root or project folder is missing.
 
-Start with a title line that names "PDD Alpha" as local guidance for the person's existing coding-agent conversation. Then list each manifest form whose words after `pdd` begin with all prefix words; an empty prefix lists all. Each form gets its own line: two spaces, the form, two spaces, its catalog description. The catalog owns that text, including the `PREVIEW:` label of run, resume and attach.
+Start with a title line that names "PDD Alpha" as local guidance for the person's existing coding-agent conversation. Then list each manifest form whose words after `pdd` begin with all prefix words; an empty prefix lists all. Each form gets its own line: two spaces, the form, two spaces, its catalog description. The catalog owns that text.
 
-Then write these facts in this order. Quoted phrases are required wording, because readers and accepted tests search for them.
+Then every help writes these facts in this order. Quoted phrases are required wording, because readers and accepted tests search for them.
 
-| Fact | Shown in |
-| --- | --- |
-| "Workflow runner PREVIEW": "a real workflow PR is not yet proven". | only root help, `workflow` group help and exact `workflow run`, `resume` and `attach` help |
-| Read the entire Prompting guide with `pdd --skill` before drafting any Story. | every help |
-| Session and recipe shortcuts open foreground native conversations. Workflow run and resume "may push branches and create real PRs". | every help |
-| The PDD controller must keep running while stage agents work in background Herdr. After it exits, nothing advances; explicit resume reconciles the original run. | every help |
-| `workflow attach RUN_ID` reaches the actual active stage. Completed archived stages are not live sessions. | every help |
+1. Read the entire Prompting guide with `pdd --skill` before drafting any Story.
+2. Session and recipe shortcuts open foreground native conversations. Workflow run and resume "may push branches and create real PRs".
+3. The PDD controller must keep running while stage agents work in background Herdr. After it exits, nothing advances; explicit resume reconciles the original run.
+4. `workflow attach RUN_ID` reaches the actual active stage. Completed archived stages are not live sessions.
 
-Accepted product decision: the workflow runner ships in this alpha as a preview. PREVIEW is a release label only. It adds no refusal, gate, flag or readiness claim. Help must not claim that the package never runs workflows, that native readiness proves stage success, or that a background PDD process continues a run.
+**Help claims.** Help shows no `PREVIEW` label and no notice that a real workflow PR is not yet proven. It must not claim that the package never runs workflows, that native readiness proves stage success, or that a background PDD process continues a run.
 
 ## Native sessions
 

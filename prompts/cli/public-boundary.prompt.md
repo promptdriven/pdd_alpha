@@ -14,7 +14,7 @@ The [command catalog](command-catalog.prompt.md) owns the exact routes, operands
 
 - **Local discovery**: help, `--version`, `--skill`, `workflow list [--json]` and `completion bash|zsh`. The **discovery effects** rule below limits them.
 - **Foreground native conversations**: `session` and the recipe shortcuts `workflow feature|bug|small-change`. Each starts the native agent once, in the person's terminal and cwd. A recipe shortcut is one conversation, not the runner, and opens no PR by itself.
-- **Local issue runner**, labeled PREVIEW in help: `workflow run`, `workflow resume` and `workflow attach`. The [workflow runner](workflow-runner.prompt.md) owns runs, decisions and real Git and GitHub effects, through the person's own `git`, `gh` and Herdr. It can push branches and create PRs. It never merges. The CLI only parses and dispatches.
+- **Local issue runner**: `workflow run`, `workflow resume` and `workflow attach`. The [workflow runner](workflow-runner.prompt.md) owns runs, decisions and real Git and GitHub effects, through the person's own `git`, `gh` and Herdr. It can push branches and create PRs. It never merges. The CLI only parses and dispatches.
 
 **Excluded.** None of these exist. Source keeps no declaration, validator, import or default for them, even an unused one:
 
@@ -83,7 +83,8 @@ In `package.json`:
 - Permissions: `contents: read` only.
 - Concurrency: one group for each workflow and ref. A new run cancels an older one still in progress.
 - One job on `ubuntu-latest`, with a 10-minute timeout.
-- Steps: check out; set up Node.js 22, a release that satisfies `engines`; then run in order `npm ci --ignore-scripts`, `npm test`, `node bin/pdd.mjs --help` and `npm pack --ignore-scripts --dry-run`. `--ignore-scripts` keeps install and pack from running package scripts. The help step checks that the entry runs from source. The pack step checks the allowlist without writing an archive.
+- Steps: check out; set up Node.js 22, a release that satisfies `engines`; ensure the shell test prerequisites; then run in order `npm ci --ignore-scripts`, `npm test`, `node bin/pdd.mjs --help` and `npm pack --ignore-scripts --dry-run`. `--ignore-scripts` keeps install and pack from running package scripts. The help step checks that the entry runs from source. The pack step checks the allowlist without writing an archive.
+- **Shell test prerequisites.** Before `npm ci`, CI checks that `bash` is on `PATH` and prints its version. If `zsh` is missing, CI installs it with `apt-get`, without recommended packages. Then it checks `zsh` and prints its version. Reason: `npm test` loads the completion scripts in real `bash` and `zsh`, and the CI image may not include `zsh`.
 - CI uses no secret, model account, Herdr or GitHub CLI login. The tests need no live service or model call.
 
 </details>
@@ -97,4 +98,4 @@ In `package.json`:
 - [Workflow runner](workflow-runner.prompt.md) — owner of run effects and of the map from run states to exit codes 0, 2 and 1. Navigation for review only.
 - npm (tool; generation, testing) — reads the manifest and lock file. CI runs `npm ci --ignore-scripts`, `npm test` and `npm pack --ignore-scripts --dry-run`.
 - Node.js 22.16.0 or newer (runtime, testing) — runs `bin/pdd.mjs` and `node --test`.
-- GitHub Actions (testing) — runs the CI workflow with `actions/checkout` and `actions/setup-node`.
+- GitHub Actions (testing) — runs the CI workflow with `actions/checkout` and `actions/setup-node`. The image supplies `bash` and `apt-get`, which installs `zsh` when it is missing.

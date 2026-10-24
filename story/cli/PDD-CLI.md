@@ -13,7 +13,7 @@ Out of scope: which argv the parser admits, the command forms in the catalog, gu
 ## Observable acceptance criteria
 
 - **AC1 (parse first):** Every command line the parser refuses exits with code 2, writes a diagnostic to stderr and nothing to stdout. It reads no package file and makes no runner, loader or native call. A refused recipe name exits 2 even when the package root does not exist.
-- **AC2 (help):** Root help, `workflow` group help and exact `workflow run`, `resume` and `attach` help exit 0 with empty stderr. They show every fact in the prompt's help table, including the PREVIEW notice and the real push and PR warning. Other help, such as `session --help`, has no PREVIEW notice. Help works when the package root and project folder do not exist, and it touches no runner, stage transport, definition loader or native launcher.
+- **AC2 (help):** Every help, such as root help, `workflow` group help, exact `workflow run`, `resume` and `attach` help and `session --help`, exits 0 with empty stderr. It shows the prompt's four help facts, including the real push and PR warning. By the rule "Help claims", no help shows `PREVIEW` or a notice that a real workflow PR is not yet proven. Help works when the package root and project folder do not exist, and it touches no runner, stage transport, definition loader or native launcher.
 - **AC3 (version):** `--version` writes `pdd <version>` from the package root's `package.json` and exits 0. Missing metadata, or a `version` that is not a nonempty string, exits 1 with a stderr diagnostic and empty stdout.
 - **AC4 (skill):** `--skill` writes the guidance text and exits 0. If guidance cannot load, it exits 1 and stdout stays empty.
 - **AC5 (sessions):** `session` and `workflow feature|bug|small-change` load guidance with all recipes or only the selected one. Then they call the native launcher once with the agent (default `codex`), cwd, guidance and joined request. The exit code is the launcher's code unchanged. If guidance cannot load, the exit code is 1 and no launch happens. These commands never call the runner.
@@ -34,7 +34,7 @@ These existing tests exercise the criteria. They are evidence only; this Story d
 | Criteria | Tests |
 | --- | --- |
 | AC1 | `test/cli.test.mjs` (ALPHA6 unknown recipes with an absent package root; ALPHA8 invalid runner argv), `test/cli-editable-routing.test.mjs` (invalid attach argv), `test/cli-preview-help.test.mjs` (unknown command with help through the entry) |
-| AC2 | `test/cli-preview-help.test.mjs`; `test/cli.test.mjs` (ALPHA4 help forms through the packed entry) |
+| AC2 | `test/cli-preview-help.test.mjs` (root, group and exact runner help: exit 0, push and PR warning, no `PREVIEW` text or not-yet-proven notice); `test/cli.test.mjs` (ALPHA4 help forms through the packed entry) |
 | AC3, AC10 | `test/cli.test.mjs` (ALPHA4, success only) |
 | AC4 | `test/cli.test.mjs` (ALPHA2, ALPHA4) |
 | AC5 | `test/cli.test.mjs` (ALPHA4 native exits and missing guide; ALPHA6 selected recipe and native code) |

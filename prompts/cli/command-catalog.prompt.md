@@ -6,7 +6,7 @@ The catalog is the only list of public `pdd` commands. Each route gives one comm
 
 The module takes no input. Importing it reads no file, environment variable or network resource, starts no process and imports no other module.
 
-Preservation: behavioral refinement. Keep the export names and binding kind, the exact route set and order, every declared value, the record shapes with their absent keys, the frozenness and the exact form text. A description may be reworded if it keeps every fact of its current text below, including the `PREVIEW: ` prefix. How the module builds the constants may vary.
+Preservation: behavioral refinement. Keep the export names and binding kind, the exact route set and order, every declared value, the record shapes with their absent keys, the frozenness and the exact form text. A description may be reworded if it keeps every fact of its current text below. How the module builds the constants may vary.
 
 ## Routes
 
@@ -33,21 +33,21 @@ Operand types are a closed set of tokens: `text`, `workflow-name`, `issue`, `uui
 - **Free workflow name.** `workflow.run` declares `name` as a `workflow-name`, not as a choice of the bundled names. The [definition loader](workflow-definition-loader.prompt.md) decides which definitions exist.
 - **No defaults here.** Declarations carry no default value. When `--agent` is absent, the CLI uses `codex`. When `--decision` is absent, the [workflow runner](workflow-runner.prompt.md) only inspects and reconciles.
 
-## Help forms and the PREVIEW label
+## Help forms
 
 Each route has one help form, except `help`, which has four. `PUBLIC_COMMAND_MANIFEST` holds all fifteen form records in route order and then form order. They are the same records as in the routes' `forms` arrays. Root help lists them in this order.
 
 - **Form prefix.** Every form starts with `pdd`. Except on the `help` route, the words after `pdd` begin with the route's prefix words. Reason: help for a command shows the forms whose leading words match the requested prefix.
-- **PREVIEW label.** Only the descriptions of `workflow.run`, `workflow.resume` and `workflow.attach` begin with `PREVIEW: `. No other description contains `PREVIEW`. Accepted product decision: the runner commands stay published with this label until a real workflow PR is proven. The label is not a gate or a success claim, and it changes no declaration, parsing or completion. The CLI owns the help footer about the preview.
+- **No preview label.** No description contains `PREVIEW` or says that a real workflow PR is not yet proven. Accepted product decision: the runner commands are published without a release label. This adds no gate or success claim, and the `workflow.run` description keeps its warning about real pushes and PRs.
 
 <details>
 <summary><strong>Exact help forms and descriptions</strong></summary>
 
 | Route | Form | Description |
 | --- | --- | --- |
-| `workflow.run` | `pdd workflow run NAME ISSUE [--agent codex\|claude]` | `PREVIEW: Run a validated project or bundled workflow for a GitHub issue; may push branches and create real PRs.` |
-| `workflow.resume` | `pdd workflow resume RUN_ID [--decision approve\|skip]` | `PREVIEW: Inspect or continue a saved workflow; omitted decision only reads/reconciles.` |
-| `workflow.attach` | `pdd workflow attach RUN_ID` | `PREVIEW: Attach to the saved active background stage; archived stages return information.` |
+| `workflow.run` | `pdd workflow run NAME ISSUE [--agent codex\|claude]` | `Run a validated project or bundled workflow for a GitHub issue; may push branches and create real PRs.` |
+| `workflow.resume` | `pdd workflow resume RUN_ID [--decision approve\|skip]` | `Inspect or continue a saved workflow; omitted decision only reads/reconciles.` |
+| `workflow.attach` | `pdd workflow attach RUN_ID` | `Attach to the saved active background stage; archived stages return information.` |
 | `workflow.<name>` | `pdd workflow <name> [--agent codex\|claude] [request text]` | `Open a native conversation following the bundled <name> recipe; default codex.` |
 | `session` | `pdd session [--agent codex\|claude] [request text]` | `Open an installed native agent with the full guide and manual recipes; default codex.` |
 | `help` | Four records: `pdd`, `pdd --help`, `pdd -h`, `pdd help` | `Show local alpha commands.` for each |

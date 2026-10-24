@@ -27,7 +27,7 @@
       "expected": {
         "exitCode": 0,
         "stderr": "",
-        "help": { "title": true, "formsListed": "all", "previewNotice": true, "guideBeforeStory": true, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
+        "help": { "title": true, "formsListed": "all", "previewOrUnprovenNotice": false, "guideBeforeStory": true, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
       },
       "effects": ["no runner, transport, loader or native access", "no file read or write"]
     },
@@ -39,7 +39,7 @@
       "expected": {
         "exitCode": 0,
         "stderr": "",
-        "help": { "formsListed": "only forms that start with pdd workflow", "previewNotice": true, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
+        "help": { "formsListed": "only forms that start with pdd workflow", "previewOrUnprovenNotice": false, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
       },
       "effects": ["no runner, transport, loader or native access"]
     },
@@ -51,21 +51,29 @@
       "expected": {
         "exitCode": 0,
         "stderr": "",
-        "help": { "formsListed": "only forms that start with pdd workflow run", "runFormLabeledPreview": true, "formLineIndent": "two spaces", "previewNotice": true, "pushAndPrWarning": true }
+        "help": { "formsListed": "only forms that start with pdd workflow run", "runFormDescription": "the workflow.run catalog description, unchanged", "formLineIndent": "two spaces", "previewOrUnprovenNotice": false, "pushAndPrWarning": true }
       },
       "effects": ["no runner, transport, loader or native access"]
     },
     {
-      "id": "session-help-has-no-preview-notice",
+      "id": "session-help-keeps-shared-facts",
       "criteria": ["AC2"],
       "given": "nativeSession fails if called.",
       "input": ["session", "--help"],
       "expected": {
         "exitCode": 0,
         "stderr": "",
-        "help": { "formsListed": "only forms that start with pdd session", "previewNotice": false, "pushAndPrWarning": true }
+        "help": { "formsListed": "only forms that start with pdd session", "previewOrUnprovenNotice": false, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true }
       },
       "effects": ["no native launch"]
+    },
+    {
+      "id": "no-help-shows-preview-or-unproven-notice",
+      "criteria": ["AC2"],
+      "given": "Same stubs as root-help. Each argv is a separate call.",
+      "input": { "eachArgv": [[], ["--help"], ["-h"], ["help"], ["workflow", "--help"], ["workflow", "run", "--help"], ["workflow", "resume", "-h"], ["workflow", "attach", "--help"], ["help", "workflow", "resume"], ["help", "workflow", "attach"]] },
+      "expected": { "exitCode": 0, "stderr": "", "help": { "previewOrUnprovenNotice": false, "pushAndPrWarning": true, "controllerFact": true, "attachFact": true } },
+      "effects": ["no runner, transport, loader or native access"]
     },
     {
       "id": "version-from-metadata",
@@ -253,7 +261,7 @@
       "criteria": ["AC11", "AC12"],
       "given": "Process run of the executable entry (prompts/cli/bin-entry.prompt.md): node bin/pdd.mjs with these words, in a new empty folder that is also HOME, with PATH empty.",
       "input": ["workflow", "attach", "--help"],
-      "expected": { "processStatus": 0, "stderr": "", "help": { "previewNotice": true } },
+      "expected": { "processStatus": 0, "stderr": "", "help": { "previewOrUnprovenNotice": false, "pushAndPrWarning": true } },
       "effects": ["folder stays empty", "no network", "no child process"]
     },
     {
