@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-models.prompt.md (sha256: bf0f42c58e8c9397bc078712857ef8bbb821ce5687bd2d50e279b994d36ee55c).
+// Generated from prompts/cli/workflow-models.prompt.md (sha256: b7efff7960350eb630f7d017dd6d747697d9132bc779c595e15bab0c8b7391c9).
 import {spawn,execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const text = value => typeof value === 'string' && value.length > 0 && !/[\x00-\x1f\x7f]/u.test(value);
@@ -44,16 +44,55 @@ export async function resolveWorkflowModel({machineId,agent,selection} = {}, por
     cliVersion:catalog.cliVersion,catalogRevision:catalog.revision,source:override?'override':'defaults'}};
 }
 
+// Launch availability is separate from strict discovery and Settings validation.
+export async function resolveWorkflowLaunchModel({machineId,agent,selection,frozenSelection} = {}, ports = {}) {
+  if (!text(machineId) || !['codex','claude'].includes(agent)) return refused('bad_args');
+  const frozen = frozenSelection;
+  const nativeDefault = frozen?.source === 'native-defaults';
+  if (frozen !== undefined && (!frozen || typeof frozen !== 'object' || Array.isArray(frozen) || frozen.machineId !== machineId || frozen.agent !== agent
+    || (nativeDefault ? frozen.model !== null || frozen.effort !== null || frozen.cliVersion !== null || frozen.catalogRevision !== null
+      : !text(frozen.model) || !(frozen.effort === null || text(frozen.effort))
+        || !['defaults','override','settings-fallback'].includes(frozen.source)))) return refused('bad_args');
+  let observation, catalogError, settings, settingsRead = false;
+  const wrapped = {...ports,
+    nativeCatalog:{read:async input => {
+      try {return observation = await ports.nativeCatalog.read(input);} catch(error) {catalogError = error;throw error;}
+    }},
+    toolDefaults:{read:async input => {settingsRead = true;return settings = await ports.toolDefaults.read(input);}}
+  };
+  const requested = frozen ? nativeDefault ? undefined : {model:frozen.model,...(frozen.effort === null ? {} : {effort:frozen.effort})} : selection;
+  const result = await resolveWorkflowModel({machineId,agent,selection:requested},wrapped);
+  // A foreign observation is never permission to launch on this machine.
+  if (catalogError?.code === 'target_mismatch' || observation && (observation.machineId !== machineId || observation.agent !== agent)) return refused('catalog_unavailable');
+  if (result.state === 'selected' && frozen && !nativeDefault
+    && (result.selection.model !== frozen.model || result.selection.effort !== frozen.effort)) return refused('bad_args');
+  if (result.state === 'selected') return frozen
+    ? {state:'selected',code:null,selection:{...frozen}} : result;
+  if (result.code !== 'catalog_unavailable') return result;
+  // Reaching Settings with visible, validated rows means the list was readable;
+  // an invalid default is still a strict refusal, not a discovery outage.
+  if (settingsRead && observation?.models?.some(m => !m.hidden)) return result;
+  if (!frozen && !settingsRead) {
+    try {settings = await ports.toolDefaults?.read({machineId,agent});} catch {settings = null;}
+  }
+  const pair = settings && text(settings.model) && (settings.effort === null || text(settings.effort)) ? settings : null;
+  const accepted = frozen ? {...frozen} : {machineId,agent,model:pair?.model ?? null,effort:pair?.effort ?? null,
+    cliVersion:null,catalogRevision:null,source:pair?'settings-fallback':'native-defaults'};
+  return {state:'selected',code:null,selection:accepted,
+    warning:`Model list unavailable; using ${accepted.model ?? 'native defaults'}`};
+}
+
 // Public local composition. All native observations are projected before use;
 // neither raw configuration nor protocol errors cross the adapter boundary.
 export function createLocalWorkflowModelPorts({machineId,cwd,settings,executable='codex',env=process.env,timeoutMs=10000}={}) {
   return {
     toolDefaults:{read:async input=>{
-      if(input.machineId!==machineId)throw Error('catalog_unavailable');
+      if(input.machineId!==machineId)throw Object.assign(Error('catalog_unavailable'),{code:'target_mismatch'});
       return settings ? settings.read(input) : null;
     }},
     nativeCatalog:{read:async input=>{
-      if(input.machineId!==machineId || input.agent!=='codex')throw Error('catalog_unavailable');
+      if(input.machineId!==machineId)throw Object.assign(Error('catalog_unavailable'),{code:'target_mismatch'});
+      if(input.agent!=='codex')throw Error('catalog_unavailable');
       try {
         const startedAt=Date.now();
         const version=execFileSync(executable,['--version'],{cwd,env,encoding:'utf8',stdio:['ignore','pipe','ignore'],timeout:timeoutMs,maxBuffer:4096}).trim();

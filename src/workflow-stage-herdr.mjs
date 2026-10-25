@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: 21c0d1ae93f2144709dc73cf643eb224b0612554f5b3e7de7f8efbbfb6d3bd8c).
+// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: f4c87e02a5d8fb4e77e4134ad720aa6b39b2609054394c4f0216ccced4f750b3).
 import {execFile as callbackExec,spawn} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
@@ -71,11 +71,11 @@ async function supportedSelection(b,ports){
   if(!b.launchSelection)return true;
   if(b.launchSelection.agent!==b.agent)return false;
   if(ports.validateLaunchSelection)return await ports.validateLaunchSelection(b.launchSelection)===true;
-  try{const resolveModel=ports.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowModel;const selection=b.launchSelection;const r=await resolveModel({machineId:selection.machineId,agent:b.agent,selection:{model:selection.model,...(selection.effort==null?{}:{effort:selection.effort})}},ports);return r?.state==='selected'&&r.selection.model===selection.model&&r.selection.effort===selection.effort;}catch{return false;}
+  try{const resolveModel=ports.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowLaunchModel;const selection=b.launchSelection;const r=await resolveModel({machineId:selection.machineId,agent:b.agent,frozenSelection:selection,selection:selection.model===null?undefined:{model:selection.model,...(selection.effort==null?{}:{effort:selection.effort})}},ports);return r?.state==='selected'&&r.selection.model===selection.model&&r.selection.effort===selection.effort;}catch{return false;}
 }
 function launchArgs(b,ports,resume){
   const encode=ports.nativeArgs??nativeArgs,input={agent:b.agent,cwd:b.cwd,selection:b.launchSelection,...(resume?{resume}:{})},args=encode(input);
-  if(b.launchSelection&&isDeepStrictEqual(args,encode({...input,selection:undefined})))throw fault('unsupported');
+  if(b.launchSelection&&b.launchSelection.source!=='native-defaults'&&isDeepStrictEqual(args,encode({...input,selection:undefined})))throw fault('unsupported');
   return args;
 }
 async function observed(r,b,save) {

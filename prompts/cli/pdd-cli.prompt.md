@@ -150,8 +150,11 @@ selection and before preparing a run or native effect. Read defaults for the cho
 tool on the chosen machine; validate the final pair against that machine's current
 CLI list. Forward the accepted selection unchanged to the native launcher/stage.
 A workflow freezes this pair once; it does not re-read model defaults per stage.
-Explicit unsupported/hidden model or effort is exit 2; unavailable catalog/defaults
-is exit 1. Neither outcome starts a native process or silently chooses another pair.
+Use the model owner's `resolveWorkflowLaunchModel` launch availability rule when
+its list is unavailable: Settings default or no model/effort flags, with exactly
+one returned warning on stderr. This also applies to sessions with a Settings
+adapter. Available catalogs still reject unsupported/hidden choices (exit 2) or
+invalid defaults (exit 1) before native effects. No guessed list or raw error.
 Remote requests carry model/effort overrides, never source-machine defaults or
 account choices; the target resolves and durably records its effective pair before
 its launch receipt. Source discovery/help does not query model catalogs.

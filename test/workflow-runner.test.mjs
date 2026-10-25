@@ -1258,3 +1258,16 @@ test('public attachment durable callbacks cannot write after their journal owner
   });
   assert.equal(readFileSync(h.journal,'utf8'),before);assert.equal(h.attachments,1);
 });
+
+for(const settings of [null,{model:'settings-model',effort:'high'}])test(`rule10 actual runner freezes ${settings?'Settings pair':'native defaults'} before assignment and admits after defaults change`,async t=>{
+  const f=await p1Fixture(t);delete f.ports.resolveWorkflowModel;
+  f.ports.nativeCatalog={read:async()=>{throw Error('unavailable');}};
+  f.ports.toolDefaults={read:async()=>settings};
+  const prepared=await f.prepare({machineId:'local'});assert.equal(prepared.state,'prepared',prepared.message);
+  const saved=f.saved(prepared.runId).launchSelection;
+  assert.equal(saved.model,settings?.model??null);assert.equal(saved.effort,settings?.effort??null);
+  assert.equal(saved.source,settings?'settings-fallback':'native-defaults');assert.equal(f.native.length,0);
+  f.ports.toolDefaults.read=async()=>({model:'changed-default',effort:'low'});
+  const driven=await f.drive();assert.equal(driven.state,'waiting',driven.message);
+  assert.ok(f.native.length>0);assert.deepEqual(f.saved(prepared.runId).launchSelection,saved);
+});

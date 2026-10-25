@@ -172,3 +172,20 @@ test('delayed identity discovered before first prompt is claimed before delivery
   h.ports.promoteWorkflowClaim=async({claim,nativeSessionId})=>{assert.equal(h.checkpoints.at(-1).nativeSession.value,nativeSessionId);promotions++;return claim;};
   const result=await runHerdrStage(h.input,h.ports);assert.equal(result.state,'settled',result.reason);assert.equal(count(h,'agent','prompt'),1);
 });
+
+for(const settings of [null,{model:'settings-model',effort:'high'}])test(`rule10 unavailable list preserves ${settings?'Settings pair':'native defaults'} through real stage admission`,async t=>{
+  const h=await harness(t);
+  const {resolveWorkflowLaunchModel}=await import('../src/workflow-models.mjs');
+  const modelPorts={nativeCatalog:{read:async()=>{throw Error('unavailable');}},toolDefaults:{read:async()=>settings}};
+  const chosen=await resolveWorkflowLaunchModel({machineId:'local',agent:'codex'},modelPorts);
+  h.input.launchSelection=chosen.selection;Object.assign(h.ports,modelPorts);
+  const first=await runHerdrStage(h.input,h.ports);assert.equal(first.state,'settled',first.reason);
+  const start=h.calls.find(c=>c[0]==='agent'&&c[1]==='start'),args=start.slice(start.indexOf('--')+1);
+  assert.ok(args.includes('--dangerously-bypass-approvals-and-sandbox'));assert.ok(args.includes('--dangerously-bypass-hook-trust'));
+  if(settings){assert.equal(args[args.indexOf('-m')+1],'settings-model');assert.ok(args.includes('model_reasoning_effort="high"'));}
+  else {assert.equal(args.includes('-m'),false);assert.equal(args.some(a=>a.startsWith('model_reasoning_effort=')),false);}
+  h.ports.toolDefaults.read=async()=>({model:'changed-default',effort:'low'});
+  const next=await runHerdrStage({...h.input,backend:first.backend},h.ports);
+  assert.equal(next.state,'settled',next.reason);assert.deepEqual(next.backend.launchSelection,chosen.selection);
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);
+});

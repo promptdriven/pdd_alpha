@@ -65,7 +65,11 @@ caller supplies the model owner's validated target-machine model/effort pair;
 checkpoint it before launch and pass it unchanged. The native-flags owner alone
 encodes that pair with the installed CLI's supported arguments; no arbitrary
 passthrough, hardcoded model list or global configuration writes. Revalidate
-support on recovery; unsupported saved selection blocks rather than falling back.
+support through `resolveWorkflowLaunchModel` with the saved `frozenSelection` on
+recovery; a known unsupported saved pair blocks. Under the model owner's rule 10,
+an unavailable list preserves the frozen pair or native-default policy without a
+duplicate warning. Only the explicit native-default policy may encode no model
+flags; silently dropping a real pair remains unsupported.
 Preserve provider, login and HOME. Managed restore consults the current machine/tool
 policy and its durable account transition, alongside the actual backend account
 and launch record. Saved account observations never override machine Settings.

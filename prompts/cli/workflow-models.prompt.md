@@ -10,6 +10,29 @@ choose accounts or start an agent. Preservation: new model/effort selection;
 full-access, guide-first context, native login/provider and existing exit behavior
 remain with their public owners. No global native config write or private import.
 
+## Launch availability (CEO rule 10)
+
+Export `resolveWorkflowLaunchModel({machineId,agent,selection?,frozenSelection?},ports)`
+for launch consumers; discovery and Settings writes retain the strict APIs below.
+A missing, empty or unreadable native model list must never prevent a run. Use
+that tool's Settings `{model,effort}` default when usable; otherwise select native
+defaults by omitting both model and effort flags. Do not guess a model or catalog.
+An unavailable list takes precedence over start-only overrides. Return a selected
+result with `warning: "Model list unavailable; using <default>"`, where `<default>`
+is the Settings model or `native defaults`. The CLI prints it once per start;
+internal admission/recovery checks do not print. Never include raw probe errors.
+
+Fallback selections retain machine/agent identity, use null `cliVersion` and
+`catalogRevision`, and source `settings-fallback` or `native-defaults`; the latter
+has null model and effort. Malformed/unreadable Settings supplies no usable default.
+Wrong-machine/tool observations and invalid arguments still refuse. A readable
+catalog keeps all strict unsupported-choice and invalid-default refusals below.
+Freeze the accepted pair or native-default policy at workflow start. A supplied
+`frozenSelection` must match the requested machine/tool and valid selection shape;
+recovery retains it when the list is unavailable, even if Settings changed. If a
+list becomes available, revalidate a saved pair; preserve a saved native-default
+policy without inventing a pair. No effects, credentials or configuration writes.
+
 ## Valid choices and defaults
 
 Obtain Codex models from that machine's installed CLI `model/list`, including each
@@ -94,6 +117,6 @@ port, including with a target-local client adapter.
 ## Dependencies
 
 - [Story](../../story/cli/WORKFLOW-MODELS.md) and [cases](../../vectors/cli/workflow-models.json): independent verification expectations.
-- nativeCatalog and toolDefaults required caller interfaces above: generation/runtime/testing inputs. The local Codex transport is declared above; Claude acceptance evidence remains required from a supplied verified adapter. Absence blocks selection rather than fabricating capabilities.
+- nativeCatalog and toolDefaults required caller interfaces above: generation/runtime/testing inputs. The local Codex transport is declared above; Claude acceptance evidence remains required from a supplied verified adapter. Absence blocks strict discovery; launch availability follows rule 10 above without fabricating capabilities.
 - [Native flags](native-flags.prompt.md): navigation-only encoding owner for an already validated selection. Its proposed selection parameter is recorded for owner confirmation in lane notes; this module returns no arbitrary argv.
 - [Prompting guide](../../docs/prompting-guide.md): authoring method.

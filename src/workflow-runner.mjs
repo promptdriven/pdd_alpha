@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 129b8b24a2b23434ffe1efe9a9e5b16ff43bcac8006d13ba6c3afcd570fdf345).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 424720d8cde606bf50b16cb8d5597e0d0752584333a32aec2c00823312626edf).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -705,8 +705,8 @@ async function validatedSelection(s,p) {
   const agent=s.actualTool??s.agent,selection=s.backendSelection??s.launchSelection;
   if(!selection || selection.agent!==agent)return false;
   try {
-    const resolveModel=p.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowModel;
-    const selected=await resolveModel({machineId:selection.machineId,agent,selection:{model:selection.model,...(selection.effort==null?{}:{effort:selection.effort})}},p);
+    const resolveModel=p.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowLaunchModel;
+    const selected=await resolveModel({machineId:selection.machineId,agent,frozenSelection:selection,selection:selection.model===null?undefined:{model:selection.model,...(selection.effort==null?{}:{effort:selection.effort})}},p);
     return selected?.state==='selected' && selected.selection.agent===agent && selected.selection.model===selection.model && selected.selection.effort===selection.effort;
   }catch{return false;}
 }
@@ -778,7 +778,7 @@ async function quotaFlow(s,directory,p,event) {
     if(await p.quotaPorts.inspectEffects?.(s.quota)!==true)return {state:'refused',code:'effects_unproved'};
     if(name==='sendHandoffOnce'){
       if(s.quota?.state!=='handoff_intent'||!isDeepStrictEqual(value.key,[s.pending.attemptId,input.turnKey,value.targetTool]))return {state:'refused',code:'send_binding_unproved'};
-      const resolveModel=p.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowModel;
+      const resolveModel=p.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowLaunchModel;
       const selected=await resolveModel({machineId:s.machineId,agent:value.targetTool},p);
       if(selected?.state!=='selected'||selected.selection.agent!==value.targetTool)return {state:'refused',code:'target_model_unsupported'};
       s.pending.handoffSelection=structuredClone(selected.selection);await record(s,directory,'handoff.model.intent');value={...value,launchSelection:s.pending.handoffSelection};
@@ -913,8 +913,8 @@ async function execute(options, ports, resume) {
       return outcome;
     }
     {
-      const resolveModel=p.resolveWorkflowModel ?? (await import('./workflow-models.mjs')).resolveWorkflowModel;
-      const selection=await resolveModel({machineId:options.machineId ?? null,agent:options.agent ?? 'codex',selection:options.launchSelection ? {model:options.launchSelection.model,...(options.launchSelection.effort==null?{}:{effort:options.launchSelection.effort})}:undefined},p);
+      const resolveModel=p.resolveWorkflowModel ?? (await import('./workflow-models.mjs')).resolveWorkflowLaunchModel;
+      const selection=await resolveModel({machineId:options.machineId ?? null,agent:options.agent ?? 'codex',frozenSelection:options.launchSelection,selection:options.launchSelection?.model ? {model:options.launchSelection.model,...(options.launchSelection.effort==null?{}:{effort:options.launchSelection.effort})}:undefined},p);
       if(selection?.state!=='selected')fail('Machine model/effort defaults are unavailable or unsupported.');
       if(options.launchSelection && (!['model','effort','agent','machineId','cliVersion','catalogRevision'].every(k=>isDeepStrictEqual(options.launchSelection[k],selection.selection[k]))))fail('The supplied model selection differs from validated machine capabilities.');
       options={...options,launchSelection:options.launchSelection ?? selection.selection};

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/native-flags.prompt.md (sha256: 28f0d8e00637ea7737ac2a0a003ee1812c9aa7bb724646160bb7abb4df4b7409).
+// Generated from prompts/cli/native-flags.prompt.md (sha256: 5be6359a79da61653edc04b88a2e8ef38e51446bf9dd83addb5a7c2d9a8364f8).
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -34,11 +34,14 @@ function tomlString(value) {
 export function nativeArgs(input) {
   assertInput(input);
   const { agent, cwd, fullAccess = true, resume = null, selection = null } = input;
-  if (selection !== null && (!selection || typeof selection !== 'object' || Array.isArray(selection)
+  const nativeDefault = selection && typeof selection === 'object' && !Array.isArray(selection) && selection.source === 'native-defaults' && selection.agent === agent
+    && typeof selection.machineId === 'string' && selection.machineId.length > 0
+    && selection.model === null && selection.effort === null && selection.cliVersion === null && selection.catalogRevision === null;
+  if (selection !== null && !nativeDefault && (!selection || typeof selection !== 'object' || Array.isArray(selection)
     || typeof selection.model !== 'string' || !selection.model.length
     || !(selection.effort === null || typeof selection.effort === 'string' && selection.effort.length)))
     throw new TypeError('invalid selection');
-  const modelArgs = selection === null ? [] : agent === 'codex'
+  const modelArgs = selection === null || nativeDefault ? [] : agent === 'codex'
     ? ['-m', selection.model, ...(selection.effort === null ? [] : ['-c', `model_reasoning_effort=${tomlString(selection.effort)}`])]
     : ['--model', selection.model, ...(selection.effort === null ? [] : ['--effort', selection.effort])];
   const args = [];

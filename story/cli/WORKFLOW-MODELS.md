@@ -12,7 +12,8 @@ The [owning prompt](../../prompts/cli/workflow-models.prompt.md) defines the con
 - **AC4:** Explicit model/effort overrides are validated as a pair before launch; unsupported explicit values are refused without downgrade.
 - **AC5:** An override model with no effort keeps a compatible Settings effort or uses that model’s observed default.
 - **AC6:** Workflows freeze the accepted pair at start; later defaults change future runs and unsupported recovery is blocked.
-- **AC7:** Catalog/Settings failure, wrong target identity and malformed or empty capability data return finite refusals and launch nothing.
+- **AC7:** Strict discovery/Settings validation refuses unavailable evidence. Launches with a missing native list use Settings defaults, otherwise omit model/effort flags; print one safe warning and continue. Wrong target identity still refuses before effects.
+- **AC9:** Recovery preserves the frozen Settings pair or native-default policy while the list is unavailable; an available list still rejects an unsupported saved pair.
 - **AC8:** Account policy grants no model change or cross-tool permission; permitted cross-tool successors validate their target defaults separately.
 
 [Expected cases](../../vectors/cli/workflow-models.json) are synthetic independent expectations, not implementation or live-service results.

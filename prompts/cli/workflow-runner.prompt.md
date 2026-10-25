@@ -321,10 +321,13 @@ legacy journal selection bytes do not authorize them.
 
 The model owner supplies validated `launchSelection={machineId,agent,model,effort,
 cliVersion,catalogRevision,source}`. Snapshot it in run.started before effects;
-source is defaults or override. If the caller omits launchSelection, resolve it
-through the model owner before assignment/freeze; compatibility entry points
-never bypass validation. Subsequent stages and recovery use the frozen pair,
-revalidating support on the actual machine without silently substituting a model.
+source is defaults, override, settings-fallback or native-defaults. Resolve through
+the model owner's `resolveWorkflowLaunchModel` before assignment/freeze, passing
+any supplied selection as `frozenSelection`. Compatibility entry points never
+bypass identity/argument validation. Subsequent stages and recovery retain the
+frozen pair or native-default policy under the model owner's rule 10; unavailable
+lists do not block. Internal checks emit no duplicate warning. Revalidate known
+pairs when a list is available without silently substituting a model.
 A changed default affects future runs. An unsupported frozen pair becomes Needs you;
 resuming does not accept a new selection. Account transitions do not grant permission
 to change model/effort.

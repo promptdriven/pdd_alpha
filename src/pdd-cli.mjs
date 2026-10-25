@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 65b43c3e21491f258729d7fe23be522595d65237d52ff6aca9688cd0f4ce763c).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 4dbe0b1fcd25c92754f7d52f300706b353f392035ff9ae652fc3e60226ce6545).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -116,11 +116,12 @@ export async function runPdd(argv, dependencies = {}) {
     }
     let launchSelection=null;
     // Preserve Alpha's foreground native-default path when no capability adapter or override is supplied.
-    if(modelPorts || workflowModels || Object.keys(selectionOverrides).length || plan.local==='workflow-run') {
+    if(modelPorts || workflowModels || settings || Object.keys(selectionOverrides).length || plan.local==='workflow-run') {
       const mod=workflowModels??await import('./workflow-models.mjs');
       const selectionPorts=await localModels(selectedCwd);Object.assign(ports,selectionPorts);
-      const result=await mod.resolveWorkflowModel({machineId,agent,selection:selectionOverrides},selectionPorts);
+      const result=await (mod.resolveWorkflowLaunchModel??mod.resolveWorkflowModel)({machineId,agent,selection:selectionOverrides},selectionPorts);
       if(result.state!=='selected') {line(stderr,result.code==='bad_args'?'Unsupported model or effort for this machine.':'Native model catalog/defaults unavailable. Retry after the machine CLI capability adapter is available.');return {exitCode:result.code==='bad_args'?2:1};}
+      if(result.warning)line(stderr,safeLabel(result.warning));
       launchSelection=result.selection;
     }
     if(projectEntry) {

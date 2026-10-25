@@ -34,7 +34,11 @@ Inputs:
   pair that [machine CLI models](workflow-models.prompt.md) returned as
   `result.selection` (`effort` may be `null` for a model with no effort
   control). This module never chooses, checks or changes a model or effort; it
-  only writes the pair as flags. See [model and effort](#model-effort).
+  only writes the pair as flags. It also accepts the model owner's explicit
+  native-default policy `{source:"native-defaults",machineId,agent,model:null,
+  effort:null,cliVersion:null,catalogRevision:null}` for this same agent, emitting
+  no model/effort flags. Other malformed selections still throw. See
+  [model and effort](#model-effort).
 
 Here `T` is the one trust element `projects={<cwd key>={trust_level="trusted"}}`
 built by the [trust rule](#trust-element) and `<id>` is `resume`.
@@ -51,7 +55,8 @@ built by the [trust rule](#trust-element) and `<id>` is `resume`.
 | `claude` | `false` | id | `--resume`, `<id>` |
 
 <a id="model-effort"></a>**Model and effort (S58).** With a non-null
-`selection`, the list above gets these elements appended, after the last
+`selection` pair (excluding the explicit native-default policy), the list above
+gets these elements appended, after the last
 element of the row and before `<id>` when there is one:
 
 | `agent` | `effort` | Appended, in order |
@@ -146,7 +151,7 @@ A caller bug throws `TypeError` before any result. The message is free.
 | `cwd` | a string that starts with `/`, has no U+0000 and no unpaired surrogate | `TypeError` |
 | `fullAccess` | missing, `true`, `false` | `TypeError` (also for `null`, `"true"`, `1`) |
 | `resume` | missing, `null`, or a UUID text `8-4-4-4-12` hex digits (either case), passed unchanged | `TypeError` (also for `""`, a session name, a `p`+hex log id) |
-| `selection` | missing, `null`, or `{model: <non-empty string>, effort: <non-empty string> or null}` | `TypeError` (also for `{}`, a missing `effort` property, `{model: ""}`, a number) |
+| `selection` | missing, `null`, or `{model: <non-empty string>, effort: <non-empty string> or null}`, or the explicit native-default policy above | `TypeError` (also for `{}`, a missing `effort` property, `{model: ""}`, a number) |
 
 Other properties of the argument are ignored. `cwd` is required for every call,
 also when the result does not contain it, so a caller bug shows early.
