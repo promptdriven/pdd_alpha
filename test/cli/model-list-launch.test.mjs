@@ -80,3 +80,43 @@ test('rule10 a previously effort-free frozen pair cannot acquire an effort on re
   const frozen={machineId:'local',agent:'codex',model:'observed',effort:null,cliVersion:'old',catalogRevision:'old',source:'defaults'};
   assert.equal((await resolveWorkflowLaunchModel({...input('codex'),frozenSelection:frozen},readable())).code,'bad_args');
 });
+
+for(const agent of ['codex','claude'])for(const initial of [null,{model:'observed',effort:'high'}])for(const later of ['invalid','unreadable']) {
+  test(`R10-FROZEN-DEFAULTS ${agent}/${initial?'settings-fallback':'native-defaults'} survives readable catalog with ${later} later defaults`,async()=>{
+    const chosen=await resolveWorkflowLaunchModel(input(agent),unavailable(initial));
+    assert.equal(chosen.state,'selected');const before=JSON.stringify(chosen.selection);let reads=0;
+    const ports=readable();
+    ports.toolDefaults.read=async()=>{reads++;if(later==='unreadable')throw Error('Settings unavailable');return {model:'later-unknown',effort:'low'};};
+    const read=ports.nativeCatalog.read;ports.nativeCatalog.read=async value=>({...await read(value),nativeDefaults:{model:'later-unknown',effort:'low'}});
+    for(let i=0;i<2;i++) {
+      const next=await resolveWorkflowLaunchModel({...input(agent),frozenSelection:chosen.selection},ports);
+      assert.equal(next.state,'selected');assert.deepEqual(next.selection,chosen.selection);assert.equal(next.warning,undefined);
+      assert.equal(JSON.stringify(chosen.selection),before);
+    }
+    assert.equal(reads,0,'frozen support must not read current defaults');
+  });
+}
+for(const agent of ['codex','claude'])test(`R10-FROZEN-DEFAULTS ${agent} retains actual unsupported, hidden, effort and foreign refusals`,async()=>{
+  const chosen=await resolveWorkflowLaunchModel(input(agent),unavailable({model:'observed',effort:'high'}));
+  for(const failure of ['unknown','hidden','effort','foreign']) {
+    const ports=readable();let reads=0;ports.toolDefaults.read=async()=>{reads++;throw Error('Settings unavailable');};
+    const read=ports.nativeCatalog.read;ports.nativeCatalog.read=async value=>{
+      const raw=await read(value);
+      if(failure==='unknown')raw.models[0].id='other';
+      if(failure==='hidden')raw.models[0].hidden=true;
+      if(failure==='effort'){raw.models[0].efforts=['low'];raw.models[0].defaultEffort='low';}
+      if(failure==='foreign')raw.machineId='other';
+      return raw;
+    };
+    const next=await resolveWorkflowLaunchModel({...input(agent),frozenSelection:chosen.selection},ports);
+    assert.equal(next.state,'refused',failure);assert.equal(next.code,failure==='foreign'?'catalog_unavailable':'bad_args',failure);
+    assert.equal(next.selection,undefined);assert.equal(next.warning,undefined);assert.equal(reads,0);
+  }
+});
+for(const agent of ['codex','claude'])for(const later of ['invalid','unreadable'])test(`R10-FROZEN-DEFAULTS control ${agent} initial ${later} default still refuses before native effects`,async()=>{
+  const ports=readable();ports.toolDefaults.read=async()=>{if(later==='unreadable')throw Error('Settings unavailable');return {model:'unknown',effort:'low'};};
+  const selected=await resolveWorkflowLaunchModel(input(agent),ports);assert.equal(selected.state,'refused');assert.equal(selected.code,'catalog_unavailable');assert.equal(selected.warning,undefined);
+  const stdout=capture(),stderr=capture();
+  assert.equal(await runPdd(['session','--agent',agent],{stdout,stderr,modelPorts:ports,nativeSession:()=>assert.fail('No native effect for an initially invalid/unreadable default')}),1);
+  assert.doesNotMatch(stdout.text+stderr.text,/Model list unavailable; using/);
+});

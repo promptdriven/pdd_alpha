@@ -1,24 +1,28 @@
-// Generated from prompts/cli/workflow-models.prompt.md (sha256: b7efff7960350eb630f7d017dd6d747697d9132bc779c595e15bab0c8b7391c9).
+// Generated from prompts/cli/workflow-models.prompt.md (sha256: b42d0c649408b2ea5406a5b0d539b17c722d53b2337d8e92b6c9e5210740691f).
 import {spawn,execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const text = value => typeof value === 'string' && value.length > 0 && !/[\x00-\x1f\x7f]/u.test(value);
 const refused = code => ({state:'refused',code});
 const validPair = (pair, models) => pair && models.some(m => m.id === pair.model
   && (m.efforts.length ? m.efforts.includes(pair.effort) : pair.effort === null));
+function catalogModels(raw,machineId,agent) {
+  if (!raw || raw.machineId !== machineId || raw.agent !== agent || !text(raw.cliVersion)
+    || !text(raw.revision) || !Array.isArray(raw.models) || !raw.models.length) throw Error();
+  const ids = new Set();
+  const models = raw.models.map(m => {
+    if (!m || !text(m.id) || ids.has(m.id) || !text(m.label) || typeof m.hidden !== 'boolean'
+      || !Array.isArray(m.efforts) || m.efforts.some(e => !text(e)) || new Set(m.efforts).size !== m.efforts.length
+      || (m.efforts.length ? !m.efforts.includes(m.defaultEffort) : m.defaultEffort !== null)) throw Error();
+    ids.add(m.id);
+    return {id:m.id,label:m.label,efforts:[...m.efforts],defaultEffort:m.defaultEffort,hidden:m.hidden};
+  }).filter(m => !m.hidden).map(({hidden,...m})=>m);
+  return models;
+}
 export async function listWorkflowModels({machineId,agent} = {}, ports = {}) {
   if (!text(machineId) || !['codex','claude'].includes(agent)) return refused('bad_args');
   try {
     const raw = await ports.nativeCatalog.read({machineId,agent});
-    if (!raw || raw.machineId !== machineId || raw.agent !== agent || !text(raw.cliVersion)
-      || !text(raw.revision) || !Array.isArray(raw.models) || !raw.models.length) throw Error();
-    const ids = new Set();
-    const models = raw.models.map(m => {
-      if (!m || !text(m.id) || ids.has(m.id) || !text(m.label) || typeof m.hidden !== 'boolean'
-        || !Array.isArray(m.efforts) || m.efforts.some(e => !text(e)) || new Set(m.efforts).size !== m.efforts.length
-        || (m.efforts.length ? !m.efforts.includes(m.defaultEffort) : m.defaultEffort !== null)) throw Error();
-      ids.add(m.id);
-      return {id:m.id,label:m.label,efforts:[...m.efforts],defaultEffort:m.defaultEffort,hidden:m.hidden};
-    }).filter(m => !m.hidden).map(({hidden,...m})=>m);
+    const models = catalogModels(raw,machineId,agent);
     const settings = await ports.toolDefaults.read({machineId,agent});
     const defaults = settings === null ? raw.nativeDefaults : settings;
     if (!models.length || !validPair(defaults,models)) throw Error();
@@ -60,23 +64,32 @@ export async function resolveWorkflowLaunchModel({machineId,agent,selection,froz
     }},
     toolDefaults:{read:async input => {settingsRead = true;return settings = await ports.toolDefaults.read(input);}}
   };
-  const requested = frozen ? nativeDefault ? undefined : {model:frozen.model,...(frozen.effort === null ? {} : {effort:frozen.effort})} : selection;
-  const result = await resolveWorkflowModel({machineId,agent,selection:requested},wrapped);
+  // Recovery validates capability support, not today's default choice.
+  if (frozen) {
+    try {
+      const raw = await wrapped.nativeCatalog.read({machineId,agent});
+      const models = catalogModels(raw,machineId,agent);
+      if (!nativeDefault && !validPair(frozen,models)) return refused('bad_args');
+      return {state:'selected',code:null,selection:{...frozen}};
+    } catch {
+      if (catalogError?.code === 'target_mismatch' || observation && (observation.machineId !== machineId || observation.agent !== agent)) return refused('catalog_unavailable');
+      return {state:'selected',code:null,selection:{...frozen},
+        warning:`Model list unavailable; using ${frozen.model ?? 'native defaults'}`};
+    }
+  }
+  const result = await resolveWorkflowModel({machineId,agent,selection},wrapped);
   // A foreign observation is never permission to launch on this machine.
   if (catalogError?.code === 'target_mismatch' || observation && (observation.machineId !== machineId || observation.agent !== agent)) return refused('catalog_unavailable');
-  if (result.state === 'selected' && frozen && !nativeDefault
-    && (result.selection.model !== frozen.model || result.selection.effort !== frozen.effort)) return refused('bad_args');
-  if (result.state === 'selected') return frozen
-    ? {state:'selected',code:null,selection:{...frozen}} : result;
+  if (result.state === 'selected') return result;
   if (result.code !== 'catalog_unavailable') return result;
   // Reaching Settings with visible, validated rows means the list was readable;
   // an invalid default is still a strict refusal, not a discovery outage.
   if (settingsRead && observation?.models?.some(m => !m.hidden)) return result;
-  if (!frozen && !settingsRead) {
+  if (!settingsRead) {
     try {settings = await ports.toolDefaults?.read({machineId,agent});} catch {settings = null;}
   }
   const pair = settings && text(settings.model) && (settings.effort === null || text(settings.effort)) ? settings : null;
-  const accepted = frozen ? {...frozen} : {machineId,agent,model:pair?.model ?? null,effort:pair?.effort ?? null,
+  const accepted = {machineId,agent,model:pair?.model ?? null,effort:pair?.effort ?? null,
     cliVersion:null,catalogRevision:null,source:pair?'settings-fallback':'native-defaults'};
   return {state:'selected',code:null,selection:accepted,
     warning:`Model list unavailable; using ${accepted.model ?? 'native defaults'}`};

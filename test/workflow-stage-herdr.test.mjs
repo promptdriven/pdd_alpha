@@ -189,3 +189,20 @@ for(const settings of [null,{model:'settings-model',effort:'high'}])test(`rule10
   assert.equal(next.state,'settled',next.reason);assert.deepEqual(next.backend.launchSelection,chosen.selection);
   assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);
 });
+
+for(const settings of [null,{model:'saved',effort:'high'}])for(const later of ['invalid','unreadable'])test(`R10-FROZEN-DEFAULTS actual stage preserves ${settings?'settings-fallback':'native-defaults'} after ${later} later Settings`,async t=>{
+  const h=await harness(t);
+  const {resolveWorkflowLaunchModel}=await import('../src/workflow-models.mjs');
+  const modelPorts={nativeCatalog:{read:async()=>{throw Error('list unavailable');}},toolDefaults:{read:async()=>settings}};
+  const chosen=await resolveWorkflowLaunchModel({machineId:'local',agent:'codex'},modelPorts);
+  assert.equal(chosen.state,'selected');h.input.launchSelection=chosen.selection;let reads=0;
+  modelPorts.nativeCatalog.read=async({machineId,agent})=>({machineId,agent,cliVersion:'1',revision:'now-readable',models:[{id:'saved',label:'Saved',hidden:false,efforts:['high'],defaultEffort:'high'}],nativeDefaults:{model:'saved',effort:'high'}});
+  modelPorts.toolDefaults.read=async()=>{reads++;if(later==='unreadable')throw Error('Settings unavailable');return {model:'unknown-later',effort:'low'};};
+  Object.assign(h.ports,modelPorts);const first=await runHerdrStage(h.input,h.ports);
+  assert.equal(first.state,'settled',first.reason);assert.deepEqual(first.backend.launchSelection,chosen.selection);
+  const args=h.calls.find(c=>c[0]==='agent'&&c[1]==='start');assert.ok(args.includes('--dangerously-bypass-approvals-and-sandbox'));assert.ok(args.includes('--dangerously-bypass-hook-trust'));
+  if(settings){assert.equal(args[args.indexOf('-m')+1],'saved');assert.ok(args.includes('model_reasoning_effort="high"'));}
+  else {assert.equal(args.includes('-m'),false);assert.equal(args.some(a=>a.startsWith('model_reasoning_effort=')),false);}
+  const next=await runHerdrStage({...h.input,backend:first.backend},h.ports);assert.equal(next.state,'settled',next.reason);
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);assert.equal(reads,0);
+});

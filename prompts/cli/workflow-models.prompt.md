@@ -26,12 +26,17 @@ Fallback selections retain machine/agent identity, use null `cliVersion` and
 `catalogRevision`, and source `settings-fallback` or `native-defaults`; the latter
 has null model and effort. Malformed/unreadable Settings supplies no usable default.
 Wrong-machine/tool observations and invalid arguments still refuse. A readable
-catalog keeps all strict unsupported-choice and invalid-default refusals below.
+catalog keeps all strict unsupported-choice refusals and initial invalid-default
+refusals below.
 Freeze the accepted pair or native-default policy at workflow start. A supplied
 `frozenSelection` must match the requested machine/tool and valid selection shape;
-recovery retains it when the list is unavailable, even if Settings changed. If a
-list becomes available, revalidate a saved pair; preserve a saved native-default
-policy without inventing a pair. No effects, credentials or configuration writes.
+recovery retains it when the list is unavailable, even if Settings changed. Frozen
+revalidation reads only the same-machine/tool catalog, never current Settings or
+native defaults: later defaults, including invalid or unreadable Settings, affect
+future starts only. With a readable catalog, require the saved pair's visible model
+and exact effort to remain supported; preserve a saved native-default policy
+without inventing a pair. Initial resolution still validates its current default.
+No effects, credentials or configuration writes.
 
 ## Valid choices and defaults
 
