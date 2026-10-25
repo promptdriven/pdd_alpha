@@ -1,0 +1,487 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-stage-herdr.prompt.md",
+  "story": "../../story/cli/WORKFLOW-STAGE-HERDR.md",
+  "note": "Synthetic contract observations. No implementation or live service results.",
+  "cases": [
+    {
+      "id": "actual-start-ack-pinned",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "startAck": "session A seq4",
+        "liveLookup": "session B seq5"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "prompts": 0
+      }
+    },
+    {
+      "id": "ack-checkpoint-fails",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "startAck": "actual ids",
+        "checkpoint": "fails"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "liveLookups": 0,
+        "prompts": 0
+      }
+    },
+    {
+      "id": "same-ready-first-prompt",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "phase": "ready",
+        "explicitProgress": true,
+        "sameDigest": true,
+        "exactReadyIdentity": true,
+        "processProof": "exact stage pane process/start identity",
+        "journalGeneration": "current durable backendGen"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "prompts": 1,
+        "newStarts": 0
+      }
+    },
+    {
+      "id": "prompt-intent-not-resend",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "phase": "prompt_intent",
+        "delivery": "unknown"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "prompts": 0,
+        "replacementStarts": 0
+      }
+    },
+    {
+      "id": "blocked-startup",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "state": "launch_pending",
+        "nativeId": "actual"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "state": "blocked",
+        "nativeIdPreserved": true,
+        "autoanswered": false
+      }
+    },
+    {
+      "id": "candidate-requires-activity",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "status": "idle",
+        "workingObserved": false
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "settled": false,
+        "accepted": false
+      }
+    },
+    {
+      "id": "candidate-is-not-pass",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "workingThenReady": true,
+        "processProof": "exact stage pane process/start identity",
+        "journalGeneration": "current durable backendGen"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "transport": "settled",
+        "runnerMustValidateHandoffAndTests": true
+      }
+    },
+    {
+      "id": "attach-invalidates-candidate",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "candidateEpoch": 1,
+        "attachmentEpoch": 2
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "oldCandidateAccepted": false,
+        "freshSameAttemptInspection": true,
+        "promptResent": false
+      }
+    },
+    {
+      "id": "guard-busy-poll",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "guard": "WORKFLOW_STAGE_BUSY",
+        "operation": "observe"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "state": "active",
+        "outOfGuardQueries": 0,
+        "newAttempts": 0
+      }
+    },
+    {
+      "id": "close-own-pane",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "accepted": true,
+        "sameIdentityReady": true,
+        "runTabOtherPanes": [
+          "controller",
+          "person"
+        ],
+        "processProof": "exact stage pane process/start identity",
+        "journalGeneration": "current durable backendGen"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "closed": [
+          "stage pane"
+        ],
+        "workspaceCloseCalls": 0
+      }
+    },
+    {
+      "id": "close-reply-lost",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "closeIntent": "durable",
+        "closeReply": "lost"
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "repeatClose": false,
+        "nextStageStarted": false
+      }
+    },
+    {
+      "id": "native-id-null",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "firstPrompt": "not yet",
+        "herdrNativeId": null
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "nativeId": null,
+        "fabricatedId": false
+      }
+    },
+    {
+      "id": "legacy-backend",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "session": "old hidden server",
+        "adopted": false
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "newPrompts": 0,
+        "serverRestart": false,
+        "workspaceClose": false
+      }
+    },
+    {
+      "id": "stage-no-hard-timeout",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "durationMinutes": 31,
+        "agentWorking": true
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "failedForDuration": false,
+        "terminated": false
+      }
+    },
+    {
+      "id": "idle-without-process-proof",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "idle": true,
+        "journalGeneration": 3,
+        "processProof": null
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "ready": false,
+        "prompts": 0
+      }
+    },
+    {
+      "id": "process-without-stage-generation",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "processProof": "exact stage",
+        "journalGeneration": null
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "ready": false,
+        "prompts": 0
+      }
+    },
+    {
+      "id": "failed-claude-resume-needs-you",
+      "criteria": [
+        "AC17"
+      ],
+      "given": {
+        "resume": "Claude refused",
+        "firstPromptAlreadySent": true
+      },
+      "when": {
+        "operation": "workflow-stage-herdr"
+      },
+      "expected": {
+        "needsYou": true,
+        "resumeRetried": false,
+        "handoffRequiresSeparateIntent": true
+      }
+    },
+    {
+      "id": "selection-passed-unchanged",
+      "criteria": [
+        "AC18"
+      ],
+      "given": {
+        "selection": {
+          "machineId": "m1",
+          "agent": "codex",
+          "model": "a",
+          "effort": "high"
+        },
+        "validated": true
+      },
+      "when": {
+        "operation": "runHerdrStage"
+      },
+      "expected": {
+        "launchSelection": {
+          "machineId": "m1",
+          "agent": "codex",
+          "model": "a",
+          "effort": "high"
+        },
+        "checkpointBeforeStart": true,
+        "globalConfigWritten": false
+      }
+    },
+    {
+      "id": "unsupported-frozen-effort",
+      "criteria": [
+        "AC19"
+      ],
+      "given": {
+        "savedSelection": {
+          "model": "a",
+          "effort": "ultra"
+        },
+        "currentSupportedEfforts": [
+          "low",
+          "high"
+        ]
+      },
+      "when": {
+        "operation": "resumeHerdrStage"
+      },
+      "expected": {
+        "state": "blocked",
+        "newPrompt": false,
+        "fallbackModelSelected": false
+      }
+    },
+    {
+      "id": "restore-reconciles-machine-policy",
+      "criteria": [
+        "AC20"
+      ],
+      "given": {
+        "savedActualAccount": "a",
+        "machinePolicy": {
+          "revision": 8,
+          "targetAccountId": "b"
+        },
+        "stoppedProof": true
+      },
+      "when": {
+        "operation": "resumeHerdrStage"
+      },
+      "expected": {
+        "machineTarget": "b",
+        "oldPreferenceRestored": false,
+        "workingGenerations": 1
+      }
+    },
+    {
+      "id": "delayed-native-id-claim",
+      "criteria": [
+        "AC21"
+      ],
+      "given": {
+        "nativeIdAtStart": null,
+        "firstNativeIdAt": [
+          "prompt acknowledgement",
+          "working observation",
+          "ready observation"
+        ],
+        "promotion": "owned"
+      },
+      "when": {
+        "operation": "runHerdrStage"
+      },
+      "expected": {
+        "discoveryDurableBeforePromotion": true,
+        "claimBeforeProgression": true,
+        "prompts": 1,
+        "state": "settled"
+      }
+    },
+    {
+      "id": "delayed-native-id-claim-refused",
+      "criteria": [
+        "AC22"
+      ],
+      "given": {
+        "firstNativeIdAt": [
+          "prompt acknowledgement",
+          "later observation"
+        ],
+        "promotion": [
+          "busy",
+          "retired",
+          "uncertain",
+          "missing acknowledgement"
+        ]
+      },
+      "when": {
+        "operation": "runHerdrStage"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "nativeIdPreserved": true,
+        "settled": false,
+        "prompts": 1,
+        "newStarts": 1,
+        "closeCalls": 0
+      }
+    },
+    {
+      "id": "delayed-native-id-checkpoint-fails",
+      "criteria": [
+        "AC23"
+      ],
+      "given": {
+        "firstNativeIdAt": "later observation",
+        "checkpoint": "failed or missing"
+      },
+      "when": {
+        "operation": "inspectHerdrStage"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "promotions": 0,
+        "nativeIdPreserved": true,
+        "newPrompts": 0
+      }
+    },
+    {
+      "id": "delayed-native-id-inspection-reconciles",
+      "criteria": [
+        "AC21",
+        "AC22",
+        "AC23"
+      ],
+      "given": {
+        "phase": "submitted",
+        "nativeIdAtStart": null,
+        "firstNativeIdAt": "inspection",
+        "checkpoint": "durable",
+        "promotion": "owned"
+      },
+      "when": {
+        "operation": "inspectHerdrStage"
+      },
+      "expected": {
+        "discoveryDurableBeforePromotion": true,
+        "state": "settled",
+        "newPrompts": 0,
+        "newStarts": 0
+      }
+    }
+  ]
+}

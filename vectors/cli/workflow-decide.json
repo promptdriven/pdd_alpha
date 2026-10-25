@@ -1,0 +1,940 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-decide.prompt.md",
+  "story": "../../story/cli/WORKFLOW-DECIDE.md",
+  "note": "Independent synthetic contract cases. Conditions are case notation, not observed results or a transport schema. No live services/models.",
+  "cases": [
+    {
+      "id": "current-rev-proof",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "waitingPerson": {
+          "rev": 57,
+          "stage": "approve",
+          "decisions": [
+            "approve"
+          ]
+        },
+        "requestedRev": 57,
+        "savedRuntime": "old",
+        "launchProof": "exact recorded Node process",
+        "journalControllerGeneration": "matching durable controller.started for this launch"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "started",
+        "exitCode": 0,
+        "driveLineVersion": "old",
+        "paneRunCount": 1,
+        "decisionDoneFromStartAlone": false
+      }
+    },
+    {
+      "id": "stale-rev",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "requestedRev": 57,
+        "waitingPerson": {
+          "rev": 58
+        }
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "stale_decision",
+        "exitCode": 1,
+        "effects": 0
+      }
+    },
+    {
+      "id": "heartbeat-does-not-stale",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "requestedRev": 57,
+        "waitRev": 57,
+        "statusHeartbeatLater": true
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "revMatches": true
+      }
+    },
+    {
+      "id": "recorded-before-stale",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "decisionId": "already recorded same payload",
+        "requestedRev": 57,
+        "currentStage": "build"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "recorded",
+        "exitCode": 0,
+        "writes": 0,
+        "herdrCalls": 0
+      }
+    },
+    {
+      "id": "id-payload-changed",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "decisionId": "recorded approve rev57",
+        "payload": "skip rev57"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "bad_args",
+        "effects": 0
+      }
+    },
+    {
+      "id": "same-id-new-revision",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "decisionId": "recorded approve rev57",
+        "payload": "approve rev58"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "bad_args",
+        "effects": 0
+      }
+    },
+    {
+      "id": "intent-uncertain",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "intent": "uncertain",
+        "samePayload": true
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "uncertain",
+        "newLaunches": 0
+      }
+    },
+    {
+      "id": "typed-without-proof",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "paneRun": "ok",
+        "processInfo": "missing",
+        "journalLaunchProof": "missing"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "uncertain",
+        "exitCode": 1,
+        "paneRunCount": 1
+      }
+    },
+    {
+      "id": "legacy-pair",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "adoptedLegacy": true,
+        "expectedStage": "approve",
+        "expectedSeq": 57,
+        "actualStage": "approve",
+        "actualSeq": 57,
+        "processProof": true,
+        "journalControllerGeneration": "matching durable controller.started for this launch"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "started",
+        "legacyExactChecks": true
+      }
+    },
+    {
+      "id": "both-bindings-required",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "revMatches": true,
+        "legacyStageMatches": false
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "stale_decision",
+        "effects": 0
+      }
+    },
+    {
+      "id": "completed",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "currentStage": null,
+        "requestedRev": 57
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "stale_decision",
+        "effects": 0
+      }
+    },
+    {
+      "id": "held-controller",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "revMatches": true,
+        "lock": "held"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "run_not_waiting",
+        "effects": 0
+      }
+    },
+    {
+      "id": "unknown-controller-lock",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "revMatches": true,
+        "lock": "unknown"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "run_not_waiting",
+        "effects": 0
+      }
+    },
+    {
+      "id": "status-is-not-authority",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "status": "waiting",
+        "journal": "running"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "run_not_waiting",
+        "effects": 0
+      }
+    },
+    {
+      "id": "damaged-history",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "lastLine": "valid",
+        "earlierLine": "malformed"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "failed",
+        "effects": 0
+      }
+    },
+    {
+      "id": "incomplete-decision-scan",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "decisionIdMatch": false,
+        "complete": false
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "failed",
+        "effects": 0
+      }
+    },
+    {
+      "id": "changed-artifacts",
+      "criteria": [
+        "AC17"
+      ],
+      "given": {
+        "waitRev": 57,
+        "requestedRev": 57,
+        "acceptedHash": "changed before drive lock"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "semanticDecisionAccepted": false,
+        "stageEffects": 0
+      }
+    },
+    {
+      "id": "json-result",
+      "criteria": [
+        "AC18"
+      ],
+      "given": {
+        "json": true,
+        "moduleResult": "started"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "stdoutLines": 1,
+        "jsonVersion": 1,
+        "exitCodeFieldOnStdout": false,
+        "messagePrintedTwice": false
+      }
+    },
+    {
+      "id": "text-result",
+      "criteria": [
+        "AC19"
+      ],
+      "given": {
+        "json": false,
+        "moduleResult": "uncertain"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "stdoutLines": 1,
+        "stdoutIsResultMessage": true,
+        "exitCode": 1
+      }
+    },
+    {
+      "id": "unknown-run",
+      "criteria": [
+        "AC20"
+      ],
+      "given": {
+        "lookup": "not ready"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "unknown_run",
+        "effects": 0
+      }
+    },
+    {
+      "id": "unsafe-runtime",
+      "criteria": [
+        "AC21"
+      ],
+      "given": {
+        "savedNode": "/path/has'quote/node"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "unsupported",
+        "effects": 0
+      }
+    },
+    {
+      "id": "server-absent",
+      "criteria": [
+        "AC22"
+      ],
+      "given": {
+        "defaultHerdr": "not running"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "code": "herdr_not_running",
+        "serverStarts": 0
+      }
+    },
+    {
+      "id": "before-first-effect-fsync",
+      "criteria": [
+        "AC23"
+      ],
+      "given": {
+        "intentFsync": "failure"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "state": "failed",
+        "herdrEffects": 0
+      }
+    },
+    {
+      "id": "unadopted-old-run",
+      "criteria": [
+        "AC24"
+      ],
+      "given": {
+        "legacyRun": true,
+        "adopted": false
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "input": "synthetic conditions above"
+      },
+      "expected": {
+        "controllerStarts": 0,
+        "stagePrompts": 0
+      }
+    },
+    {
+      "id": "bad-run-id-uppercase",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6F1C2D3E-0A1B-4C2D-8E3F-1A2B3C4D5E6F",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "messageMustNotContain": "6F1C2D3E-0A1B-4C2D-8E3F-1A2B3C4D5E6F",
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-run-id-version-1",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-1c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-decision-id-variant",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-7a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-decision-case",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "Approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-decision-reject",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "reject",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-seq-zero",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 0,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-seq-fraction",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "approve",
+          "expectSeq": 57.5,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-stage-double-hyphen",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "prompt--story",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-stage-65-chars",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectStage": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "expectSeq": 57,
+          "cwd": "/home/user/work/repo-issue-412",
+          "packageRoot": "/home/user/pdd"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": [],
+        "herdrCallsMustNotInclude": [
+          "workspace.create",
+          "tab.create",
+          "pane.run",
+          "server start"
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "bad-revision-0",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectedRev": 0,
+          "cwd": "/home/user/repo",
+          "packageRoot": "/home/user/.pdd/versions/0.1.0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": 0
+      }
+    },
+    {
+      "id": "bad-revision--1",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectedRev": -1,
+          "cwd": "/home/user/repo",
+          "packageRoot": "/home/user/.pdd/versions/0.1.0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": 0
+      }
+    },
+    {
+      "id": "bad-revision-9007199254740992",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectedRev": 9007199254740992,
+          "cwd": "/home/user/repo",
+          "packageRoot": "/home/user/.pdd/versions/0.1.0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": 0
+      }
+    },
+    {
+      "id": "bad-revision-57",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectedRev": "57",
+          "cwd": "/home/user/repo",
+          "packageRoot": "/home/user/.pdd/versions/0.1.0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": 0
+      }
+    },
+    {
+      "id": "bad-revision-None",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "reads": "must not occur"
+      },
+      "when": {
+        "call": "decideWorkflow",
+        "args": {
+          "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+          "decision": "approve",
+          "decisionId": "0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b",
+          "expectedRev": null,
+          "cwd": "/home/user/repo",
+          "packageRoot": "/home/user/.pdd/versions/0.1.0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "bad_args",
+          "exitCode": 2
+        },
+        "reads": 0
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-worktree.prompt.md (sha256: 9b942984bd903fa6958b3785c462b619b56c01f2cae6357341d642af9b383abc).
+// Generated from prompts/cli/workflow-worktree.prompt.md (sha256: 005b22f4e3f03777f4a97879604119afc4440dfc90f2e7a91cf1995abc007065).
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -209,10 +209,17 @@ export async function allocateIssueWorktree(input, ports = {}) {
     if (await exists(p.issue)) return result('conflict', 'This issue already has a persistent worktree claim in this repository.');
     const worktrees = await externalWorktrees(ctx, c);
     for (const directory of [p.root, p.index, p.runs, p.issues, worktrees]) await ensureDirectory(directory);
-    const fullRef = (await c.git(ctx.sourceRoot, ['rev-parse', '--symbolic-full-name', '--verify', '--end-of-options', baseRef])).trim();
+    const defaultBranch=baseRef.startsWith('refs/remotes/origin/')?baseRef.slice('refs/remotes/origin/'.length):baseRef;
+    await c.git(ctx.sourceRoot,['check-ref-format','--branch',defaultBranch]);
+    // A new allocation must observe the real remote, never a stale tracking ref.
+    await c.git(ctx.sourceRoot,['fetch','origin',defaultBranch]);
+    const pinnedRef=`refs/remotes/origin/${defaultBranch}`;
+    const fullRef = (await c.git(ctx.sourceRoot, ['rev-parse', '--symbolic-full-name', '--verify', '--end-of-options', pinnedRef])).trim();
     if (!fullRef.startsWith('refs/')) fail();
-    const baseSha = (await c.git(ctx.sourceRoot, ['rev-parse', '--verify', '--end-of-options', `${baseRef}^{commit}`])).trim();
+    const baseSha = (await c.git(ctx.sourceRoot, ['rev-parse', '--verify', '--end-of-options', `${pinnedRef}^{commit}`])).trim();
     if (!SHA.test(baseSha)) fail();
+    const fetchedSha=(await c.git(ctx.sourceRoot,['rev-parse','--verify','--end-of-options','FETCH_HEAD^{commit}'])).trim();
+    if(fetchedSha!==baseSha)fail();
     const id = randomUUID(), branch = branchName(workflowName, issueNumber, id);
     await c.git(ctx.sourceRoot, ['check-ref-format', '--branch', branch]);
     const branchExists = await c.raw(ctx.sourceRoot, ['show-ref', '--verify', '--quiet', 'refs/heads/' + branch]);

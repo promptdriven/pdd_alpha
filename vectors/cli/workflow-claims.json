@@ -1,0 +1,199 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-claims.prompt.md",
+  "story": "../../story/cli/WORKFLOW-CLAIMS.md",
+  "note": "Independent synthetic expectations. Each given names conditions, not observed program output. Case notation is not a runtime schema.",
+  "cases": [
+    {
+      "id": "held-across-exec",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "session": "codex:synthetic-native-uuid",
+        "firstProcess": "live",
+        "secondStart": "restore"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "secondState": "busy",
+        "secondExecs": 0,
+        "firstUnaffected": true
+      }
+    },
+    {
+      "id": "process-exit",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "claimHolder": "exited"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "kernelLock": "free",
+        "lockUnlinked": false
+      }
+    },
+    {
+      "id": "pid-reuse",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "savedPid": "exists for unrelated process",
+        "kernelLock": "free"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "exclusionSource": "kernel lock",
+        "killProcesses": false
+      }
+    },
+    {
+      "id": "unknown-lock",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "kernelInspection": "unavailable"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "state": "uncertain",
+        "nativeExecs": 0
+      }
+    },
+    {
+      "id": "provisional-id",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "nativeId": null,
+        "attempt": "saved",
+        "backendGen": 1
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "provisionalHeld": true,
+        "nativeIdInvented": false
+      }
+    },
+    {
+      "id": "late-restore-retired",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "oldNativeId": "retired",
+        "newNativeId": "current",
+        "sameAttempt": true
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "oldStart": "retired",
+        "oldExecs": 0,
+        "workingGenerations": 1
+      }
+    },
+    {
+      "id": "successor-not-stopped",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "successorIntent": true,
+        "oldProcessStoppedProof": false
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "successorMayWork": false
+      }
+    },
+    {
+      "id": "same-live-reattach",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "savedBindings": "same",
+        "process": "same live"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "newNativeProcess": false,
+        "backendGenIncrement": 0
+      }
+    },
+    {
+      "id": "provisional-promotion-atomic",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "nativeId": "newly observed",
+        "provisional": "held",
+        "nativeClaim": "free"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "nativeAcquiredBeforeProvisionalRelease": true,
+        "bindingDurableBeforePrompt": true
+      }
+    },
+    {
+      "id": "provisional-promotion-busy",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "nativeClaim": "held by other process"
+      },
+      "when": {
+        "operation": "workflow-claims"
+      },
+      "expected": {
+        "provisionalRetained": true,
+        "prompts": 0
+      }
+    },
+    {
+      "id": "shared-switch-keeps-agent-exclusion",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "policyRevision": 8,
+        "oldGeneration": 2,
+        "successorGeneration": 3,
+        "oldProcessStopped": false
+      },
+      "when": {
+        "operation": "claimWorkflowSession"
+      },
+      "expected": {
+        "successorMayWork": false,
+        "workingGenerations": 1
+      }
+    }
+  ]
+}

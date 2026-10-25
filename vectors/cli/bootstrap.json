@@ -1,0 +1,332 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/bootstrap.prompt.md",
+  "story": "../../story/cli/BOOTSTRAP.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "stock-mac-no-node",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "nodeOnPath": false,
+        "npxOnPath": false,
+        "trustedArtifacts": true
+      },
+      "when": "Run verified install.sh",
+      "expected": {
+        "verifiedOwnedNodeExecutedBeforeAlpha": true,
+        "systemNodeRequired": false,
+        "setupEntered": true
+      }
+    },
+    {
+      "id": "stock-linux-no-node",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "platform": "linux",
+        "arch": "x64",
+        "nodeOnPath": false,
+        "trustedArtifacts": true
+      },
+      "when": "Run verified install.sh",
+      "expected": {
+        "setupEntered": true,
+        "nodeSource": "PDD-owned absolute path"
+      }
+    },
+    {
+      "id": "missing-trust-root",
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "given": {
+        "descriptor": null,
+        "downloadToolsPresent": true
+      },
+      "when": "Invoke bootstrap",
+      "expected": {
+        "downloadedCodeExecuted": false,
+        "activeInstallChanged": false,
+        "verificationError": true,
+        "nextStepCount": 1
+      }
+    },
+    {
+      "id": "unsupported-platform",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "platform": "win32",
+        "arch": "x64"
+      },
+      "when": "Invoke bootstrap",
+      "expected": {
+        "setupEntered": false,
+        "activeInstallChanged": false,
+        "automaticSudo": false
+      }
+    },
+    {
+      "id": "disk-below-stage-floor",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "freeBytesAfterDownload": 1073741823
+      },
+      "when": "Run preflight",
+      "expected": {
+        "activeInstallChanged": false,
+        "setupEntered": false,
+        "nextStepCount": 1
+      }
+    },
+    {
+      "id": "missing-verifier",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "signatureToolPresent": false,
+        "nodeOnPath": false
+      },
+      "when": "Run preflight",
+      "expected": {
+        "unverifiedNodeExecuted": false,
+        "automaticToolInstall": false,
+        "nextStepCount": 1
+      }
+    },
+    {
+      "id": "literal-setup-argv",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "cwd": "/home/user/my project",
+        "args": [
+          "--name",
+          "$(touch forbidden); literal"
+        ]
+      },
+      "when": "Enter setup after verification",
+      "expected": {
+        "cwd": "/home/user/my project",
+        "argv": [
+          "setup",
+          "--name",
+          "$(touch forbidden); literal"
+        ],
+        "shellEvaluation": false
+      }
+    },
+    {
+      "id": "tool-choice-preserved",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "selectedTools": [
+          "codex"
+        ],
+        "claudeInstalled": false
+      },
+      "when": "Pass control to setup",
+      "expected": {
+        "bootstrapClaudeSignIn": false,
+        "bootstrapAnswersConsent": false,
+        "setupOwnsToolChoice": true
+      }
+    },
+    {
+      "id": "existing-install-newer-bootstrap",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "installed": "R1",
+        "fetchedBootstrap": "R3",
+        "recordHealthy": true
+      },
+      "when": "Invoke setup bootstrap",
+      "expected": {
+        "setupRuntime": "R1",
+        "implicitUpgrade": false,
+        "nativeSignInReads": 0
+      }
+    },
+    {
+      "id": "interrupted-before-flip",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "current": "R1",
+        "transaction": "staged R2"
+      },
+      "when": "Cancel invoking bootstrap before activation",
+      "expected": {
+        "current": "R1",
+        "cleanupScope": "this transaction incomplete files only"
+      }
+    },
+    {
+      "id": "ssh-close-after-acceptance",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "transactionAccepted": true,
+        "independentUpdaterProof": true
+      },
+      "when": "Close invoking SSH session",
+      "expected": {
+        "acceptedUpdateContinues": true,
+        "transactionTracked": true
+      }
+    },
+    {
+      "id": "power-loss-after-flip",
+      "criteria": [
+        "AC4",
+        "AC5"
+      ],
+      "given": {
+        "current": "R2",
+        "recordPhase": "activating",
+        "from": "R1",
+        "to": "R2"
+      },
+      "when": "Rerun installer",
+      "expected": {
+        "recoveryUsesExistingTransaction": true,
+        "freshInstallInvented": false,
+        "repeatBlindFlip": false
+      }
+    },
+    {
+      "id": "resumable-short-setup",
+      "criteria": [
+        "AC4",
+        "AC6"
+      ],
+      "given": {
+        "checkpoint": "owned runtime ready",
+        "transactionId": "T1"
+      },
+      "when": "Print setup progress",
+      "expected": {
+        "concreteResumeCommandUsesTransaction": "T1",
+        "legacyToolInventoryRequired": false,
+        "cleanupCommand": "pdd doctor --cleanup",
+        "resumeCommand": "pdd setup",
+        "newTransactionCreated": false,
+        "resumeFlagAdded": false
+      }
+    },
+    {
+      "id": "shim-shadowed-in-fresh-shell",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "shell": "fish",
+        "winner": "legacy function",
+        "herdrShimWins": true
+      },
+      "when": "Run setup precedence checks",
+      "expected": {
+        "setupGreen": false,
+        "actualWinnerShown": "legacy function",
+        "repairStepCount": 1
+      }
+    },
+    {
+      "id": "ordinary-native-pass-through",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "invocation": "typed claude",
+        "PDDStarted": false,
+        "autoSwitchOwnSessions": false
+      },
+      "when": "Invoke native tool after setup",
+      "expected": {
+        "usesStockSignIn": true,
+        "PDDAccountInjected": false,
+        "newGlobalNativeConfig": false
+      }
+    },
+    {
+      "id": "plain-setup-recovers-recorded-transaction",
+      "criteria": [
+        "AC4",
+        "AC6"
+      ],
+      "given": {
+        "existingTransactionId": "T1",
+        "checkpoint": "runtime ready"
+      },
+      "when": "Rerun pdd setup",
+      "expected": {
+        "transactionId": "T1",
+        "newTransactionCreated": false,
+        "resumeFlagRequired": false,
+        "cleanupRun": false
+      }
+    },
+    {
+      "id": "settings-once-per-machine-tool",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "machine": "M1",
+        "selectedTools": [
+          "codex",
+          "claude"
+        ],
+        "existingMachineToolSettings": true
+      },
+      "when": "Enter optional client setup",
+      "expected": {
+        "accountConfigurationOwner": "machine/tool Settings",
+        "agentAccountQuestion": false,
+        "runAccountQuestion": false,
+        "bootstrapProjectPicker": false,
+        "bootstrapModelList": false
+      }
+    },
+    {
+      "id": "resume-preserves-settings",
+      "criteria": [
+        "AC4",
+        "AC7"
+      ],
+      "given": {
+        "existingTransaction": "T1",
+        "machineToolAccounts": {
+          "M1/codex": "Auto"
+        },
+        "projectBaseFolder": "/home/user/pdd",
+        "modelEffortDefaults": "existing per-tool defaults"
+      },
+      "when": "Rerun pdd setup",
+      "expected": {
+        "transaction": "T1",
+        "machineToolSettingsReset": false,
+        "projectBaseFolder": "/home/user/pdd",
+        "modelEffortDefaultsReset": false
+      }
+    }
+  ]
+}

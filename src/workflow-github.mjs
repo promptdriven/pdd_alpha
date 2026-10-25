@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-github.prompt.md (sha256: c6b061533414187d4c391aeac11c411184e20191e2a3b446339a4ce123ec8424).
+// Generated from prompts/cli/workflow-github.prompt.md (sha256: e2492f285f593683787948c66b0a1f52b0b45e7b7f6501d6104068dc4be64138).
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, open, readFile, realpath } from 'node:fs/promises';

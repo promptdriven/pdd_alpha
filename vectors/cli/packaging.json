@@ -1,0 +1,350 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/packaging.prompt.md",
+  "story": "../../story/cli/PACKAGING.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "isolated-alpha-consumer",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "artifact": "Alpha alone",
+        "clientAvailable": false
+      },
+      "when": "Inspect packed closure and invoke local help/skill/recovery",
+      "expected": {
+        "completeGuideAndReferences": true,
+        "bin": "pdd",
+        "esm": true,
+        "license": "MIT",
+        "engineFloor": ">=22.16.0",
+        "requiresFleetSignIn": false,
+        "requiresPrivateImport": false
+      }
+    },
+    {
+      "id": "private-source-boundary",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "publicArtifact": "candidate"
+      },
+      "when": "Inspect shipped files and dependency closure",
+      "expected": {
+        "privatePhoneClientKeeperCode": false,
+        "credentialsOrCapturedChats": false,
+        "installLifecycleEffects": []
+      }
+    },
+    {
+      "id": "paired-artifacts-complete",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "current": "R1",
+        "alphaVerified": true,
+        "clientVerified": false
+      },
+      "when": "Attempt paired release exposure",
+      "expected": {
+        "current": "R1",
+        "exposedPartialRelease": false,
+        "overwrittenLiveFiles": []
+      }
+    },
+    {
+      "id": "complete-one-flip",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "current": "R1",
+        "alphaVerified": true,
+        "clientVerified": true,
+        "nodeVerified": true
+      },
+      "when": "Activate eligible R2 under the common barrier",
+      "expected": {
+        "current": "R2",
+        "previous": "R1",
+        "visibleMixedPackageRelease": false
+      }
+    },
+    {
+      "id": "missing-signed-client-descriptor",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "alphaAvailable": true,
+        "clientRegistry": "public npm",
+        "signedClientArtifact": null
+      },
+      "when": "Request client installation",
+      "expected": {
+        "clientComplete": false,
+        "registryCredentialRequested": false,
+        "alphaAloneStillUsable": true,
+        "currentUnchanged": true
+      }
+    },
+    {
+      "id": "older-retained-consumer",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "candidate": "R5",
+        "compatibleWithPrevious": true,
+        "retainedRun": "R1",
+        "compatibleWithR1": false
+      },
+      "when": "Evaluate activation compatibility",
+      "expected": {
+        "activationAllowed": false,
+        "runRuntime": "R1"
+      }
+    },
+    {
+      "id": "unknown-control-state",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "fallbackReads": "state written by candidate",
+        "controlState": "future_action"
+      },
+      "when": "Exercise fallback reader/writer contract",
+      "expected": {
+        "permissionToAct": false,
+        "unknownDataPreserved": true
+      }
+    },
+    {
+      "id": "draft-not-publication",
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "given": {
+        "packagePrepared": true,
+        "publicationAuthority": false
+      },
+      "when": "Prepare distribution contract",
+      "expected": {
+        "registryPublish": false,
+        "serviceStart": false
+      }
+    },
+    {
+      "id": "public-proprietary-client",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "clientSourceRepository": "private",
+        "clientPackage": "@promptdriven/pdd-fleet",
+        "userNpmToken": null
+      },
+      "when": "Inspect ordinary-user download contract",
+      "expected": {
+        "registry": "public npm",
+        "license": "proprietary",
+        "requiresUserNpmToken": false,
+        "signedManifestRequired": true,
+        "npmIntegrityRequired": true,
+        "alphaImportsClient": false
+      }
+    },
+    {
+      "id": "failed-lab-cannot-publish",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "immutableCandidate": "R2",
+        "fixtureSet": "F1",
+        "stagingResult": "pass",
+        "labResult": "fail",
+        "signingKeyId": "K1",
+        "testedVersionMatrix": "M1"
+      },
+      "when": "Evaluate release evidence",
+      "expected": {
+        "publicationAllowed": false,
+        "scopeSilentlyCut": false
+      }
+    },
+    {
+      "id": "public-alpha-review-gate",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "reviewedCurrentRevision": true,
+        "fullSuiteGreenOnVM": false
+      },
+      "when": "Evaluate public Alpha merge/publication",
+      "expected": {
+        "mergeAllowed": false,
+        "publicationAllowed": false
+      }
+    },
+    {
+      "id": "public-recovery-service",
+      "criteria": [
+        "AC1",
+        "AC7"
+      ],
+      "given": {
+        "clientInstalled": false,
+        "explicitSetup": true
+      },
+      "when": "Provision Alpha recovery",
+      "expected": {
+        "runsKeeperBootLoginOwner": "Alpha",
+        "claimsPublic": true,
+        "restoreContractPublic": true,
+        "LinkRequired": false,
+        "existingHerdrStopped": false
+      }
+    },
+    {
+      "id": "recovery-service-text-stable",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "installedRelease": "R1",
+        "targetRelease": "R2",
+        "recoveryServiceUnchanged": true
+      },
+      "when": "Rerun setup",
+      "expected": {
+        "recoveryServiceRewritten": false,
+        "competingLinkRecoveryInstalled": false
+      }
+    },
+    {
+      "id": "machine-release-still-needs-iphone-check",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "train": "machine",
+        "CI": "pass",
+        "staging": "pass",
+        "lab": "pass",
+        "manualIPhoneCheck": "missing"
+      },
+      "when": "Evaluate release gate",
+      "expected": {
+        "publicationAllowed": false,
+        "phoneOnlyExemption": false
+      }
+    },
+    {
+      "id": "public-specification-source-retained",
+      "criteria": [
+        "AC1",
+        "AC8"
+      ],
+      "given": {
+        "candidateModule": "synthetic public module",
+        "canonicalPrompt": true,
+        "Story": true,
+        "independentCases": true,
+        "privateSpecificationsPresentElsewhere": true
+      },
+      "when": "Prepare public repository/source release",
+      "expected": {
+        "matchingPublicPromptStoryCasesIncluded": true,
+        "generatedCodeReplacesContract": false,
+        "privateSpecificationsShippedInAlpha": false
+      }
+    },
+    {
+      "id": "specification-before-build",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "part": "synthetic public module",
+        "StoryReady": false,
+        "promptReady": true,
+        "expectedCasesReady": true
+      },
+      "when": "Evaluate readiness to build that part",
+      "expected": {
+        "partReadyToBuild": false,
+        "existingCodeTreatedAsIndependentSpecification": false
+      }
+    },
+    {
+      "id": "machine-settings-survive-update",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "machineToolAccounts": {
+          "M1/codex": "Auto",
+          "M1/claude": "fixed A1"
+        },
+        "projectBaseFolder": "/home/user/pdd",
+        "toolDefaults": {
+          "codex": {
+            "model": "native M1",
+            "effort": "native E1"
+          }
+        },
+        "targetRelease": "R2"
+      },
+      "when": "Install and activate release",
+      "expected": {
+        "machineToolAccountSettingsChanged": false,
+        "projectBaseFolder": "/home/user/pdd",
+        "toolDefaultsChanged": false,
+        "agentRunAccountOverrideAdded": false,
+        "packageModelCapabilityListAdded": false
+      }
+    },
+    {
+      "id": "personal-sign-in-gate-pending",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "reviewedRevision": true,
+        "otherGates": "pass",
+        "personalSignInTest": "waiting for person"
+      },
+      "when": "Evaluate release gate",
+      "expected": {
+        "publicationAllowed": false,
+        "automaticPersonalSignIn": false,
+        "automaticPersonalSignOut": false,
+        "waitingTestReportedPassed": false
+      }
+    },
+    {
+      "id": "authorized-merger-still-reviewed",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "agentAuthorizedToMerge": true,
+        "currentRevisionReviewed": false,
+        "fullSuiteGreenOnVM": true
+      },
+      "when": "Evaluate merge route",
+      "expected": {
+        "mergeAllowed": false,
+        "directPushMain": false
+      }
+    }
+  ]
+}

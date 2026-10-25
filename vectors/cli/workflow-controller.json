@@ -1,0 +1,226 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-controller.prompt.md",
+  "story": "../../story/cli/WORKFLOW-CONTROLLER.md",
+  "note": "Independent synthetic expectations. Each given names conditions, not observed program output. Case notation is not a runtime schema.",
+  "cases": [
+    {
+      "id": "proof-required",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "paneRun": "ok",
+        "processInfo": {
+          "node": "recorded",
+          "argv": "drive same run",
+          "pane": "saved",
+          "startIdentity": "actual"
+        },
+        "journalLaunchGeneration": "matching durable controller.started, generation 1"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "started",
+        "proofPersisted": true,
+        "controllerPaneCount": 1
+      }
+    },
+    {
+      "id": "typed-without-process",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "paneRun": "ok",
+        "processInfo": null,
+        "journalLaunchGeneration": "not a substitute for live proof"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "uncertain",
+        "controllerPaneCount": 1,
+        "controllerCommandRepeated": false
+      }
+    },
+    {
+      "id": "lost-type-with-proof",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "paneRun": "reply_lost",
+        "processInfo": "exact recorded process",
+        "journalLaunchGeneration": "matching durable controller.started, generation 1"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "started",
+        "controllerPaneCount": 1
+      }
+    },
+    {
+      "id": "wrong-node",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "processInfo": "unrelated node in saved pane"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "uncertain",
+        "stagePrompts": 0
+      }
+    },
+    {
+      "id": "reused-pid",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "processInfo": "same pid different start identity"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "uncertain"
+      }
+    },
+    {
+      "id": "intent-not-durable",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "fsync": "fails before tab create"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "failed",
+        "controllerCommandDelivered": false,
+        "newRunTabCreated": false
+      }
+    },
+    {
+      "id": "saved-runtime",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "current": "new",
+        "runtime": "old version and owned Node",
+        "journalLaunchGeneration": "matching durable controller.started, generation 1"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "launchVersion": "old",
+        "launchNode": "saved owned Node"
+      }
+    },
+    {
+      "id": "unsafe-path",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "runtimeNode": "/owned/path'quote/node"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "unsupported",
+        "effects": 0
+      }
+    },
+    {
+      "id": "duplicate-intent",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "savedLaunch": "uncertain",
+        "processInfo": "unproved"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "uncertain",
+        "controllerCommandDelivered": false,
+        "newRunTabCreated": false
+      }
+    },
+    {
+      "id": "focus-and-ownership",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "workspace": "person repo workspace",
+        "existingPanes": [
+          "person"
+        ],
+        "journalLaunchGeneration": "matching durable controller.started, generation 1"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "session": "default",
+        "newRunTab": true,
+        "focusChanged": false,
+        "typedExistingPanes": false
+      }
+    },
+    {
+      "id": "live-without-generation",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "processInfo": "exact live Node drive",
+        "journalGeneration": null
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "uncertain",
+        "started": false
+      }
+    },
+    {
+      "id": "wrong-controller-generation",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "processInfo": "exact live Node drive",
+        "journalGeneration": "prior launch generation"
+      },
+      "when": {
+        "operation": "workflow-controller"
+      },
+      "expected": {
+        "state": "uncertain",
+        "started": false
+      }
+    }
+  ]
+}

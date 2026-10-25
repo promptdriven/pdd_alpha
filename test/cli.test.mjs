@@ -14,18 +14,19 @@ import { listLocalWorkflows } from '../src/workflow-list.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temp = t => { const p = mkdtempSync(join(tmpdir(), 'pdd-alpha-')); t.after(() => rmSync(p, { recursive: true, force: true })); return p; };
+const workflowModels={resolveWorkflowModel:async()=>({state:'selected',selection:{model:'native',effort:null}})};
 const capture = () => ({ text: '', write(value) { this.text += value; } });
 
 // Wrong: deleting the adapter leaves private catalog/validator routes or unknown help succeeds.
 test('ALPHA1: only local plans are admitted without Host disposition or forwarded arguments', () => {
-  assert.deepEqual(PUBLIC_COMMAND_IDS, ['workflow.run', 'workflow.resume', 'workflow.attach', 'workflow.feature', 'workflow.bug', 'workflow.small-change', 'session', 'help', 'version', 'skill', 'completion', 'workflow.list']);
+  for (const id of ['workflow.run','workflow.drive','workflow.status','projects','models','doctor','runs-keeper']) assert.ok(PUBLIC_COMMAND_IDS.includes(id));
   for (const argv of [[], ['--help'], ['-h'], ['help'], ['--version'], ['--skill'], ['completion', 'bash'],
     ['completion', 'zsh'], ['session'], ['session','--agent','claude','Draft a prompt'], ['workflow','feature'], ['workflow','bug','--agent','claude'], ['workflow', 'list'], ['workflow', 'list', '--json'], ['workflow', '--help']]) {
     const input = [...argv], plan = parseArgv(input);
     assert.equal(plan.hostArgv, undefined); assert.equal(plan.host, undefined); assert.deepEqual(input, argv);
   }
   for (const argv of [['session','--agent','unknown'], ['session','--agent'], ['session','--agent','codex','--agent','claude'], ['run', 'start', 'issue'], ['verify'], ['try'], ['lint'], ['runtime', 'discover'],
-    ['replay'], ['call'], ['tests'], ['doctor'], ['phone'], ['machine'], ['repo'], ['agents'], ['workbench'],
+    ['replay'], ['call'], ['tests'], ['machine'], ['repo'], ['workbench'],
     ['unknown', '--help'], ['session', '--dangerously-skip-permissions'], ['workflow', 'new', 'feature'], ['workflow', 'list', '--brief'],
     ['workflow', 'list', '--json', '--json'], ['workflow', 'list', 'extra'], ['completion', 'fish'],
     ['completion'], ['--version', 'extra'], ['--skill', '--json'], ['help', 'runtime'], ['--help', 'extra'], ['\0']]) {
@@ -95,7 +96,7 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
     { cwd, env, encoding: 'utf8', timeout: 5000 });
   for (const argv of [[], ['--help'], ['-h'], ['help'], ['workflow', '--help'], ['workflow', 'list', '--help'], ['completion', '--help'], ['session','--help'], ['workflow','run','--help'], ['workflow','resume','--help'], ['workflow','attach','--help']]) {
     const answer = run(argv); assert.equal(answer.status, 0, answer.stderr); assert.equal(answer.stderr, '');
-    assert.ok(answer.stdout.includes('pdd')); assert.doesNotMatch(answer.stdout, /pdd (?:run|verify|try|lint|runtime|doctor|phone)\b/);
+    assert.ok(answer.stdout.includes('pdd')); assert.doesNotMatch(answer.stdout, /pdd (?:run|verify|try|lint|runtime)\b/);
   }
   const version = run(['--version']); assert.equal(version.status, 0); assert.equal(version.stdout, `${metadata.version}\n`);
   const skill = run(['--skill']); assert.equal(skill.status, 0, skill.stderr);
@@ -111,7 +112,7 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
   const human = run(['workflow', 'list'], packed); assert.equal(human.status, 0); assert.ok(human.stdout.includes('feature'));assert.ok(human.stdout.includes('Listing starts no work.'));
   for (const shell of ['bash', 'zsh']) {
     const result = run(['completion', shell]); assert.equal(result.status, 0, result.stderr);
-    assert.doesNotMatch(result.stdout, /\b(?:runtime|doctor|verify|lint|phone|machine)\b/);
+    assert.doesNotMatch(result.stdout, /\b(?:runtime|verify|lint)\b/);
     const script = join(sandbox, `completion.${shell}`); writeFileSync(script, result.stdout);
     if (shell === 'bash') {
       const loaded = spawnSync('bash', ['--noprofile', '--norc', '-c', 'source "$1"; COMP_WORDS=(pdd workflow ""); COMP_CWORD=2; _pdd_complete; printf "%s\\n" "${COMPREPLY[@]}"', 'test', script], { env, encoding: 'utf8' });
@@ -129,7 +130,7 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
       assert.equal(decisions.status,0,decisions.stderr);assert.deepEqual(decisions.stdout.trim().split('\n').sort(),['approve','skip']);
     }
   }
-  for (const word of ['run', 'verify', 'try', 'lint', 'runtime', 'replay', 'call', 'tests', 'doctor', 'phone', 'machine', 'repo', 'agents', 'workbench', 'unknown']) {
+  for (const word of ['run', 'verify', 'try', 'lint', 'runtime', 'replay', 'call', 'tests', 'machine', 'repo', 'workbench', 'unknown']) {
     for (const args of [[word], [word, '--help'], [word, '-h']]) {
       const result = run(args); assert.equal(result.status, 2, JSON.stringify(args)); assert.equal(result.stdout, ''); assert.ok(result.stderr.trim());
     }
@@ -148,7 +149,7 @@ process.exit(Number(process.env.NATIVE_FIXTURE_EXIT||0));
     const launched = spawnSync(process.execPath,[bin,'session','--agent',agent,request],
       {cwd:project,env:nativeEnv,input:'native stdin is inherited\n',encoding:'utf8',timeout:5000});
     assert.equal(launched.status,0,launched.stderr);const observed=JSON.parse(launched.stdout);
-    assert.equal(observed.executable,join(fakeBin,agent));assert.equal(observed.argv.length,agent==='codex'?5:2); assert.ok(observed.argv.at(-1).includes(request));
+    assert.equal(observed.executable,join(fakeBin,agent));assert.equal(observed.argv.length,agent==='codex'?8:2); assert.ok(observed.argv.at(-1).includes(request));
     assert.ok(observed.argv.at(-1).includes(guide));assert.ok(observed.argv.at(-1).indexOf(guide)<observed.argv.at(-1).indexOf(skillText));
     for(const name of names.filter(name=>name.startsWith('.pdd/workflows/')&&name.endsWith('.md')))
       assert.ok(observed.argv.at(-1).includes(readFileSync(join(packed,name),'utf8')),name);
@@ -160,7 +161,7 @@ process.exit(Number(process.env.NATIVE_FIXTURE_EXIT||0));
       const args=[bin,'workflow',name,...(agent?['--agent',agent]:[]),'--',request+' --help'];
       const launched=spawnSync(process.execPath,args,{cwd:project,env:nativeEnv,input:'selected recipe input',encoding:'utf8',timeout:5000});
       assert.equal(launched.status,0,launched.stderr);const observed=JSON.parse(launched.stdout),payload=observed.argv.at(-1);
-      assert.equal(observed.executable,join(fakeBin,agent??'codex'));assert.equal(observed.argv.length,(agent??'codex')==='codex'?5:2);assert.ok(payload.includes(guide));assert.ok(payload.includes(request+' --help'));
+      assert.equal(observed.executable,join(fakeBin,agent??'codex'));assert.equal(observed.argv.length,(agent??'codex')==='codex'?8:2);assert.ok(payload.includes(guide));assert.ok(payload.includes(request+' --help'));
       assert.equal(observed.cwd,project);assert.equal(observed.input,'selected recipe input');assert.equal(observed.setting,'unchanged');
       const entry=`.pdd/workflows/${name}/WORKFLOW.md`,entryText=readFileSync(join(packed,entry),'utf8');
       assert.ok(payload.includes(entryText));assert.ok(payload.indexOf(guide)<payload.indexOf(entryText));
@@ -180,7 +181,7 @@ process.exit(Number(process.env.NATIVE_FIXTURE_EXIT||0));
   const missingEntry=join(packed,'.pdd/workflows/feature/WORKFLOW.md');rmSync(missingEntry);
   const selectedMissing=spawnSync(process.execPath,[bin,'workflow','feature'],{cwd:project,env:nativeEnv,input:'',encoding:'utf8',timeout:5000});assert.equal(selectedMissing.status,1);assert.equal(selectedMissing.stdout,'');
   const exited=spawnSync(process.execPath,[bin,'session'],{cwd:project,env:{...nativeEnv,NATIVE_FIXTURE_EXIT:'7'},input:'',encoding:'utf8',timeout:5000});
-  assert.equal(exited.status,7);assert.equal(JSON.parse(exited.stdout).argv.length,5);
+  assert.equal(exited.status,7);assert.equal(JSON.parse(exited.stdout).argv.length,8);
   const missing=spawnSync(process.execPath,[bin,'session','--agent','claude'],{cwd:project,env:{...env,PATH:home},input:'',encoding:'utf8',timeout:5000});
   assert.equal(missing.status,127);assert.equal(missing.stdout,'');assert.ok(missing.stderr.includes('claude'));
   rmSync(join(packed,'docs/prompting-guide.md'));
@@ -199,8 +200,8 @@ test('ALPHA5: native argv and process lifetime preserve settings exits and direc
     const context='# Full guide\nquoted "value"\nFull manual recipes';
     const promise=launchNativeSession({agent,cwd:'/project with spaces',context,request:'x; $(command)',stderr:capture()},
       {spawn:(...args)=>{calls.push(args);return child;},signals,stdinIsTTY:false});
-    assert.equal(calls.length,1);assert.equal(calls[0][0],agent);assert.equal(calls[0][1].length,agent==='codex'?5:2);
-    assert.deepEqual(calls[0][1].slice(0,-1),agent==='codex'?['--no-daemon','--dangerously-bypass-approvals-and-sandbox','-c','projects={"/project with spaces"={trust_level="trusted"}}']:['--dangerously-skip-permissions']);
+    assert.equal(calls.length,1);assert.equal(calls[0][0],agent);assert.equal(calls[0][1].length,agent==='codex'?8:2);
+    assert.deepEqual(calls[0][1].slice(0,-1),agent==='codex'?['--no-daemon','--dangerously-bypass-approvals-and-sandbox','--dangerously-bypass-hook-trust','-c','check_for_update_on_startup=false','-c','projects={"/project with spaces"={trust_level="trusted"}}']:['--dangerously-skip-permissions']);
     assert.ok(calls[0][1].at(-1).includes(context));assert.ok(calls[0][1].at(-1).includes('x; $(command)'));
     assert.deepEqual(calls[0][2],{cwd:'/project with spaces',stdio:'inherit',shell:false});
     signals.emit('SIGINT');signals.emit('SIGTERM');signals.emit('SIGHUP');assert.deepEqual(kills,['SIGINT','SIGTERM','SIGHUP']);
@@ -239,9 +240,9 @@ test('ALPHA7: run and resume dispatch structured owner API with exact existing p
   const uuid='a1234567-1234-4123-8123-123456789abc';
   for(const issue of ['42','owner/repo#42','https://github.com/owner/repo/issues/42']){
     const output=capture(),errors=capture(),calls=[];
-    const runner={runWorkflow:async(input,ports)=>{calls.push({input,ports});return {exitCode:2,state:'waiting',runId:uuid,stage:'approve',message:'waiting '+uuid+' approve'};}};
-    const code=await runPdd(['workflow','run','feature',issue,'--agent','claude'],{workflowRunner:runner,cwd:'/chosen',packageRoot:'/bundle',stdout:output,stderr:errors});
-    assert.equal(code,2);assert.equal(calls.length,1);assert.deepEqual(calls[0].input,{name:'feature',issue,agent:'claude',cwd:'/chosen',packageRoot:'/bundle'});
+    const runner={prepareWorkflow:async(input,ports)=>{calls.push({input,ports});return {exitCode:2,state:'waiting',runId:uuid,stage:'approve',message:'waiting '+uuid+' approve'};}};
+    const code=await runPdd(['workflow','run','feature',issue,'--agent','claude'],{workflowModels,workflowRunner:runner,cwd:'/chosen',packageRoot:'/bundle',stdout:output,stderr:errors});
+    assert.equal(code,2);assert.equal(calls.length,1);assert.deepEqual(calls[0].input,{name:'feature',issue,agent:'claude',machineId:'local',cwd:'/chosen',packageRoot:'/bundle',launchSelection:{model:'native',effort:null}});
     assert.equal(typeof calls[0].ports.loadGuidance,'function');assert.equal(calls[0].ports.launchNativeSession,launchNativeSession);
     assert.equal(calls[0].ports.stdout,output);assert.equal(calls[0].ports.stderr,errors);assert.equal(calls[0].input.context,undefined);
     assert.equal(output.text,'waiting '+uuid+' approve\n');assert.equal(errors.text,'');
@@ -254,7 +255,7 @@ test('ALPHA7: run and resume dispatch structured owner API with exact existing p
     assert.equal(code,0);assert.deepEqual(calls,[{runId:uuid,cwd:'/chosen',packageRoot:'/absent-guide',...(decision?{decision}:{})}]);
     assert.equal(output.text,'completed '+uuid+'\n');
   }
-  const calls=[];assert.equal(await runPdd(['workflow','run','small-change','1'],{stdout:capture(),stderr:capture(),workflowRunner:{runWorkflow:async input=>{
+  const calls=[];assert.equal(await runPdd(['workflow','run','small-change','1'],{workflowModels,stdout:capture(),stderr:capture(),workflowRunner:{prepareWorkflow:async input=>{
     calls.push(input);return {exitCode:1,state:'recovery_required',runId:uuid,stage:'change',message:'recovery_required '+uuid};}}}),1);
   assert.equal(calls[0].agent,'codex');assert.equal(calls.length,1);
 });
@@ -269,7 +270,15 @@ test('ALPHA8: runner argument failures and invalid replies are finite without na
   for(const args of invalid){assert.equal(await runPdd(args,{packageRoot:'/absent',stdout:capture(),stderr:capture(),workflowRunner:{
     runWorkflow:()=>assert.fail('No runner'),resumeWorkflow:()=>assert.fail('No runner')}}),2);}
   for(const answer of [undefined,{exitCode:0,state:'invented',message:'no'}, {exitCode:NaN,state:'completed',message:'no'}, {exitCode:0,state:'completed',message:''}]){
-    let calls=0;assert.equal(await runPdd(['workflow','run','feature','42'],{stdout:capture(),stderr:capture(),workflowRunner:{runWorkflow:async()=>{calls++;return answer;}}}),1);assert.equal(calls,1);
+    let calls=0;assert.equal(await runPdd(['workflow','run','feature','42'],{workflowModels,stdout:capture(),stderr:capture(),workflowRunner:{prepareWorkflow:async()=>{calls++;return answer;}}}),1);assert.equal(calls,1);
   }
   let calls=0;assert.equal(await runPdd(['workflow','resume',uuid],{stdout:capture(),stderr:capture(),workflowRunner:{resumeWorkflow:async()=>{calls++;throw Error('possible effect, no retry');}}}),1);assert.equal(calls,1);
+});
+
+test('public link dispatch retains the subcommand and arguments', async () => {
+  const seen = [];
+  const phoneCli = { runLinkCommand: async (argv) => { seen.push(argv); return 0; } };
+  assert.equal(await runPdd(['link','status','--json'], { phoneCli, stdout:capture(), stderr:capture() }), 0);
+  assert.equal(await runPdd(['link','run'], { phoneCli, stdout:capture(), stderr:capture() }), 0);
+  assert.deepEqual(seen, [['status','--json'], ['run']]);
 });

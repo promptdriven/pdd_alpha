@@ -1,3 +1,4 @@
+// Generated from prompts/cli/workflow-artifacts.prompt.md (sha256: f2635c10a487100f61a62114f367c669060ba73b20fe3cf7410f787d1a29ac59).
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';

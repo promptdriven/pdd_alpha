@@ -1,0 +1,245 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-artifacts.prompt.md",
+  "story": "../../story/cli/WORKFLOW-ARTIFACTS.md",
+  "note": "Synthetic expected cases derived from the contract, not implementation results.",
+  "cases": [
+    {
+      "id": "identity-and-bytes",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "expectedIdentity": "run-a/stage-a/issue-a/revision-a",
+        "handoffIdentity": "same",
+        "artifactHash": "matches actual bytes"
+      },
+      "when": {
+        "call": "readWorkflowHandoff"
+      },
+      "expected": {
+        "accepted": true,
+        "identityPreserved": true
+      }
+    },
+    {
+      "id": "wrong-input",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "expectedRevision": "revision-a",
+        "handoffRevision": "revision-b"
+      },
+      "when": {
+        "call": "readWorkflowHandoff"
+      },
+      "expected": {
+        "rejected": true,
+        "completionEvidence": false
+      }
+    },
+    {
+      "id": "closed-schema",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "extraField": "approval",
+        "duplicatePaths": [
+          "story.md",
+          "story.md"
+        ]
+      },
+      "when": {
+        "call": "readWorkflowHandoff"
+      },
+      "expected": {
+        "rejected": true,
+        "approvalInvented": false
+      }
+    },
+    {
+      "id": "missing-required-role",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "requiredRoles": [
+          "prompt",
+          "story",
+          "cases"
+        ],
+        "roles": [
+          "prompt",
+          "cases"
+        ]
+      },
+      "when": {
+        "call": "readWorkflowHandoff"
+      },
+      "expected": {
+        "rejected": true
+      }
+    },
+    {
+      "id": "report-empty-files",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "requiredRoles": [],
+        "files": []
+      },
+      "when": {
+        "call": "readWorkflowHandoff"
+      },
+      "expected": {
+        "accepted": true,
+        "executableEvidenceClaimed": false
+      }
+    },
+    {
+      "id": "hash-case",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "suppliedDigestCase": "upper",
+        "actualDigestCase": "lower",
+        "sameDigest": true
+      },
+      "when": {
+        "call": "assertWorkflowArtifacts"
+      },
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "containment",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "paths": [
+          "../outside.md",
+          "/outside.md",
+          ".git/data",
+          "link-to-outside.md"
+        ]
+      },
+      "when": {
+        "call": "assertWorkflowArtifacts"
+      },
+      "expected": {
+        "rejected": true,
+        "outsideArtifactAccepted": false
+      }
+    },
+    {
+      "id": "handoff-metadata",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "gitMetadata": "ordinary worktree pointer file",
+        "handoff": "inside resolved metadata"
+      },
+      "when": {
+        "call": "readWorkflowHandoff"
+      },
+      "expected": {
+        "accepted": true,
+        "otherHandoffSelected": false
+      }
+    },
+    {
+      "id": "literal-argv",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "testCommands": [
+          [
+            "node",
+            "test.mjs",
+            "literal ; $value"
+          ]
+        ]
+      },
+      "when": {
+        "call": "runWorkflowTestCommands"
+      },
+      "expected": {
+        "argumentBytesPreserved": true,
+        "shellEvaluated": false
+      }
+    },
+    {
+      "id": "no-commands-no-pass",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "testCommands": []
+      },
+      "when": {
+        "call": "runWorkflowTestCommands"
+      },
+      "expected": {
+        "rejected": true,
+        "passed": false
+      }
+    },
+    {
+      "id": "exit-status-not-prose",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "testCommands": [
+          [
+            "node",
+            "test-a.mjs"
+          ],
+          [
+            "node",
+            "test-b.mjs"
+          ]
+        ],
+        "observedExits": [
+          1,
+          0
+        ],
+        "stdout": "PASS"
+      },
+      "when": {
+        "call": "runWorkflowTestCommands"
+      },
+      "expected": {
+        "passed": false,
+        "resultExitCodes": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "spawn-failure",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "commandOutcome": "spawn error"
+      },
+      "when": {
+        "call": "runWorkflowTestCommands"
+      },
+      "expected": {
+        "passed": false,
+        "resultExitCode": null
+      }
+    }
+  ]
+}

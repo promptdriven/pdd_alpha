@@ -1,0 +1,154 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-definitions.prompt.md",
+  "story": "../../story/cli/WORKFLOW-DEFINITIONS.md",
+  "note": "Synthetic expected cases derived from the contract, not implementation results.",
+  "cases": [
+    {
+      "id": "bundled-counts",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "bundledJson": "canonical"
+      },
+      "when": {
+        "read": "WORKFLOW_STAGES"
+      },
+      "expected": {
+        "stageCounts": {
+          "feature": 12,
+          "bug": 11,
+          "small-change": 5
+        }
+      }
+    },
+    {
+      "id": "feature-order",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "workflow": "feature"
+      },
+      "when": {
+        "read": "WORKFLOW_STAGES.feature"
+      },
+      "expected": {
+        "stageIds": [
+          "understand",
+          "visual",
+          "prompt-story",
+          "check",
+          "try",
+          "approve",
+          "prompt-pr",
+          "prompt-merge",
+          "build",
+          "verify",
+          "code-pr",
+          "code-merge"
+        ]
+      }
+    },
+    {
+      "id": "optional-steps-visible",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "workflow": "feature"
+      },
+      "when": {
+        "read": "WORKFLOW_STAGES.feature"
+      },
+      "expected": {
+        "optionalStageIds": [
+          "visual",
+          "try",
+          "prompt-pr"
+        ],
+        "mergeOfOptionalPr": "prompt-merge"
+      }
+    },
+    {
+      "id": "agent-boundaries",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "workflows": [
+          "feature",
+          "bug",
+          "small-change"
+        ]
+      },
+      "when": {
+        "read": "WORKFLOW_STAGES"
+      },
+      "expected": {
+        "maximumNativeSessions": [
+          7,
+          6,
+          3
+        ],
+        "humanPrMergeLaunchAgents": false
+      }
+    },
+    {
+      "id": "immutable-definitions",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "definitions": "loaded"
+      },
+      "when": {
+        "attempt": "nested stage edit"
+      },
+      "expected": {
+        "definitionsUnchanged": true
+      }
+    },
+    {
+      "id": "custom-runtime-names",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "requestedRecipe": "custom-flow",
+        "loaderResult": "valid"
+      },
+      "when": {
+        "consume": "compatibility export and loader selection"
+      },
+      "expected": {
+        "customSelectionAllowed": true,
+        "newImplicitStepKinds": false
+      }
+    },
+    {
+      "id": "pdd-specification-gate",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "proposalRoles": [
+          "cases"
+        ],
+        "recipe": "small-change"
+      },
+      "when": {
+        "operation": "definition-validation"
+      },
+      "expected": {
+        "valid": false,
+        "implementationStarted": false,
+        "missingRoles": [
+          "prompt",
+          "story"
+        ]
+      }
+    }
+  ]
+}

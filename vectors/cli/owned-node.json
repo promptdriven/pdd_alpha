@@ -1,0 +1,239 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/owned-node.prompt.md",
+  "story": "../../story/cli/OWNED-NODE.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "exact-trusted-runtime",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "platform": "linux",
+        "arch": "x64",
+        "artifactVersion": "22.16.0",
+        "trustedIntegrity": true
+      },
+      "when": "stageOwnedNode then ensureOwnedNode under publication lease",
+      "expected": {
+        "node": "/home/user/.pdd/tools/node/22.16.0/bin/node",
+        "nodeVersion": "22.16.0",
+        "changed": true,
+        "systemNodeChanged": false
+      }
+    },
+    {
+      "id": "system-node-removed",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "runNode": "/home/user/.pdd/tools/node/22.16.0/bin/node",
+        "systemNodeMissing": true
+      },
+      "when": "Launch recorded run runtime",
+      "expected": {
+        "executable": "/home/user/.pdd/tools/node/22.16.0/bin/node",
+        "PATHNodeLookup": false
+      }
+    },
+    {
+      "id": "tampered-artifact",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "current": "R1",
+        "integrityMatches": false
+      },
+      "when": "stageOwnedNode then ensureOwnedNode under publication lease",
+      "expected": {
+        "code": "runtime_verification_failed",
+        "downloadedExecutableRun": false,
+        "current": "R1"
+      }
+    },
+    {
+      "id": "unsupported-architecture",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "platform": "darwin",
+        "arch": "unknown",
+        "matchingArtifact": false
+      },
+      "when": "stageOwnedNode then ensureOwnedNode under publication lease",
+      "expected": {
+        "code": "unsupported_runtime",
+        "crossPlatformFallback": false,
+        "activeMutation": false
+      }
+    },
+    {
+      "id": "archive-escape",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "archiveEntry": "../../outside/node"
+      },
+      "when": "Verify/extract candidate",
+      "expected": {
+        "code": "runtime_verification_failed",
+        "outsideWrite": false,
+        "candidateExecuted": false
+      }
+    },
+    {
+      "id": "existing-runtime-conflict",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "installedNodeVersion": "22.16.0",
+        "installedBytesMatch": false
+      },
+      "when": "ensureOwnedNode same version",
+      "expected": {
+        "accepted": false,
+        "overwrittenInstalledBytes": false
+      }
+    },
+    {
+      "id": "reuse-verified-runtime",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "version": "22.16.0",
+        "existingBytesVerified": true
+      },
+      "when": "stageOwnedNode then ensureOwnedNode under publication lease",
+      "expected": {
+        "changed": false,
+        "rewrittenFiles": []
+      }
+    },
+    {
+      "id": "download-interrupted",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "current": "R1",
+        "download": "interrupted"
+      },
+      "when": "stageOwnedNode then ensureOwnedNode under publication lease",
+      "expected": {
+        "code": "runtime_download_failed",
+        "current": "R1",
+        "existingNodeUnchanged": true
+      }
+    },
+    {
+      "id": "bootstrap-no-node",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "systemNode": null,
+        "npx": null,
+        "trustedBootstrapFacilities": true
+      },
+      "when": "Install owned runtime before Alpha",
+      "expected": {
+        "requiresNodeToInstallNode": false,
+        "unverifiedExecutableRun": false
+      }
+    },
+    {
+      "id": "candidate-node-cannot-exec",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "launcherSupportNode": "N1",
+        "candidateNode": "N2",
+        "N2Executable": false
+      },
+      "when": "Launch candidate Link",
+      "expected": {
+        "launcherRecoveryStillRunsUnder": "N1",
+        "systemNodeFallback": false
+      }
+    },
+    {
+      "id": "retained-runtime-node",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "currentNode": "N3",
+        "previousNode": "N2",
+        "oldRunNode": "N1"
+      },
+      "when": "Request Node cleanup",
+      "expected": {
+        "retained": [
+          "N1",
+          "N2",
+          "N3"
+        ],
+        "removed": []
+      }
+    },
+    {
+      "id": "engine-floor",
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "given": {
+        "artifactVersion": "20.0.0",
+        "targetMinimum": "22.16.0",
+        "integrityValid": true
+      },
+      "when": "stageOwnedNode then ensureOwnedNode under publication lease",
+      "expected": {
+        "accepted": false,
+        "runtimePublished": false
+      }
+    },
+    {
+      "id": "node-stage-does-not-hold-global-lock",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "transactionId": "T1",
+        "setupOwnsUpdateLock": true,
+        "artifactTrusted": true
+      },
+      "when": "stageOwnedNode",
+      "expected": {
+        "downloadMayProceed": true,
+        "stagedNodeUnderUniqueTemporaryFolder": true,
+        "currentChanged": false
+      }
+    },
+    {
+      "id": "node-publication-has-no-download",
+      "criteria": [
+        "AC1",
+        "AC6"
+      ],
+      "given": {
+        "verifiedStagedNode": "N2",
+        "leaseHeld": true
+      },
+      "when": "ensureOwnedNode",
+      "expected": {
+        "networkRequests": 0,
+        "finalNodePathAbsolute": true,
+        "runtimePublicationLocked": true
+      }
+    }
+  ]
+}

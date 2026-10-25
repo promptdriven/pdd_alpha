@@ -1,0 +1,576 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/doctor.prompt.md",
+  "story": "../../story/cli/DOCTOR.md",
+  "note": "Synthetic independent expected cases from the public diagnostic contract. This JSON is a specification, not an executable harness or observed implementation output. Expected objects assert named public results/effects; unnamed fields are not constrained. No real credentials, service changes or filesystem cleanup are used.",
+  "cases": [
+    {
+      "id": "alpha-only-local-health",
+      "criteria": [
+        "AC2",
+        "AC3"
+      ],
+      "given": {
+        "clientInstalled": false,
+        "alphaChecks": [
+          {
+            "id": "runtime",
+            "state": "pass",
+            "detail": "Runtime readable.",
+            "next": null
+          }
+        ]
+      },
+      "when": "runDoctorCommand([])",
+      "expected": {
+        "exitCode": 0,
+        "privateClientPackageRequired": false,
+        "clientChecksState": "skip",
+        "clientSkipReason": "Client not installed.",
+        "alphaChecksRetained": true
+      }
+    },
+    {
+      "id": "json-health-contract",
+      "criteria": [
+        "AC1",
+        "AC3"
+      ],
+      "given": {
+        "argv": [
+          "--json"
+        ],
+        "checks": [
+          {
+            "id": "runtime",
+            "state": "fail",
+            "detail": "Missing owned Node.",
+            "next": "Rerun pdd setup."
+          },
+          {
+            "id": "disk",
+            "state": "pass",
+            "detail": "Enough space.",
+            "next": null
+          }
+        ]
+      },
+      "when": "Print diagnostic result",
+      "expected": {
+        "exitCode": 1,
+        "stdoutJSON": {
+          "ok": false,
+          "checks": [
+            {
+              "id": "runtime",
+              "state": "fail",
+              "detail": "Missing owned Node.",
+              "next": "Rerun pdd setup."
+            },
+            {
+              "id": "disk",
+              "state": "pass",
+              "detail": "Enough space.",
+              "next": null
+            }
+          ]
+        },
+        "stdoutLineCount": 1,
+        "rawExceptionPrinted": false
+      }
+    },
+    {
+      "id": "text-result-and-one-next-step",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "checks": [
+          {
+            "id": "disk",
+            "state": "fail",
+            "detail": "Low disk.",
+            "next": "Free 1 GB."
+          }
+        ]
+      },
+      "when": "Print default text",
+      "expected": {
+        "stdout": "FAIL disk: Low disk.\n  Next: Free 1 GB.\n",
+        "exitCode": 1
+      }
+    },
+    {
+      "id": "combined-modes-refused",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "argv": [
+          "--json",
+          "--cleanup"
+        ]
+      },
+      "when": "runDoctorCommand",
+      "expected": {
+        "exitCode": 2,
+        "usageOnStderr": true,
+        "diagnosticReads": [],
+        "cleanupEffects": [],
+        "privatePackageRequired": false
+      }
+    },
+    {
+      "id": "unknown-operand-refused",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "argv": [
+          "repair-all"
+        ]
+      },
+      "when": "runDoctorCommand",
+      "expected": {
+        "exitCode": 2,
+        "usageOnStderr": true,
+        "effects": []
+      }
+    },
+    {
+      "id": "duplicate-mode-refused",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "argv": [
+          "--json",
+          "--json"
+        ]
+      },
+      "when": "runDoctorCommand",
+      "expected": {
+        "exitCode": 2,
+        "checksExecuted": false
+      }
+    },
+    {
+      "id": "installed-client-self-check-unavailable",
+      "criteria": [
+        "AC2",
+        "AC4"
+      ],
+      "given": {
+        "argv": [
+          "--check-only"
+        ],
+        "clientInstalled": true,
+        "clientAdapterAvailable": false
+      },
+      "when": "Run candidate self-check",
+      "expected": {
+        "exitCode": 1,
+        "clientSelfCheckState": "fail",
+        "pretendsClientAbsent": false
+      }
+    },
+    {
+      "id": "adapter-failure-is-one-failed-check",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "clientInstalled": true,
+        "adapterError": "synthetic unavailable",
+        "otherAlphaChecksPass": true
+      },
+      "when": "Collect optional client check result",
+      "expected": {
+        "exitCode": 1,
+        "errorEscapes": false,
+        "remainingAlphaChecksReported": true,
+        "rawAdapterErrorDumped": false
+      }
+    },
+    {
+      "id": "check-only-temporary-paths",
+      "criteria": [
+        "AC4",
+        "AC8"
+      ],
+      "given": {
+        "argv": [
+          "--check-only"
+        ],
+        "candidateRoot": "/home/user/.pdd/update/staging/T1",
+        "selectedNode": "verified temporary N2",
+        "requiredFilesReadable": true,
+        "clientInstalled": false
+      },
+      "when": "Run candidate public self-check",
+      "expected": {
+        "exitCode": 0,
+        "checkedRoot": "/home/user/.pdd/update/staging/T1",
+        "usesCurrentInstead": false,
+        "networkEffects": [],
+        "writes": [],
+        "serviceMutations": []
+      }
+    },
+    {
+      "id": "missing-required-module-is-fail",
+      "criteria": [
+        "AC2",
+        "AC4"
+      ],
+      "given": {
+        "argv": [
+          "--check-only"
+        ],
+        "requiredPublicModuleMissing": true
+      },
+      "when": "Inspect candidate module closure",
+      "expected": {
+        "exitCode": 1,
+        "requiredModuleState": "fail",
+        "requiredModuleSkipped": false
+      }
+    },
+    {
+      "id": "remote-check-skipped-in-check-only",
+      "criteria": [
+        "AC3",
+        "AC4"
+      ],
+      "given": {
+        "argv": [
+          "--check-only"
+        ],
+        "clientInstalled": true,
+        "localClientChecksAvailable": true,
+        "remoteKeeperStatus": "unknown",
+        "requiredLocalChecksPass": true
+      },
+      "when": "Run local-only diagnostics",
+      "expected": {
+        "remoteCheckState": "skip",
+        "remoteCheckHasReason": true,
+        "networkEffects": [],
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "all-optional-unavailable-not-alpha-failure",
+      "criteria": [
+        "AC2",
+        "AC3"
+      ],
+      "given": {
+        "alphaChecksPass": true,
+        "optionalClientAbsent": true,
+        "platformOnlyCheckInapplicable": true
+      },
+      "when": "Compute health result",
+      "expected": {
+        "ok": true,
+        "exitCode": 0,
+        "optionalChecksHaveSkipReason": true
+      }
+    },
+    {
+      "id": "report-goes-only-to-stdout",
+      "criteria": [
+        "AC5",
+        "AC8"
+      ],
+      "given": {
+        "argv": [
+          "--report"
+        ],
+        "versions": "synthetic matrix",
+        "installPhase": "checked",
+        "diskFreeBytes": 2147483648,
+        "safeLogLines": [
+          "local check passed"
+        ]
+      },
+      "when": "Produce support report",
+      "expected": {
+        "destination": "stdout",
+        "uploadEffects": [],
+        "reportFilesCreated": [],
+        "safeFactsIncluded": true
+      }
+    },
+    {
+      "id": "report-redacts-or-omits-unsafe-lines",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "argv": [
+          "--report"
+        ],
+        "logLineKinds": [
+          "safe status",
+          "token-bearing",
+          "message text",
+          "pairing link",
+          "private key",
+          "push endpoint",
+          "approval proof"
+        ],
+        "unknownAdapterFields": true
+      },
+      "when": "Produce support report",
+      "expected": {
+        "unsafePayloadsPrinted": false,
+        "unredactableLinesOmitted": true,
+        "rawUnknownAdapterFieldsPrinted": false
+      }
+    },
+    {
+      "id": "report-log-cap",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "argv": [
+          "--report"
+        ],
+        "safeLogLineCount": 201
+      },
+      "when": "Produce support report",
+      "expected": {
+        "printedLogLineCount": 200
+      }
+    },
+    {
+      "id": "cleanup-needs-interactive-terminal",
+      "criteria": [
+        "AC6",
+        "AC8"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "stdinIsTTY": false
+      },
+      "when": "Request cleanup",
+      "expected": {
+        "exitCode": 1,
+        "cleanupEffects": [],
+        "rerunInteractivelyStepPresent": true
+      }
+    },
+    {
+      "id": "cleanup-keep-is-success",
+      "criteria": [
+        "AC6",
+        "AC8"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "stdinIsTTY": true,
+        "ownedItem": "legacy PDD unit",
+        "choice": "keep"
+      },
+      "when": "Review exact item and effect",
+      "expected": {
+        "exitCode": 0,
+        "itemRetained": true,
+        "cleanupEffects": [],
+        "keepOffered": true
+      }
+    },
+    {
+      "id": "cleanup-eof-retains-unprocessed",
+      "criteria": [
+        "AC6",
+        "AC8"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "stdinIsTTY": true,
+        "unprocessedItems": [
+          "old unit",
+          "legacy helper"
+        ],
+        "input": "EOF"
+      },
+      "when": "Await per-item choice",
+      "expected": {
+        "unprocessedItemsRetained": true,
+        "implicitUnload": false,
+        "implicitRemove": false
+      }
+    },
+    {
+      "id": "cleanup-explicit-owned-unload",
+      "criteria": [
+        "AC6",
+        "AC7"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "stdinIsTTY": true,
+        "item": "exact owned legacy unit",
+        "itemIdentityUnchanged": true,
+        "liveReferences": false,
+        "choice": "unload"
+      },
+      "when": "Recheck and apply that per-item choice",
+      "expected": {
+        "exactSelectedUnitUnloaded": true,
+        "removeAlsoApplied": false,
+        "processNameKill": false,
+        "unrelatedServiceChanged": false
+      }
+    },
+    {
+      "id": "cleanup-target-changes-before-effect",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "choice": "remove",
+        "itemIdentityRecheck": "changed"
+      },
+      "when": "Recheck before remove",
+      "expected": {
+        "targetRetained": true,
+        "exitCode": 1,
+        "failureNextStepPresent": true,
+        "cleanupEffect": false
+      }
+    },
+    {
+      "id": "cleanup-live-reference-blocks-removal",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "choice": "remove",
+        "liveRunReferencesItem": true
+      },
+      "when": "Recheck proposed cleanup",
+      "expected": {
+        "itemRetained": true,
+        "worktreeRemoved": false,
+        "HerdrStopped": false,
+        "agentSignalled": false,
+        "controllerSignalled": false,
+        "exitCode": 1
+      }
+    },
+    {
+      "id": "read-modes-do-not-repair",
+      "criteria": [
+        "AC4",
+        "AC8"
+      ],
+      "given": {
+        "argvVariants": [
+          [],
+          [
+            "--json"
+          ],
+          [
+            "--report"
+          ],
+          [
+            "--check-only"
+          ]
+        ],
+        "checksFindRepairNeeded": true
+      },
+      "when": "Run each read mode",
+      "expected": {
+        "effects": [],
+        "stockAuthReads": [],
+        "signInOrRefresh": false,
+        "repairStepReportedOnly": true
+      }
+    },
+    {
+      "id": "cleanup-failure-no-blind-repeat",
+      "criteria": [
+        "AC3",
+        "AC7"
+      ],
+      "given": {
+        "argv": [
+          "--cleanup"
+        ],
+        "choice": "unload",
+        "effectResult": "failed or uncertain"
+      },
+      "when": "Report chosen item result",
+      "expected": {
+        "exitCode": 1,
+        "automaticRepeat": false,
+        "furtherDestructiveAction": false,
+        "nextStepPresent": true
+      }
+    },
+    {
+      "id": "machine-tool-settings-are-read-only-facts",
+      "criteria": [
+        "AC8",
+        "AC9"
+      ],
+      "given": {
+        "clientInstalled": true,
+        "localAccountFact": {
+          "machine": "M1",
+          "tool": "codex",
+          "setting": "Auto"
+        },
+        "argv": [
+          "--report"
+        ]
+      },
+      "when": "Report redacted client diagnostics",
+      "expected": {
+        "machineToolSettingsWritten": false,
+        "agentAccountSetterOffered": false,
+        "runAccountSetterOffered": false,
+        "projectSelectorOffered": false
+      }
+    },
+    {
+      "id": "check-only-no-capability-discovery",
+      "criteria": [
+        "AC4",
+        "AC9"
+      ],
+      "given": {
+        "argv": [
+          "--check-only"
+        ],
+        "clientInstalled": true,
+        "nativeModelCapabilityCache": "not loaded"
+      },
+      "when": "Run candidate self-check",
+      "expected": {
+        "nativeModelListQuery": false,
+        "nativeEffortProbe": false,
+        "bundledCapabilitiesUsed": false,
+        "launchDefaultsChanged": false
+      }
+    }
+  ]
+}

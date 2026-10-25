@@ -10,6 +10,14 @@ Own `src/workflow-github.mjs`, exporting only the four module functions below. H
 
 `prepareWorkflowPr({cwd,runId,stageId,repository,baseBranch,bodyFile},ports)` returns exactly `{repository,runId,stageId,headBranch,baseBranch,headSha,marker,title,bodyFile}`. Run/stage identifiers are nonempty ASCII letters/digits/dot/underscore/hyphen, at most160 characters, so the marker is unambiguous. Verify repository matches origin, HEAD is a committed named topic branch different from base, the selected remote base ref exists, and at least one committed change is ahead of it. Refuse staged/unstaged changes and unrelated untracked files. The declared PR body file may itself be untracked metadata; never overwrite a tracked file. Refuse a body path with a symlink at the file or any ancestor, a nonregular file, or a multiply linked file; metadata aliases must not redirect body writes into source. Preserve existing regular authored body files, and leave parent creation to the caller. Preserve an existing authored body, use the actual latest commit subject as title, and write one own-line `<!-- pdd-workflow:<runId>:<stageId> -->` marker. An existing different/duplicate workflow marker refuses rather than replacing another intent. Return its absolute body file path. No push or PR write occurs here.
 
+## Advisory secret scan
+
+Before `publishWorkflowPr`, the runner requests an advisory scan of the exact
+publication input. Findings add a redacted warning note to the authored PR body
+and raise Needs you. Never include a matched secret. This warning does not
+block an otherwise authorized publication or authorize publishing failed tests.
+Unavailable scanning is reported as unverified. No new strict publication gate.
+
 ## One publication and read-only recovery
 
 The runner must durably save the exact prepared intent BEFORE calling `publishWorkflowPr({cwd,intent},ports)` once. The helper has no journal and cannot certify that save; unknown effects normally use only `reconcileWorkflowPr({cwd,intent},ports)`. Missing PR alone never permits another publication. The explicit absence-checked recovery below is the only exception.
@@ -51,6 +59,9 @@ Optional `ports.execFile(file,args,{cwd})` returns or resolves `{stdout,stderr?,
 </details>
 
 ## Dependencies
+
+- [Story](../../story/cli/WORKFLOW-GITHUB.md) and [cases](../../vectors/cli/workflow-github.json):
+  verification inputs with independent expected outcomes.
 
 - Load the entire [Prompting guide](../../docs/prompting-guide.md) for authoring and generation; it owns module contracts and preservation. The helper owns local-runner GitHub effects, not CLI dispatch.
 - Runtime: Node `child_process.execFile`, `fs/promises`, `path` and `util`; installed normal Git and GitHub CLI (`git remote/status/symbolic-ref/rev-parse/rev-list/log/check-ref-format/push/ls-files/ls-remote`, `gh repo view`, `gh api`, `gh pr list/create`). Use their normal login/environment. No private modules or service dependencies.

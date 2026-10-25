@@ -1,11 +1,12 @@
 import test from 'node:test';
+import vectors from '../vectors/cli/workflow-worktree.json' with {type:'json'};
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile, rm, readdir, lstat, symlink, mkdir, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, resolve } from 'node:path';
 import { allocateIssueWorktree, lookupIssueWorktree } from '../src/workflow-worktree.mjs';
 
 const execute = promisify(execFile);
@@ -22,6 +23,7 @@ async function fixture(t) {
   const ports = { async execFile(file, args, options) {
     assert.equal(file, 'git'); assert.deepEqual(Object.keys(options), ['cwd']);
     calls.push({ file, args: [...args], cwd: options.cwd });
+    if(args[0]==='fetch'){const head=(await git('rev-parse',args[2])).stdout.trim();await git('update-ref',`refs/remotes/origin/${args[2]}`,head);const path=(await gitAt(options.cwd,'rev-parse','--git-path','FETCH_HEAD')).stdout.trim();await writeFile(resolve(options.cwd,path),head+'\n');return {stdout:''};}
     return execute(file, args, { ...options, encoding: 'utf8' });
   } };
   const input = (issueNumber = 1, extra = {}) => ({ cwd, repository: 'Acme/Project', issueNumber,
@@ -200,9 +202,10 @@ test('partial intent or missing issue claim is retained and never repaired or ad
 const moduleUrl = new URL('../src/workflow-worktree.mjs', import.meta.url).href;
 function subprocessAllocator(input, crash) {
   const code = `import { allocateIssueWorktree } from ${JSON.stringify(moduleUrl)};
-    import { execFile } from 'node:child_process'; import { promisify } from 'node:util';
+    import { execFile } from 'node:child_process'; import { promisify } from 'node:util';import {writeFile} from 'node:fs/promises';
     const execute = promisify(execFile), crash = process.argv[2];
     const ports = { async execFile(file,args,options) {
+      if(args[0]==='fetch'){const head=(await execute('git',['rev-parse',args[2]],options)).stdout.trim();await execute('git',['update-ref','refs/remotes/origin/'+args[2],head],options);const path=(await execute('git',['rev-parse','--git-path','FETCH_HEAD'],options)).stdout.trim();await writeFile(path,head+'\\n');return {stdout:''};}
       const add = args[0] === 'worktree' && args[1] === 'add';
       if (add && crash === 'before') process.exit(77);
       const response = await execute(file,args,{...options,encoding:'utf8'});
@@ -485,4 +488,16 @@ test('external saved assignment cannot substitute an arbitrary outside sibling p
   assert(readOnly(f.calls)); assert.equal(adds(f.calls).length, 0);
   assert.deepEqual(await snapshot(join(f.common, 'pdd', 'worktree-assignments')), before);
   assert.equal(await readFile(join(a.worktreePath, 'source.txt'), 'utf8'), 'committed base\n');
+});
+
+test('independent fetch-failure retains stale local base without creating a worktree',async t=>{
+  const f=await fixture(t),original=f.ports.execFile;f.ports.execFile=async(file,args,options)=>{if(args[0]==='fetch')throw Error('remote unavailable');return original(file,args,options);};
+  const result=await allocateIssueWorktree(f.input(),f.ports);assert.equal(result.state,vectors.cases.find(c=>c.id==='fetch-failure').expected.state);assert.equal(adds(f.calls).length,0);
+});
+
+test('successful fetch with a stale remote-tracking ref cannot allocate from the old base',async t=>{
+  const f=await fixture(t),initial=(await f.git('rev-parse','HEAD')).stdout.trim();await f.git('update-ref','refs/remotes/origin/main',initial);
+  await writeFile(join(f.cwd,'new.txt'),'new remote commit\n');await f.git('add','.');await f.git('commit','-m','Fresh remote commit');const fresh=(await f.git('rev-parse','HEAD')).stdout.trim();
+  const original=f.ports.execFile;f.ports.execFile=async(file,args,options)=>{if(args[0]==='fetch'){await writeFile(join(f.common,'FETCH_HEAD'),fresh+'\n');return {stdout:''};}return original(file,args,options);};
+  const result=await allocateIssueWorktree(f.input(),f.ports);assert.equal(result.state,vectors.cases.find(c=>c.id==='fetch-tracking-mismatch').expected.state);assert.equal(adds(f.calls).length,0);
 });

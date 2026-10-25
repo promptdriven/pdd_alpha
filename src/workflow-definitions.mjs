@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-definitions.prompt.md (sha256: 788d86597f1c2c87df54fde2d34d7f721c3212d187106f2ff57526cfea03f86f).
+// Generated from prompts/cli/workflow-definitions.prompt.md (sha256: 986c4859dc402ab8c281fc977408b6f10002f82c63542bfe366d8342e2265455).
 import { fileURLToPath } from 'node:url';
 import { loadWorkflowDefinition } from './workflow-definition-loader.mjs';
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));

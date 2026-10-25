@@ -1,0 +1,278 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-definition-loader.prompt.md",
+  "story": "../../story/cli/WORKFLOW-DEFINITION-LOADER.md",
+  "note": "Synthetic expected cases derived from the contract, not implementation results.",
+  "cases": [
+    {
+      "id": "project-overrides-bundle",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "projectRecipe": "valid",
+        "bundledRecipe": "valid"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "source": "project",
+        "mixedSources": false
+      }
+    },
+    {
+      "id": "invalid-local-refuses",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "projectDirectory": "exists",
+        "projectWorkflowJson": "missing",
+        "bundledRecipe": "valid"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "rejected": true,
+        "bundledFallback": false
+      }
+    },
+    {
+      "id": "bundle-when-local-absent",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "projectParents": "absent",
+        "bundledRecipe": "valid"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "source": "bundled"
+      }
+    },
+    {
+      "id": "safe-content",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "instruction": "../other.md"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "rejected": true,
+        "undeclaredContentIncluded": false
+      }
+    },
+    {
+      "id": "exact-snapshot",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "files": [
+          "workflow.json",
+          "overview.md",
+          "stage.md"
+        ],
+        "edit": "stage Markdown changed"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "snapshotContent": "actual selected bytes",
+        "orderedPaths": [
+          "overview.md",
+          "stage.md",
+          "workflow.json"
+        ],
+        "digestChanged": true
+      }
+    },
+    {
+      "id": "immutable-output",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "definition": "valid"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition",
+        "then": "attempt nested mutation"
+      },
+      "expected": {
+        "returnedDefinitionUnchanged": true
+      }
+    },
+    {
+      "id": "stage-boundary",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "stageCounts": [
+          64,
+          65
+        ]
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "acceptedCounts": [
+          64
+        ],
+        "rejectedCounts": [
+          65
+        ]
+      }
+    },
+    {
+      "id": "file-boundary",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "fileSizesBytes": [
+          262144,
+          262145
+        ],
+        "snapshotUnderLimit": true
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "acceptedSizes": [
+          262144
+        ],
+        "rejectedSizes": [
+          262145
+        ]
+      }
+    },
+    {
+      "id": "approval-graph",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "graph": "work before proposal"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "rejected": true,
+        "commandsExecuted": false
+      }
+    },
+    {
+      "id": "verify-after-work",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "graph": "accepted proposal -> verify -> work -> verified PR"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "rejected": true
+      }
+    },
+    {
+      "id": "merge-binding",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "requiresMerge": "later-or-wrong-kind"
+      },
+      "when": {
+        "call": "loadWorkflowDefinition"
+      },
+      "expected": {
+        "rejected": true
+      }
+    },
+    {
+      "id": "arbitrary-safe-names",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "names": [
+          "zebra",
+          "custom-flow",
+          "feature"
+        ],
+        "allValid": true
+      },
+      "when": {
+        "call": "listWorkflowDefinitions"
+      },
+      "expected": {
+        "names": [
+          "custom-flow",
+          "feature",
+          "zebra"
+        ],
+        "nativeStarted": false,
+        "installedRecipes": false
+      }
+    },
+    {
+      "id": "invalid-discovery",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "discovered": [
+          "valid",
+          "invalid"
+        ]
+      },
+      "when": {
+        "call": "listWorkflowDefinitions"
+      },
+      "expected": {
+        "rejected": true,
+        "errorIdentifiesDefinition": true
+      }
+    },
+    {
+      "id": "pdd-specification-gate",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "proposalRoles": [
+          "cases"
+        ],
+        "recipe": "small-change"
+      },
+      "when": {
+        "operation": "definition-validation"
+      },
+      "expected": {
+        "valid": false,
+        "implementationStarted": false,
+        "missingRoles": [
+          "prompt",
+          "story"
+        ]
+      }
+    }
+  ]
+}

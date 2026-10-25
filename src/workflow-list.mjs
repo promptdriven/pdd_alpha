@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-list.prompt.md (sha256: 4804e56894ad44ffa356cbd16fb99847fb77e4d394a683e91bf8449b1898b680).
+// Generated from prompts/cli/workflow-list.prompt.md (sha256: a686b823da85530ce5db9c657a2cfb6196e055407425aec1f45273253f803339).
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -25,6 +25,8 @@ export function listLocalWorkflows({ cwd = process.cwd(), readDir = readdirSync,
     const directory = join(root, entry.name);
     const file = join(directory, 'WORKFLOW.md');
     try {
+      const directoryInfo=stat(directory);
+      if(!directoryInfo.isDirectory()||directoryInfo.isSymbolicLink())continue;
       const fileInfo = stat(file);
       if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) continue;
       workflows.push({ name: entry.name, file: relative(cwd, file) });

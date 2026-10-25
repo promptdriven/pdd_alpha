@@ -1,0 +1,327 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/versions.prompt.md",
+  "story": "../../story/cli/VERSIONS.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "complete-runtime",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "current": "R2",
+        "runtimeComplete": true,
+        "clientIncluded": true
+      },
+      "when": "resolveRuntime without explicit root",
+      "expected": {
+        "realRoot": "R2",
+        "nodeAbsolute": true,
+        "binUnderRoot": true,
+        "credentialHelperUnderR2": true,
+        "currentResolutions": 1
+      }
+    },
+    {
+      "id": "alpha-only-runtime",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "current": "R2",
+        "clientIncluded": false
+      },
+      "when": "resolveRuntime",
+      "expected": {
+        "clientDigest": null,
+        "credentialHelper": null,
+        "requiresClient": false
+      }
+    },
+    {
+      "id": "explicit-root-missing",
+      "criteria": [
+        "AC1",
+        "AC6"
+      ],
+      "given": {
+        "explicitRoot": "R1",
+        "R1Missing": true,
+        "current": "R2"
+      },
+      "when": "resolveRuntime with explicit root",
+      "expected": {
+        "code": "runtime_unavailable",
+        "fallbackToCurrent": false,
+        "processStart": false
+      }
+    },
+    {
+      "id": "later-stage-stays-pinned",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "runRuntime": "R1",
+        "current": "R4"
+      },
+      "when": "Start run next stage",
+      "expected": {
+        "stageRuntime": "R1",
+        "pddProjectionFields": [
+          "node",
+          "bin",
+          "version"
+        ],
+        "pddProjectionVersion": "R1"
+      }
+    },
+    {
+      "id": "many-updates-retain-run",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "current": "R5",
+        "previous": "R4",
+        "unfinishedRuns": [
+          "R1"
+        ],
+        "liveSessions": [
+          "R2"
+        ],
+        "restoreableSessions": [
+          "R3"
+        ],
+        "launcherSupport": "R0"
+      },
+      "when": "collectVersions with complete references and lock",
+      "expected": {
+        "retained": [
+          "R0",
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5"
+        ],
+        "removed": [],
+        "retainedReferencedNodes": true
+      }
+    },
+    {
+      "id": "wait-is-unfinished",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "current": "R4",
+        "previous": "R3",
+        "runStates": {
+          "R1": "WAIT",
+          "R2": "waiting_person"
+        }
+      },
+      "when": "collectVersions",
+      "expected": {
+        "retainedIncludes": [
+          "R1",
+          "R2"
+        ],
+        "removedRunWorktrees": []
+      }
+    },
+    {
+      "id": "partial-reference-inventory",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "referencesComplete": false,
+        "otherwiseUnused": [
+          "R1"
+        ]
+      },
+      "when": "collectVersions",
+      "expected": {
+        "code": "references_uncertain",
+        "removed": []
+      }
+    },
+    {
+      "id": "reference-appears-before-delete",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "initialUnused": [
+          "R1"
+        ],
+        "underLockNewReference": "R1"
+      },
+      "when": "collectVersions",
+      "expected": {
+        "removed": [],
+        "retainedIncludes": [
+          "R1"
+        ]
+      }
+    },
+    {
+      "id": "only-owned-unused-folders",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "current": "R4",
+        "previous": "R3",
+        "completeReferences": true,
+        "unusedOwned": [
+          "R1"
+        ],
+        "unrelated": [
+          "worktree",
+          "journal",
+          "stock-node",
+          "vault"
+        ]
+      },
+      "when": "collectVersions",
+      "expected": {
+        "removed": [
+          "R1"
+        ],
+        "unrelatedRemoved": []
+      }
+    },
+    {
+      "id": "path-escape",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "versionRoot": "/home/user/.pdd/versions/R2",
+        "binRealPath": "/tmp/foreign/pdd.mjs"
+      },
+      "when": "resolveRuntime",
+      "expected": {
+        "code": "runtime_unavailable",
+        "processStart": false
+      }
+    },
+    {
+      "id": "blocked-run-preserved",
+      "criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "given": {
+        "blocked": "R1",
+        "unfinishedRunRuntime": "R1",
+        "current": "R3"
+      },
+      "when": "collectVersions after central block",
+      "expected": {
+        "retainedIncludes": [
+          "R1"
+        ],
+        "automaticRunUpgrade": false
+      }
+    },
+    {
+      "id": "pending-upgrade-keeps-both",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "runUpgradeIntent": {
+          "from": "R1",
+          "to": "R3"
+        },
+        "current": "R4",
+        "previous": "R3"
+      },
+      "when": "collectVersions",
+      "expected": {
+        "retainedIncludes": [
+          "R1",
+          "R3",
+          "R4"
+        ],
+        "retainedReferencedNodes": true
+      }
+    },
+    {
+      "id": "blocked-run-needs-upgrade-choice",
+      "criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "given": {
+        "blockedRuntime": "R1",
+        "unfinishedRun": "run-1"
+      },
+      "when": "Report blocked runtime",
+      "expected": {
+        "runtimeRetained": true,
+        "card": "Needs you: Upgrade run",
+        "automaticUpgrade": false
+      }
+    },
+    {
+      "id": "live-staging-not-garbage",
+      "criteria": [
+        "AC3",
+        "AC5"
+      ],
+      "given": {
+        "liveTransaction": "T1",
+        "stagingPath": "update/staging/T1",
+        "current": "R1"
+      },
+      "when": "Collect unrelated unused versions",
+      "expected": {
+        "liveStagingRemoved": false,
+        "current": "R1"
+      }
+    },
+    {
+      "id": "runtime-pinning-does-not-pin-account",
+      "criteria": [
+        "AC2",
+        "AC7"
+      ],
+      "given": {
+        "runRuntime": "R1",
+        "current": "R3",
+        "machineToolSettingNow": "Auto",
+        "historicalLaunchAccount": "A1"
+      },
+      "when": "Resolve retained runtime for next authorized step",
+      "expected": {
+        "runtime": "R1",
+        "accountPolicySource": "current machine/tool policy owner",
+        "agentRunAccountOverrideCreated": false,
+        "historicalAccountInterpretedAsChoice": false
+      }
+    },
+    {
+      "id": "model-effort-is-not-runtime-selection",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "versionRoot": "R2",
+        "toolDefaults": "native valid defaults",
+        "runStartModelEffortOverride": "authorized by runner"
+      },
+      "when": "Resolve Runtime",
+      "expected": {
+        "runtime": "R2",
+        "launchModelEffortChangedByResolver": false,
+        "permittedRunnerOverrideRemoved": false
+      }
+    }
+  ]
+}

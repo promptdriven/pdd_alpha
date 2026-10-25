@@ -1,380 +1,202 @@
-// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: 19fb33093150212af182c10e08a39d992ea4a73d851ada3b00a2e166ca96ab86).
-import { execFile as execFileCallback, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
-import { createHash } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
-
-const execFile = promisify(execFileCallback);
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const STAGE = /^[a-z][a-z0-9-]{0,63}$/;
-const READY = new Set(['idle', 'done']);
-const clone = value => structuredClone(value);
-const hash = value => createHash('sha256').update(value).digest('hex');
-const sessionFor = runId => `pdd-${hash(runId.toLowerCase()).slice(0, 20)}`;
-const canonical = value => JSON.stringify(value, function(key, item) {
-  return item && !Array.isArray(item) && typeof item === 'object'
-    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
-});
-function issue(code) { return Object.assign(new Error(code), { code }); }
-function fail(backend, reason, state = 'recovery_required') {
-  return { state, backend: backend ? clone(backend) : null, evidence: clone(backend?.evidence ?? {}), reason };
+// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: 21c0d1ae93f2144709dc73cf643eb224b0612554f5b3e7de7f8efbbfb6d3bd8c).
+import {execFile as callbackExec,spawn} from 'node:child_process';
+import {promisify,isDeepStrictEqual} from 'node:util';
+import {createHash} from 'node:crypto';
+import {readFile,realpath} from 'node:fs/promises';
+import {basename} from 'node:path';
+import {nativeArgs} from './native-flags.mjs';
+const execute=promisify(callbackExec),UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const STAGE=/^(?=.{1,64}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const hash=x=>createHash('sha256').update(x).digest('hex'),copy=x=>structuredClone(x);
+const fault=code=>Object.assign(Error(code),{code});
+const claims=new Map();
+function rt(p) {return {p,now:p.now??Date.now,sleep:p.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),exec:p.execFile??execute,guard:p.withStageGuard??(()=>{throw fault('stage_guard_required');}),pollMs:p.pollMs??100,startupMs:p.startupMs??30000,observeMs:p.observeMs??p.timeoutMs??1800000};}
+const outcome=(b,reason,state='recovery_required')=>({state,backend:b?copy(b):null,evidence:copy(b?.evidence??{}),...(reason?{reason}:{})});
+async function command(r,b,args) {
+  let response;try{response=await r.exec('herdr',['--session',b.session,...args],{cwd:b.cwd,shell:false,encoding:'utf8',timeout:r.startupMs+5000,maxBuffer:1024*1024});}
+  catch(e){let error;try{error=JSON.parse(e.stderr)?.error?.code;}catch{}throw fault(typeof error==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(error)?error:'herdr_command_uncertain');}
+  let x;try{x=JSON.parse(response.stdout);}catch{throw fault('herdr_invalid_reply');}
+  if(response.code!==undefined&&response.code!==0||!x||x.error){const code=x?.error?.code;throw fault(typeof code==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(code)?code:'herdr_command_uncertain');}return x;
 }
-function runtime(ports = {}) {
-  const start = ports.spawn ?? spawn;
-  return {
-    guard: ports.withStageGuard ?? (() => { throw issue('stage_guard_required'); }),
-    exec: ports.execFile ?? execFile,
-    sleep: ports.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms))),
-    now: ports.now ?? Date.now,
-    pollMs: ports.pollMs ?? 100,
-    startupMs: ports.startupMs ?? 30000,
-    activityMs: ports.activityMs ?? 5000,
-    timeoutMs: ports.timeoutMs ?? 1800000,
-    spawnServer: ports.spawnServer ?? ((session, cwd) => new Promise((resolve, reject) => {
-      const child = start('herdr', ['--session', session, 'server'],
-        { cwd, stdio: 'ignore', detached: true, shell: false });
-      child.once('error', reject);
-      child.once('spawn', () => { child.unref(); resolve(); });
-    })),
-    spawnAttach: ports.spawnAttach ?? ((session, target, cwd) => new Promise(resolve => {
-      const child = start('herdr', ['--session', session, 'agent', 'attach', target],
-        { cwd, stdio: 'inherit', shell: false });
-      let error = false;
-      child.once('error', () => { error = true; });
-      child.once('close', code => resolve(error ? 1 : Number.isInteger(code) ? code : 1));
-    }))
-  };
+async function checkpoint(b,fn) {if(typeof fn!=='function')throw fault('durable_checkpoint_required');await fn(copy(b));}
+function validate(b) {
+  if(!b||b.version!==2||b.session!=='default'||!UUID.test(b.runId??'')||!UUID.test(b.attemptId??'')||!STAGE.test(b.stageId??'')
+    ||!['codex','claude'].includes(b.agent)||!Number.isSafeInteger(b.backendGen)||b.backendGen<1||typeof b.cwd!=='string')throw fault('stage_backend_requires_adoption');
 }
-function commandError(value, args, fallback) {
-  const source = value?.error;
-  const code = typeof source?.code === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(source.code) ? source.code : fallback;
-  const error = issue(code);
-  error.detail = { operation: args.slice(0, 2).join('.'), code };
-  if ((args[0] !== 'agent' || args[1] !== 'prompt') && typeof source?.message === 'string') error.detail.message = source.message.slice(0, 600);
-  return error;
-}
-async function command(rt, session, args, cwd, timeout = 10000) {
-  let response;
-  try {
-    response = await rt.exec('herdr', ['--session', session, ...args],
-      { cwd, shell: false, encoding: 'utf8', maxBuffer: 1024 * 1024, timeout });
-  } catch (error) {
-    let structured;
-    try { structured = JSON.parse(error.stderr); } catch { /* Never expose execFile's command/prompt message. */ }
-    throw commandError(structured, args, typeof error.code === 'string' ? error.code : 'herdr_command_failed');
-  }
-  let result;
-  try { result = JSON.parse(response.stdout); }
-  catch { throw commandError(null, args, 'herdr_invalid_json'); }
-  if (!result || Array.isArray(result) || typeof result !== 'object' || result.error) {
-    throw commandError(result, args, 'invalid_herdr_reply');
-  }
-  return result;
-}
-function preNative(b) {
-  const allowed = new Set(['version','runId','stageId','attemptId','agent','cwd','session','agentName',
-    'promptDigest','nativeSession','phase','evidence','server']);
-  return b.phase === 'server_intent' && b.nativeSession === null
-    && b.evidence && !Array.isArray(b.evidence) && Object.keys(b.evidence).length === 0
-    && Object.keys(b).every(key => allowed.has(key));
-}
-
-function prePrompt(b) {
-  return ['start_intent', 'ready'].includes(b.phase) && b.evidence && !Array.isArray(b.evidence)
-    && Object.keys(b.evidence).every(key => key === 'readySeq')
-    && !['acceptanceDigest','cleanupConfirmation'].some(key => Object.hasOwn(b,key))
-    && [b.workspaceId,b.tabId,b.paneId,b.terminalId].every(value => typeof value === 'string' && value);
-}
-function startupBlocked(b) {
-  return { ...fail(b, 'native_start_person_action_required', 'blocked'),
-    detail: { operation: 'agent.start', code: 'native_start_person_action_required',
-      message: `Complete ordinary native startup using pdd workflow attach ${b.runId}, detach normally, then resume this same run. No PDD stage prompt has been sent.` } };
-}
-async function status(rt, session, cwd) {
-  return command(rt, session, ['status', 'server', '--json'], cwd);
-}
-function compatible(value, session) {
-  if (value.running !== true || value.session !== session || value.compatible !== true
-    || value.endpoint_compatible !== true || !Number.isInteger(value.protocol)
-    || typeof value.version !== 'string' || typeof value.socket !== 'string' || !value.socket) {
-    throw issue('herdr_target_incompatible');
-  }
-  return { session, socket: value.socket, protocol: value.protocol, version: value.version };
-}
-function sameServer(actual, saved) {
-  if (canonical(actual) !== canonical(saved)) throw issue('herdr_server_changed');
-}
-function agentFrom(response) {
-  const agent = response?.result?.agent;
-  if (!agent || !Number.isSafeInteger(agent.state_change_seq) || agent.state_change_seq < 0) {
-    throw issue('invalid_agent_reply');
-  }
-  return agent;
-}
-function assertBackend(b) {
-  if (!b || b.version !== 1 || !UUID.test(b.runId) || !UUID.test(b.attemptId) || !STAGE.test(b.stageId)
-    || !['codex', 'claude'].includes(b.agent) || typeof b.cwd !== 'string'
-    || ![sessionFor(b.runId), `pdd-${b.runId.toLowerCase()}`].includes(b.session)
-    || (b.server ? b.server.session !== b.session : !preNative(b))) {
-    throw issue('invalid_stage_backend');
-  }
-}
-async function checkAgent(rt, b, supplied) {
-  const a = supplied ?? agentFrom(await command(rt, b.session, ['agent', 'get', b.agentName], b.cwd));
-  if (a.terminal_id === b.terminalId && a.pane_id === b.paneId && !a.agent) throw issue('native_agent_unavailable');
-  for (const [key, expected] of Object.entries({ workspace_id: b.workspaceId, tab_id: b.tabId,
-    pane_id: b.paneId, terminal_id: b.terminalId, name: b.agentName, agent: b.agent })) {
-    if (!expected || a[key] !== expected) throw issue('stage_identity_changed');
-  }
-  if (await realpath(a.cwd ?? a.foreground_cwd ?? '') !== b.cwd) throw issue('stage_cwd_changed');
-  if (b.nativeSession && canonical(a.agent_session ?? null) !== canonical(b.nativeSession)) throw issue('native_identity_changed');
-  if (a.state_change_seq < (b.lastSeq ?? 0)) throw issue('stage_sequence_reversed');
+function agentValue(x) {const a=x?.result?.agent;if(!a||!Number.isSafeInteger(a.state_change_seq)||a.state_change_seq<0)throw fault('invalid_agent_reply');return a;}
+async function agent(r,b,supplied) {
+  const a=supplied??agentValue(await command(r,b,['agent','get',b.agentName]));
+  for(const [key,val] of Object.entries({workspace_id:b.workspaceId,tab_id:b.tabId,pane_id:b.paneId,terminal_id:b.terminalId,name:b.agentName,agent:b.agent}))if(!val||a[key]!==val)throw fault('stage_identity_changed');
+  if(await realpath(a.cwd??'')!==b.cwd||a.state_change_seq<(b.lastSeq??0))throw fault('stage_identity_changed');
+  if(b.nativeSession&&!isDeepStrictEqual(b.nativeSession,a.agent_session??null))throw fault('native_identity_changed');
   return a;
 }
-function recordAgent(b, a) {
-  b.lastSeq = a.state_change_seq;
-  if (!b.nativeSession && a.agent_session) b.nativeSession = clone(a.agent_session);
+const ready=a=>['idle','done'].includes(a.agent_status)&&a.interactive_ready===true&&!a.launch_pending;
+function remember(b,a) {b.lastSeq=a.state_change_seq;if(!b.nativeSession&&a.agent_session)b.nativeSession=copy(a.agent_session);}
+async function processProof(r,b) {
+  const x=(await command(r,b,['pane','process-info','--pane',b.paneId])).result?.process_info;
+  if(x?.pane_id!==b.paneId||!Array.isArray(x.foreground_processes))throw fault('stage_process_unproved');
+  const candidates=x.foreground_processes.filter(p=>Number.isSafeInteger(p.pid)&&p.pid>0&&p.cwd===b.cwd&&(p.name===b.agent||basename(p.argv0??'')===b.agent||(p.argv??[]).some(v=>basename(v)===b.agent)));
+  if(candidates.length!==1)throw fault('stage_process_unproved');
+  const p=candidates[0];let start;
+  if(r.p.processStartIdentity)start=await r.p.processStartIdentity({pid:p.pid,paneId:b.paneId});
+  else if(process.platform==='linux'){const text=await readFile(`/proc/${p.pid}/stat`,'utf8');start=text.slice(text.lastIndexOf(')')+2).split(' ')[19];}
+  if(typeof start!=='string'||!start)throw fault('unsupported');
+  const proof={pid:p.pid,startIdentity:start,paneId:b.paneId,terminalId:b.terminalId,backendGen:b.backendGen};
+  if(b.processProof&&!isDeepStrictEqual(b.processProof,proof))throw fault('stage_process_changed');return proof;
 }
-function isReady(a) { return READY.has(a.agent_status) && a.interactive_ready === true && !a.launch_pending; }
-async function save(b, checkpoint) {
-  if (typeof checkpoint !== 'function') throw issue('durable_checkpoint_required');
-  await checkpoint(clone(b));
+const claimKey=b=>`${b.runId}/${b.attemptId}/${b.backendGen}`;
+async function claim(r,b) {
+  if(claims.has(claimKey(b)))return;
+  const fn=r.p.claimWorkflowSession??(await import('./workflow-claims.mjs')).claimWorkflowSession;
+  const handle=await fn({kind:b.agent,nativeSessionId:null,owner:{runId:b.runId,attemptId:b.attemptId,backendGen:b.backendGen}},r.p);
+  if(handle?.state!=='owned')throw fault('stage_claim_unavailable');claims.set(claimKey(b),handle);
 }
-async function observe(rt, b, checkpoint) {
+async function promote(r,b) {
+  if(b.nativeSession?.kind!=='id')return;
+  const handle=claims.get(claimKey(b));if(handle?.state!=='owned')throw fault('stage_claim_unavailable');
+  const fn=r.p.promoteWorkflowClaim??(await import('./workflow-claims.mjs')).promoteWorkflowClaim;
+  const promoted=await fn({claim:handle,kind:b.agent,nativeSessionId:b.nativeSession.value},r.p);
+  if(promoted?.state!=='owned')throw fault('stage_claim_unavailable');claims.set(claimKey(b),promoted);
+}
+async function rememberAndClaim(r,b,a,save) {
+  const discovered=!b.nativeSession&&a.agent_session;
+  remember(b,a);
+  // The claims owner binds against durable journal identity, including ids first
+  // disclosed after delivery. A failed promotion must retain that discovery.
+  if(discovered)await checkpoint(b,save);
+  if(b.nativeSession?.kind==='id'){await claim(r,b);await promote(r,b);}
+}
+async function supportedSelection(b,ports){
+  if(!b.launchSelection)return true;
+  if(b.launchSelection.agent!==b.agent)return false;
+  if(ports.validateLaunchSelection)return await ports.validateLaunchSelection(b.launchSelection)===true;
+  try{const resolveModel=ports.resolveWorkflowModel??(await import('./workflow-models.mjs')).resolveWorkflowModel;const selection=b.launchSelection;const r=await resolveModel({machineId:selection.machineId,agent:b.agent,selection:{model:selection.model,...(selection.effort==null?{}:{effort:selection.effort})}},ports);return r?.state==='selected'&&r.selection.model===selection.model&&r.selection.effort===selection.effort;}catch{return false;}
+}
+function launchArgs(b,ports,resume){
+  const encode=ports.nativeArgs??nativeArgs,input={agent:b.agent,cwd:b.cwd,selection:b.launchSelection,...(resume?{resume}:{})},args=encode(input);
+  if(b.launchSelection&&isDeepStrictEqual(args,encode({...input,selection:undefined})))throw fault('unsupported');
+  return args;
+}
+async function observed(r,b,save) {
+  try{return await r.guard(b,async()=>{
+    const a=await agent(r,b);await rememberAndClaim(r,b,a,save??r.p.checkpoint);if(b.processProof)await processProof(r,b);
+    if((await r.p.onStageObservation?.({backend:copy(b),status:a.agent_status,reason:a.agent_status==='blocked'?'native_person_action_required':null}))?.pause)return outcome(b,'stage_idle_alarm','active');
+    if(a.agent_status==='blocked'||a.launch_pending){if(save)await checkpoint(b,save);return outcome(b,'native_person_action_required','blocked');}
+    if(a.agent_status==='working') {
+      if(!['prompt_intent','submitted','history_resumed'].includes(b.phase))return outcome(b,'unexpected_native_activity');
+      if(a.state_change_seq>(b.evidence.readySeq??Infinity))b.evidence.workingSeq??=a.state_change_seq;
+      if(save)await checkpoint(b,save);return outcome(b,null,'active');
+    }
+    if(ready(a)&&b.evidence.workingSeq&&a.state_change_seq>b.evidence.workingSeq) {
+      await processProof(r,b);
+      if(b.phase==='candidate'&&a.state_change_seq!==b.evidence.settledSeq)return outcome(b,'candidate_sequence_changed');
+      b.evidence.settledSeq??=a.state_change_seq;b.phase='candidate';if(save)await checkpoint(b,save);return outcome(b,null,'settled');
+    }
+    return outcome(b,ready(a)?'no_observed_prompt_activity':'native_state_unknown');
+  });}catch(e){if(e.code==='WORKFLOW_STAGE_BUSY')return outcome(b,'stage_temporarily_guarded','active');throw e;}
+}
+export async function runHerdrStage(input={},ports={}) {
+  const r=rt(ports);let b=input.backend?copy(input.backend):null;
   try {
-  return await rt.guard(b, async () => {
-  const a = await checkAgent(rt, b);
-  recordAgent(b, a);
-  if (b.phase === 'candidate' && a.state_change_seq !== b.evidence.settledSeq) return fail(b, 'candidate_sequence_changed');
-  if (a.agent_status === 'blocked') {
-    if (checkpoint) await save(b, checkpoint);
-    return fail(b, 'native_person_action_required', 'blocked');
-  }
-  if (a.agent_status === 'working') {
-    if (b.phase !== 'prompt_intent' && b.phase !== 'submitted') return fail(b, 'unexpected_native_activity');
-    b.evidence.workingSeq ??= a.state_change_seq;
-    if (b.evidence.workingSeq <= b.evidence.readySeq) return fail(b, 'missing_new_prompt_activity');
-    if (checkpoint) await save(b, checkpoint);
-    return { state: 'active', backend: clone(b), evidence: clone(b.evidence) };
-  }
-  if (isReady(a) && b.evidence.workingSeq && a.state_change_seq > b.evidence.workingSeq) {
-    b.evidence.settledSeq = a.state_change_seq;
-    b.phase = 'candidate';
-    if (checkpoint) await save(b, checkpoint);
-    return { state: 'settled', backend: clone(b), evidence: clone(b.evidence) };
-  }
-  return fail(b, isReady(a) ? 'no_observed_prompt_activity' : 'native_state_unknown');
-  });
-  } catch (error) {
-    if (error.code !== 'WORKFLOW_STAGE_BUSY') throw error;
-    return {state:'active',reason:'stage_temporarily_guarded',backend:clone(b),evidence:clone(b.evidence)};
-  }
-}
-
-export async function runHerdrStage(input, ports = {}) {
-  const rt = runtime(ports);
-  let b = input.backend ? clone(input.backend) : null;
-  try {
-    if (!UUID.test(input.runId) || !UUID.test(input.attemptId) || !STAGE.test(input.stageId)
-      || !['codex', 'claude'].includes(input.agent) || typeof input.context !== 'string' || !input.context.trim()
-      || typeof input.instructions !== 'string' || !input.instructions.trim() || typeof input.checkpoint !== 'function'
-      || typeof ports.withStageGuard !== 'function') {
-      throw issue('invalid_stage_input');
-    }
-    const cwd = await realpath(input.cwd);
-    const prompt = `${input.context}\n\n# Current workflow stage\n${input.instructions}`;
-    const promptDigest = hash(prompt);
-    let priorServer, seedWorkspaceIds, recoveringBootstrap = false, continuingStartup = false;
-    if (b) {
-      assertBackend(b);
-      if (b.runId !== input.runId || b.cwd !== cwd) throw issue('stage_binding_changed');
-      if (b.stageId === input.stageId && b.attemptId === input.attemptId) {
-        if (b.promptDigest !== promptDigest || b.agent !== input.agent) throw issue('stage_input_changed');
-        if (prePrompt(b)) continuingStartup = true;
-        else if (preNative(b)) recoveringBootstrap = true;
-        else return inspectHerdrStage({ backend: b, cwd }, ports);
-        priorServer = b.server ? clone(b.server) : undefined;
-      } else {
-        if (b.phase !== 'closed' || !b.acceptanceDigest) throw issue('previous_stage_not_released');
-        priorServer = clone(b.server);
-        seedWorkspaceIds = clone(b.seedWorkspaceIds);
-      }
-    }
-    if (!continuingStartup) b = { version: 1, runId: input.runId, stageId: input.stageId, attemptId: input.attemptId,
-      agent: input.agent, cwd, session: recoveringBootstrap ? b.session : priorServer?.session ?? sessionFor(input.runId),
-      agentName: `pdd-${hash(input.attemptId).slice(0, 24)}`, promptDigest,
-      nativeSession: null, phase: 'server_intent', evidence: {}, ...(priorServer ? {server: priorServer} : {}) };
-    await save(b, input.checkpoint);
-    const startupResult = await rt.guard(b, async () => {
-    if (!continuingStartup) {
-    if (recoveringBootstrap && b.session !== sessionFor(b.runId)) {
-      const historical = await status(rt, b.session, cwd);
-      if (historical.running !== false || historical.session !== b.session) throw issue('legacy_server_not_stopped');
-      b.session = sessionFor(b.runId);
-      delete b.server;
-      priorServer = undefined;
-      await save(b, input.checkpoint);
-    }
-    let server = await status(rt, b.session, cwd);
-    if (!server.running) {
-      if (priorServer && !recoveringBootstrap || server.running !== false || server.session !== b.session) throw issue('owned_server_missing');
-      await rt.spawnServer(b.session, cwd);
-      const until = rt.now() + rt.startupMs;
-      while (rt.now() < until) {
-        server = await status(rt, b.session, cwd);
-        if (server.running) break;
-        await rt.sleep(rt.pollMs);
-      }
-    } else if (!priorServer) throw issue('unowned_herdr_session');
-    b.server = compatible(server, b.session);
-    if (priorServer) sameServer(b.server, priorServer);
-    await save(b, input.checkpoint);
-    const listed = await command(rt, b.session, ['workspace', 'list'], cwd);
-    const workspaces = listed.result?.workspaces;
-    if (!Array.isArray(workspaces) || workspaces.some(w => typeof w.workspace_id !== 'string')) throw issue('invalid_workspace_inventory');
-    const currentIds = workspaces.map(w => w.workspace_id).sort();
-    if (!priorServer || recoveringBootstrap) seedWorkspaceIds = currentIds;
-    if (!Array.isArray(seedWorkspaceIds) || seedWorkspaceIds.length > 1
-      || canonical(currentIds) !== canonical([...seedWorkspaceIds].sort())) throw issue('active_stage_capacity_unavailable');
-    b.seedWorkspaceIds = seedWorkspaceIds;
-    b.maxActiveStages = 1;
-    b.phase = 'workspace_intent';
-    await save(b, input.checkpoint);
-    const created = await command(rt, b.session, ['workspace', 'create', '--cwd', cwd,
-      '--label', `PDD ${input.stageId}`, '--no-focus'], cwd);
-    const { workspace, tab, root_pane: pane } = created.result ?? {};
-    b.workspaceId = workspace?.workspace_id;
-    b.tabId = tab?.tab_id;
-    b.paneId = pane?.pane_id;
-    b.terminalId = pane?.terminal_id;
-    if (![b.workspaceId, b.tabId, b.paneId, b.terminalId].every(v => typeof v === 'string' && v)) throw issue('invalid_workspace_reply');
-    b.phase = 'start_intent';
-    await save(b, input.checkpoint);
-    let started;
-    try {
-      started = await command(rt, b.session, ['agent', 'start', b.agentName, '--kind', b.agent,
-        '--pane', b.paneId, '--timeout', String(rt.startupMs),
-        ...(b.agent === 'codex' ? ['--', '--no-daemon', '--dangerously-bypass-approvals-and-sandbox', '-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`] : ['--', '--dangerously-skip-permissions'])], cwd, rt.startupMs + 5000);
-    } catch (error) {
-      if (error.code !== 'agent_not_ready') throw error;
-      const existing = await checkAgent(rt, b);
-      recordAgent(b, existing);
-      await save(b, input.checkpoint);
-      if (existing.agent_status === 'blocked' || existing.launch_pending) return startupBlocked(b);
-      throw error;
-    }
-    const launched = await checkAgent(rt, b, agentFrom(started));
-    recordAgent(b, launched);
-    await save(b, input.checkpoint);
+    if(!UUID.test(input.runId??'')||!UUID.test(input.attemptId??'')||!STAGE.test(input.stageId??'')||!['codex','claude'].includes(input.agent)
+      ||typeof input.context!=='string'||!input.context.trim()||typeof input.instructions!=='string'||!input.instructions.trim()||typeof input.checkpoint!=='function'||!ports.withStageGuard)throw fault('invalid_stage_input');
+    const cwd=await realpath(input.cwd),prompt=`${input.context}\n\n# Current workflow stage\n${input.instructions}`,promptDigest=hash(prompt);
+    if(b&&b.version!==2)return outcome(b,'stage_backend_requires_adoption');
+    const same=b&&b.runId===input.runId&&b.stageId===input.stageId&&b.attemptId===input.attemptId;
+    if(same) {
+      validate(b);if(b.cwd!==cwd||b.agent!==input.agent||b.promptDigest!==promptDigest||!isDeepStrictEqual(b.launchSelection,input.launchSelection??null))throw fault('stage_binding_changed');
+      if(!['start_intent','ready'].includes(b.phase)||Object.keys(b.evidence??{}).some(k=>k!=='readySeq'))return inspectHerdrStage({backend:b,cwd},{...ports,checkpoint:input.checkpoint});
     } else {
-      sameServer(compatible(await status(rt, b.session, cwd), b.session), b.server);
+      if(b&&(b.phase!=='closed'||!b.acceptanceDigest))throw fault('previous_stage_not_released');
+      const c=ports.controller;if(c?.herdrSession!=='default'||![c.workspaceId,c.tabId,c.paneId].every(v=>typeof v==='string'&&v))throw fault('unsupported');
+      const backendGen=input.backendGen??ports.backendGen??1;
+      b={version:2,runId:input.runId,stageId:input.stageId,attemptId:input.attemptId,agent:input.agent,cwd,session:'default',workspaceId:c.workspaceId,tabId:c.tabId,controllerPaneId:c.paneId,agentName:`pdd-${hash(input.attemptId).slice(0,24)}`,nativeSession:null,backendGen,launchSelection:copy(input.launchSelection??null),promptDigest,phase:'pane_intent',evidence:{}};
+      validate(b);await checkpoint(b,input.checkpoint);
     }
-    // Query the live owned native, not only the launch response's earlier snapshot.
-    const ready = await checkAgent(rt, b);
-    recordAgent(b, ready);
-    if (ready.agent_status === 'blocked' || ready.launch_pending) return startupBlocked(b);
-    if (!isReady(ready)) return fail(b, 'native_start_not_ready');
-    b.phase = 'ready';
-    b.evidence.readySeq = ready.state_change_seq;
-    await save(b, input.checkpoint);
-    await rt.guard(b, async () => {
-      // Identity/currentness and the durable one-submit intent share the attach/acceptance lock.
-      const current = await checkAgent(rt, b);
-      if (!isReady(current) || current.state_change_seq !== b.evidence.readySeq) throw issue('fresh_agent_changed_before_prompt');
-      recordAgent(b, current);
-      b.phase = 'prompt_intent';
-      await save(b, input.checkpoint);
-      const delivered = await command(rt, b.session, ['agent', 'prompt', b.agentName, prompt], cwd);
-      const acknowledgement = await checkAgent(rt, b, agentFrom(delivered));
-      recordAgent(b, acknowledgement);
-      if (acknowledgement.agent_status === 'working' && acknowledgement.state_change_seq > b.evidence.readySeq) {
-        b.evidence.workingSeq = acknowledgement.state_change_seq;
+    if(!await supportedSelection(b,ports))return outcome(b,'saved_selection_unsupported','blocked');
+    const args=launchArgs(b,ports);
+    const setup=await r.guard(b,async()=>{
+      await claim(r,b);
+      if(b.phase==='pane_intent') {
+        const created=(await command(r,b,['pane','split','--pane',b.controllerPaneId,'--direction','right','--cwd',cwd,'--no-focus'])).result?.pane;
+        if(created?.workspace_id!==b.workspaceId||created.tab_id!==b.tabId||![created.pane_id,created.terminal_id].every(v=>typeof v==='string'&&v)||created.pane_id===b.controllerPaneId)throw fault('invalid_stage_pane');
+        b.paneId=created.pane_id;b.terminalId=created.terminal_id;b.phase='start_intent';await checkpoint(b,input.checkpoint);
+        let started;
+        try{started=await command(r,b,['agent','start',b.agentName,'--kind',b.agent,'--pane',b.paneId,'--timeout',String(r.startupMs),'--',...args]);}
+        catch(e){if(e.code!=='agent_not_ready')throw e;const actual=await agent(r,b);await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);return outcome(b,'native_start_person_action_required','blocked');}
+        const actual=await agent(r,b,agentValue(started));await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);
       }
-      b.phase = 'submitted';
-      await save(b, input.checkpoint);
+      const actual=await agent(r,b);await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);
+      if(!ready(actual))return outcome(b,'native_start_person_action_required','blocked');
+      await promote(r,b);b.processProof=await processProof(r,b);b.phase='ready';b.evidence.readySeq=actual.state_change_seq;await checkpoint(b,input.checkpoint);
+      const fresh=await agent(r,b);await rememberAndClaim(r,b,fresh,input.checkpoint);if(!ready(fresh)||fresh.state_change_seq!==b.evidence.readySeq)throw fault('fresh_agent_changed_before_prompt');await processProof(r,b);
+      b.phase='prompt_intent';await checkpoint(b,input.checkpoint);
+      const delivered=await agent(r,b,agentValue(await command(r,b,['agent','prompt',b.agentName,prompt])));await rememberAndClaim(r,b,delivered,input.checkpoint);
+      if(delivered.agent_status==='working'&&delivered.state_change_seq>b.evidence.readySeq)b.evidence.workingSeq=delivered.state_change_seq;
+      b.phase='submitted';await checkpoint(b,input.checkpoint);
     });
-    });
-    if (startupResult) return startupResult;
-    const startedAt = rt.now(), deadline = startedAt + rt.timeoutMs;
-    let activityDeadline = startedAt + rt.activityMs;
-    while (rt.now() < deadline) {
-      const seen = await observe(rt, b, input.checkpoint);
-      b = seen.backend;
-      if (seen.reason === 'stage_temporarily_guarded') {
-        const pausedAt = rt.now();
-        await rt.sleep(rt.pollMs);
-        activityDeadline += rt.now() - pausedAt;
-        continue;
-      }
-      if (seen.state === 'settled' || seen.state === 'blocked') return seen;
-      if (seen.state === 'recovery_required' && seen.reason !== 'no_observed_prompt_activity') return seen;
-      if (!b.evidence.workingSeq && rt.now() >= activityDeadline) return fail(b, 'prompt_activity_stalled');
-      await rt.sleep(rt.pollMs);
+    if(setup)return setup;
+    const until=r.now()+r.observeMs;
+    while(r.now()<until) {
+      const seen=await observed(r,b,input.checkpoint);b=seen.backend;
+      if(seen.state==='settled'||seen.state==='blocked'||seen.reason==='stage_idle_alarm')return seen;
+      if(seen.state==='recovery_required'&&seen.reason!=='no_observed_prompt_activity')return seen;
+      await r.sleep(r.pollMs);
     }
-    return fail(b, 'stage_wait_timeout');
-  } catch (error) {
-    return { ...fail(b, typeof error.code === 'string' ? error.code : 'stage_transport_uncertain'),
-      ...(error.detail ? { detail: error.detail } : {}) };
-  }
+    // Observation budget is an alarm, never a duration-based failure or termination.
+    return outcome(b,'stage_observation_pending','active');
+  }catch(e){return outcome(b,e.code??'stage_transport_uncertain');}
 }
-
-export async function inspectHerdrStage({ backend, cwd }, ports = {}) {
-  const rt = runtime(ports), b = clone(backend);
-  try {
-    assertBackend(b);
-    if (await realpath(cwd ?? b.cwd) !== b.cwd) throw issue('stage_cwd_changed');
-    if (b.phase === 'closed') return fail(b, 'stage_archived');
-    if (b.phase === 'close_intent') return fail(b, 'stage_cleanup_unconfirmed');
-    sameServer(compatible(await status(rt, b.session, b.cwd), b.session), b.server);
-    const seen = await observe(rt, b);
-    return seen.state === 'active' ? fail(seen.backend, 'native_stage_active') : seen;
-  } catch (error) { return fail(b, error.code ?? 'stage_inspection_unavailable'); }
+export async function inspectHerdrStage({backend,cwd}={},ports={}) {
+  const b=copy(backend),r=rt(ports);
+  try{validate(b);if(await realpath(cwd??b.cwd)!==b.cwd)throw fault('stage_cwd_changed');if(['closed','close_intent','resume_intent'].includes(b.phase))return outcome(b,b.phase==='closed'?'stage_archived':'stage_effect_unconfirmed');return await observed(r,b);}
+  catch(e){return outcome(b,e.code??'stage_inspection_unavailable');}
 }
-
-export async function attachHerdrStage({ backend }, ports = {}) {
-  const rt = runtime(ports), b = clone(backend);
+export async function attachHerdrStage({backend}={},ports={}) {
+  const b=copy(backend),r=rt(ports);
+  try{validate(b);if(b.phase==='closed')return 2;return await r.guard(b,async()=>{
+    await rememberAndClaim(r,b,await agent(r,b),ports.checkpoint);if(b.processProof)await processProof(r,b);
+    if(ports.spawnAttach)return ports.spawnAttach(b.session,b.agentName,b.cwd);
+    return new Promise(resolve=>{const child=(ports.spawn??spawn)('herdr',['--session',b.session,'agent','attach',b.agentName],{cwd:b.cwd,stdio:'inherit',shell:false});child.once('error',()=>resolve(1));child.once('close',code=>resolve(Number.isInteger(code)?code:1));});
+  });}catch{return 1;}
+}
+export async function closeHerdrStage({backend,acceptance}={},ports={}) {
+  const b=copy(backend),r=rt(ports);
   try {
-    assertBackend(b);
-    if (b.phase === 'closed') return 2;
-    return await rt.guard(b, async () => {
-      sameServer(compatible(await status(rt, b.session, b.cwd), b.session), b.server);
-      await checkAgent(rt, b);
-      return rt.spawnAttach(b.session, b.agentName, b.cwd);
+    validate(b);
+    if(b.phase!=='candidate'||!acceptance||acceptance.runId!==b.runId||acceptance.stageId!==b.stageId||acceptance.attemptId!==b.attemptId
+      ||acceptance.promptDigest!==b.promptDigest||acceptance.terminalId!==b.terminalId||acceptance.backendGen!==b.backendGen||!/^[a-f0-9]{64}$/.test(acceptance.evidenceDigest??''))throw fault('durable_stage_acceptance_required');
+    return await r.guard(b,async()=>{
+      const a=await agent(r,b);await rememberAndClaim(r,b,a,ports.checkpoint);if(!ready(a)||a.state_change_seq!==b.evidence.settledSeq)throw fault('stage_not_quiescent');await processProof(r,b);
+      b.acceptanceDigest=hash(JSON.stringify(acceptance));b.phase='close_intent';await checkpoint(b,ports.checkpoint);
+      const ack=await command(r,b,['pane','close',b.paneId]);if(ack.id!=='cli:pane:close'||ack.result?.type!=='ok')throw fault('pane_close_unconfirmed');
+      const list=(await command(r,b,['pane','list','--workspace',b.workspaceId])).result;
+      if(list?.type!=='pane_list'||!Array.isArray(list.panes)||list.panes.some(p=>typeof p.pane_id!=='string')||new Set(list.panes.map(p=>p.pane_id)).size!==list.panes.length||list.panes.some(p=>p.pane_id===b.paneId))throw fault('pane_close_unconfirmed');
+      b.phase='closed';b.cleanupConfirmation={acknowledgement:'ok',absentPaneId:b.paneId};await checkpoint(b,ports.checkpoint);
+      const handle=claims.get(claimKey(b));await handle?.release?.();claims.delete(claimKey(b));return outcome(b,null,'closed');
     });
-  } catch { return 1; }
+  }catch(e){return outcome(b,e.code??'stage_cleanup_uncertain');}
 }
-
-export async function closeHerdrStage({ backend, acceptance }, ports = {}) {
-  const checkpoint = ports.checkpoint;
-  const rt = runtime(ports), b = clone(backend);
+export async function resumeHerdrStage({backend,cwd,resumeIntent,checkpoint:save}={},ports={}) {
+  const b=copy(backend),r=rt(ports);
   try {
-    assertBackend(b);
-    if (b.phase !== 'candidate' || !acceptance || acceptance.runId !== b.runId || acceptance.stageId !== b.stageId
-      || acceptance.attemptId !== b.attemptId || acceptance.promptDigest !== b.promptDigest
-      || acceptance.terminalId !== b.terminalId || !/^[0-9a-f]{64}$/.test(acceptance.evidenceDigest ?? '')) {
-      throw issue('durable_stage_acceptance_required');
-    }
-    return await rt.guard(b, async () => {
-    const seen = await inspectHerdrStage({ backend: b, cwd: b.cwd }, ports);
-    if (seen.state !== 'settled' || seen.evidence.settledSeq !== b.evidence.settledSeq) throw issue('stage_not_quiescent');
-    b.acceptanceDigest = hash(canonical(acceptance));
-    b.phase = 'close_intent';
-    await save(b, checkpoint);
-    // This workspace was created for this stage only; its seed belongs to the run's server separately.
-    const closed = await command(rt, b.session, ['workspace', 'close', b.workspaceId], b.cwd);
-    if (Array.isArray(closed) || closed.id !== 'cli:workspace:close' || closed.result?.type !== 'ok') {
-      throw issue('workspace_close_unconfirmed');
-    }
-    const inventory = await command(rt, b.session, ['workspace', 'list'], b.cwd);
-    const workspaces = inventory.result?.workspaces;
-    if (inventory.id !== 'cli:workspace:list' || inventory.result?.type !== 'workspace_list'
-      || !Array.isArray(workspaces) || workspaces.some(w => !w || typeof w.workspace_id !== 'string')
-      || new Set(workspaces.map(w => w.workspace_id)).size !== workspaces.length
-      || workspaces.some(w => w.workspace_id === b.workspaceId)) throw issue('workspace_close_unconfirmed');
-    b.cleanupConfirmation = { acknowledgement: 'ok', absentWorkspaceId: b.workspaceId };
-    b.phase = 'closed';
-    await save(b, checkpoint);
-    return { state: 'closed', backend: b, evidence: clone(b.evidence) };
+    validate(b);if(await realpath(cwd??b.cwd)!==b.cwd||!resumeIntent||resumeIntent.runId!==b.runId||resumeIntent.attemptId!==b.attemptId
+      ||resumeIntent.stageId!==b.stageId||resumeIntent.oldGeneration!==b.backendGen||resumeIntent.newGeneration!==b.backendGen+1
+      ||!isDeepStrictEqual(resumeIntent.nativeSession,b.nativeSession)||!isDeepStrictEqual(resumeIntent.launchSelection,b.launchSelection)||resumeIntent.stoppedProof?.complete!==true)throw fault('native_resume_unproved');
+    if(!await supportedSelection(b,ports)||b.nativeSession?.kind!=='id'||!UUID.test(b.nativeSession.value??''))throw fault('native_resume_unproved');
+    const args=launchArgs(b,ports,b.nativeSession.value);
+    if(b.phase==='resume_intent')return outcome(b,'native_resume_uncertain');
+    if(typeof ports.verifyStoppedStage!=='function'||typeof ports.admitStageResume!=='function')throw fault('unsupported');
+    return await r.guard(b,async()=>{
+      if(await ports.verifyStoppedStage({backend:b,resumeIntent})!==true)throw fault('native_resume_unproved');
+      const admitted=await ports.admitStageResume({backend:b,resumeIntent});if(admitted?.allowed!==true)throw fault('native_resume_claim_unavailable');
+      b.backendGen=resumeIntent.newGeneration;b.phase='resume_intent';delete b.processProof;b.actualAccount=admitted.actualAccount??b.actualAccount??null;b.machineToolPolicy=admitted.machineToolPolicy??null;
+      await checkpoint(b,save);
+      const response=await command(r,b,['agent','start',b.agentName,'--kind',b.agent,'--pane',b.paneId,'--timeout',String(r.startupMs),'--',...args]);
+      const a=await agent(r,b,agentValue(response));remember(b,a);await checkpoint(b,save);
+      if(!ready(await agent(r,b)))return outcome(b,'native_resume_needs_you','blocked');
+      b.processProof=await processProof(r,b);b.evidence={readySeq:a.state_change_seq};b.phase='history_resumed';await checkpoint(b,save);return outcome(b,null,'active');
     });
-  } catch (error) { return fail(b, error.code ?? 'stage_cleanup_uncertain'); }
+  }catch(e){return outcome(b,b?.agent==='claude'?'native_resume_needs_you':e.code??'native_resume_uncertain');}
 }

@@ -1,17 +1,24 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 3bd47f7c3f777a7d966352136c1eee6602d1ebcd03e09827473d5e3af170391d).
-import { readFileSync } from 'node:fs';
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 65b43c3e21491f258729d7fe23be522595d65237d52ff6aca9688cd0f4ce763c).
+import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadGuidance } from './guidance.mjs';
 import { launchNativeSession } from './native-session.mjs';
 import { CommandInputError, parseArgv } from './argument-parser.mjs';
 import { renderCompletion } from './completion.mjs';
-import { PUBLIC_COMMAND_MANIFEST } from './command-catalog.mjs';
+import { PUBLIC_COMMAND_MANIFEST, PUBLIC_COMMAND_ROUTES } from './command-catalog.mjs';
 import { formatLocalWorkflows } from './workflow-list.mjs';
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const line = (stream, text) => stream.write(`${text}\n`);
 export function renderHelp(prefix = []) {
+  const route = PUBLIC_COMMAND_ROUTES.find(r=>r.prefix.length===prefix.length && r.prefix.every((w,i)=>w===prefix[i]));
+  const exact = !prefix.length ? PUBLIC_COMMAND_ROUTES.find(r=>r.id==='help').rootHelp
+    : route?.helpText ?? (prefix.length===1 ? PUBLIC_COMMAND_ROUTES.find(r=>r.prefix[0]===prefix[0])?.groupHelp : null);
+  if(exact) return `${exact.startsWith('PDD:')?'':'PDD: prompt-driven development for your coding agent.\n\n'}${exact}\n\nWorkflow run/resume may push branches and create real PRs.\nSession and recipe shortcuts stay foreground. A Herdr pane owns each workflow controller; human waits stop it and require a current decision.\nLocal recovery reconciles eligible non-human waits. Use workflow attach RUN_ID for the actual saved active stage. Controller exit ends automatic progression.`;
+
   const rows = PUBLIC_COMMAND_MANIFEST.filter(({ form }) => !prefix.length
     || prefix.every((word, index) => form.slice(4).split(/\s+/)[index] === word));
   return ['PDD: prompt-driven development for your coding agent.', '',
@@ -25,8 +32,103 @@ function guidanceError(stderr) {
   line(stderr, 'The complete PDD guidance could not be read. Use a package containing the canonical guide, skill, references and manual recipes.');
   return 1;
 }
-export async function runPdd(argv, { stdout = process.stdout, stderr = process.stderr,
-  cwd = process.cwd(), packageRoot = PACKAGE_ROOT, nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages } = {}) {
+export async function runPdd(argv, dependencies = {}) {
+  const {stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
+    nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages, workflowDecider,
+    phoneCli, clientAdapter = phoneCli, workflowController, workflowKeeper, workflowCleaner, workflowRuntime,
+    workflowRecords, workflowProjects, workflowModels, workflowPlacement, machinePlacement,
+    machineId = 'local', home = homedir(), projectPorts, modelPorts, settings,
+    updateModule, doctorModule, doctorDeps = {}, ports: suppliedPorts = {}} = dependencies;
+  const ports = {...suppliedPorts,stdout,stderr,home,machinePlacement,
+    ...(modelPorts??{}),...(dependencies.machineToolPolicy?{machineToolPolicy:dependencies.machineToolPolicy}:{})};
+  async function localModels(selectedCwd=cwd) {
+    if(modelPorts)return modelPorts;
+    const mod=await import('./workflow-models.mjs');
+    return mod.createLocalWorkflowModelPorts({...dependencies.localModelOptions,machineId,cwd:selectedCwd,settings});
+  }
+  let localProjects;
+  async function projects() {
+    if(projectPorts)return projectPorts;
+    return localProjects??=(await import('./workflow-projects.mjs')).createLocalWorkflowProjectPorts({...dependencies.localProjectOptions,machineId,cwd,home,settings,
+      ...(workflowRecords?.readRunIndex?{readRunIndex:workflowRecords.readRunIndex}:{})});
+  }
+  const printResult = result => {
+    if (!result || !['completed','waiting','failed','recovery_required','adopted','started','refused','uncertain'].includes(result.state) || !Number.isInteger(result.exitCode) || result.exitCode<0 || result.exitCode>255
+      || typeof result.message!=='string' || !result.message.trim()) throw Error('Invalid result');
+    line(stdout,result.message);return result.exitCode;
+  };
+  const unsupported = () => {line(stderr,'This command needs an available optional client adapter.');return 1;};
+  const safeLabel = value => String(value??'unknown').replace(/[\x00-\x1f\x7f-\x9f]/g,'');
+  async function statuses(runId, journal=true) {
+    const records=workflowRecords??await import('./workflow-run-records.mjs');
+    const index=await records.readRunIndex(ports);
+    const entries=runId?index.entries.filter(e=>e.runId===runId):index.entries;
+    const runs=[];
+    for (const entry of entries) {
+      let status,last;
+      try {status=await records.readRunStatus(entry.runDir,ports);} catch {status={value:null,warnings:['unreadable']};}
+      if(journal) {try {last=await records.readJournalLast(entry.runDir,ports);} catch {last={value:null,warnings:['unreadable']};}}
+      let value=status.value;
+      if(journal && (!value || !last?.value || value.journalSeq!==last.value.seq))
+        value=last?.value?records.runStatusFromState(last.value.state,{phase:'journal',now:Date.now()}):null;
+      runs.push({...value,runId:entry.runId,state:value?.state??'unknown',
+        ...(status.warnings?.length || last?.warnings?.length?{warnings:[...(status.warnings??[]),...(last?.warnings??[])]}:{}),
+        ...(index.dropped?{indexDropped:index.dropped}:{})});
+    }
+    return {runs,entries};
+  }
+  async function launchInput(plan) {
+    let selectedCwd=cwd,project=null,projectEntry=null,repository=dependencies.repository??null;
+    const agent=plan.options['--agent']??'codex';
+    if(plan.options['--project']!==undefined) {
+      const mod=workflowProjects??await import('./workflow-projects.mjs');
+      const result=await mod.resolveWorkflowProject({machineId,query:plan.options['--project']},await projects());
+      if(result.state!=='selected') {
+        const message=result.state==='ambiguous' ? 'Choose a project: '+(result.candidates??[]).map(p=>safeLabel(`${p.name} (${p.repository?.url??p.machineId}; ${p.id})`)).join(', ')
+          : result.state==='bad_args' ? 'Choose a project by name' : 'Project unavailable. Open Projects to select or explicitly clone it.';
+        line(stderr,message);return {exitCode:['ambiguous','bad_args'].includes(result.state)?2:1};
+      }
+      projectEntry=result.project;selectedCwd=result.project.root;project={id:result.project.id,name:result.project.name};repository=result.project.repository;
+    }
+    const on=plan.options['--on'];
+    let placement={state:'local',target:null};
+    if(machinePlacement || on!==undefined) {
+      let mod;
+      try {mod=workflowPlacement??await import('./workflow-placement.mjs');}
+      catch {
+        line(stderr,on && on!=='auto'?'remote_unsupported: Remote placement unsupported without the optional client.':'Placement owner unavailable.');
+        return {exitCode:1};
+      }
+      placement=await mod.selectStartTarget({kind:plan.local==='session'?'session':'workflow',on,sourceMachineId:machineId,agent,repository,project},ports);
+      if(placement.state==='refused') {line(stderr,safeLabel(`${placement.code}: ${placement.message??placement.code}`));return {exitCode:1};}
+    }
+
+    const selectionOverrides={...(plan.options['--model']!==undefined?{model:plan.options['--model']}:{}),...(plan.options['--effort']!==undefined?{effort:plan.options['--effort']}:{})};
+    if(placement.state==='selected') {
+      const mod=workflowPlacement??await import('./workflow-placement.mjs');
+      const input={kind:plan.local==='session'?'session':'workflow',target:placement.target,startId:randomUUID(),agent,repository,
+        ...(project?{project}:{}),selectionOverrides,
+        ...(plan.local==='session'?{requestText:plan.operands.join(' ')}:{workflow:{name:plan.operands[0],issue:plan.operands[1]}})};
+      // A remote launch cannot precede the durable source request binding.
+      persistStart(home,input);
+      const result=await mod.dispatchStart(input,ports);
+      line(result.state==='started'?stdout:stderr,safeLabel(result.message??result.code));return {exitCode:result.state==='started'?0:1};
+    }
+    let launchSelection=null;
+    // Preserve Alpha's foreground native-default path when no capability adapter or override is supplied.
+    if(modelPorts || workflowModels || Object.keys(selectionOverrides).length || plan.local==='workflow-run') {
+      const mod=workflowModels??await import('./workflow-models.mjs');
+      const selectionPorts=await localModels(selectedCwd);Object.assign(ports,selectionPorts);
+      const result=await mod.resolveWorkflowModel({machineId,agent,selection:selectionOverrides},selectionPorts);
+      if(result.state!=='selected') {line(stderr,result.code==='bad_args'?'Unsupported model or effort for this machine.':'Native model catalog/defaults unavailable. Retry after the machine CLI capability adapter is available.');return {exitCode:result.code==='bad_args'?2:1};}
+      launchSelection=result.selection;
+    }
+    if(projectEntry) {
+      const check=(await projects()).checkLocal;
+      if(await check({id:projectEntry.id,root:projectEntry.root,machineId})!==true) {line(stderr,'Project changed before launch. Select it again in Projects.');return {exitCode:1};}
+    }
+    return {machineId,cwd:selectedCwd,...(project?{project}:{}),...(launchSelection?{launchSelection}:{}),agent};
+  }
   let plan;
   try { plan = parseArgv(argv); }
   catch (error) {
@@ -43,37 +145,154 @@ export async function runPdd(argv, { stdout = process.stdout, stderr = process.s
     case 'skill':
       try { line(stdout, loadGuidance({ packageRoot, cwd }));return 0; }
       catch { return guidanceError(stderr); }
-    case 'workflow-run':
-    case 'workflow-resume':
-    case 'workflow-attach': {
+    case 'workflow-run': case 'workflow-resume': case 'workflow-drive': case 'workflow-adopt': case 'workflow-attach': {
       try {
-        const runner = workflowRunner ?? await import('./workflow-runner.mjs');
-        const stages = workflowStages ?? await import('./workflow-stage-herdr.mjs');
-        const {runHerdrStage,inspectHerdrStage,attachHerdrStage,closeHerdrStage} = stages;
-        if (![runHerdrStage,inspectHerdrStage,attachHerdrStage,closeHerdrStage].every(fn=>typeof fn==='function')) throw Error('Missing stage transport');
-        const ports = {loadGuidance,launchNativeSession:nativeSession,runHerdrStage,inspectHerdrStage,attachHerdrStage,closeHerdrStage,stdout,stderr};
-        const result = plan.local === 'workflow-run'
-          ? await runner.runWorkflow({name:plan.operands[0],issue:plan.operands[1],
-            agent:plan.options['--agent']??'codex',cwd,packageRoot},ports)
-          : plan.local === 'workflow-attach'
-          ? await runner.attachWorkflow({runId:plan.operands[0],cwd,packageRoot},ports)
-          : await runner.resumeWorkflow({runId:plan.operands[0],cwd,packageRoot,
-            ...(plan.options['--decision']!==undefined?{decision:plan.options['--decision']}:{} )},ports);
-        if (!result || !['completed','waiting','failed','recovery_required'].includes(result.state)
-          || !Number.isInteger(result.exitCode) || result.exitCode<0 || result.exitCode>255
-          || typeof result.message!=='string' || !result.message.trim()) throw Error('Invalid local workflow reply');
-        line(stdout,result.message);
+        const runner=workflowRunner??await import('./workflow-runner.mjs');
+        const decision = {...(plan.options['--decision']?{decision:plan.options['--decision']}:{}),
+          ...(plan.options['--id']?{decisionId:plan.options['--id']}:{}),
+          ...(plan.options['--rev']?{expectedRev:Number(plan.options['--rev'])}:{}),
+          ...(plan.options['--expect-stage']?{expect:{stage:plan.options['--expect-stage'],seq:Number(plan.options['--expect-seq'])}}:{}),
+          ...(plan.options['--launch-id']?{launchId:plan.options['--launch-id']}: {})};
+        const input={runId:plan.operands[0],cwd,packageRoot,...decision};
+        if(plan.local==='workflow-adopt') return printResult(await runner.adoptWorkflow(input,ports));
+        if(['workflow-drive','workflow-attach'].includes(plan.local)) {
+          const stages=workflowStages??await import('./workflow-stage-herdr.mjs');
+          for(const name of ['runHerdrStage','inspectHerdrStage','attachHerdrStage','closeHerdrStage','resumeHerdrStage']) {
+            if(typeof stages[name]!=='function') throw Error();ports[name]=stages[name];
+          }
+        }
+        Object.assign(ports,{loadGuidance,launchNativeSession:nativeSession});
+        if(plan.local==='workflow-drive') return printResult(await runner.driveWorkflow(input,ports));
+        if(plan.local==='workflow-attach') return printResult(await runner.attachWorkflow(input,ports));
+        let prepared;
+        if(plan.local==='workflow-run') {
+          const launch=await launchInput(plan); if(launch.exitCode!==undefined) return launch.exitCode;
+          prepared=await runner.prepareWorkflow({name:plan.operands[0],issue:plan.operands[1],packageRoot,...launch},ports);
+        } else prepared=await runner.resumeWorkflow(input,ports);
+        if(prepared?.state!=='prepared') return printResult(prepared);
+        const controller=workflowController??await import('./workflow-controller.mjs');
+        const result=await controller.startWorkflowController({...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null},ports);
+        const started=result?.state==='started';
+        line(started?stdout:stderr,started?`Started workflow ${prepared.runId}.`:'Workflow controller launch unconfirmed. Inspect the saved run before retrying.');
+        return started?0:1;
+      } catch {line(stderr,'The local workflow operation could not be confirmed. Inspect saved state before retrying.');return 1;}
+    }
+    case 'workflow-status': case 'status': {
+      try {
+        if(plan.local==='status' && clientAdapter?.runStatusCommand) {const value=await clientAdapter.runStatusCommand(argv.slice(1),{...ports,cwd,packageRoot});if(!Number.isInteger(value)||value<0||value>255)throw Error();return value;}
+        const runId=plan.local==='workflow-status'?plan.operands[0]:undefined;
+        const {runs}=await statuses(runId,plan.local==='workflow-status');
+        if(runId && !runs.length) {line(stdout,plan.options['--json']?JSON.stringify({v:1,runId,state:'unknown',message:'Run not found'}):'Run not found');return 1;}
+        if(plan.options['--json']) line(stdout,JSON.stringify(runId?{...runs[0],v:1}:{v:1,runs}));
+        else {
+          if(plan.local==='status') line(stdout,'Needs you: '+(runs.filter(r=>r.waitingPerson || r.runtimeNotice).map(r=>safeLabel(`${r.runId} rev ${r.rev}: ${r.waitingPerson?.what??r.runtimeNotice?.message??'Review run'}`)).join('; ')||'None'));
+          for(const run of runs) line(stdout,safeLabel(`${run.project?.name??run.workflow??run.runId}: ${run.state}; machine ${run.machineId??'unknown'}; step ${run.stage?.id??'unknown'}; rev ${run.rev??'unknown'}; age ${Number.isFinite(run.updatedAt)?Math.max(0,Date.now()-run.updatedAt)+'ms':'unknown'}; version ${run.runtime?.pddVersion??'unknown'}; account ${run.actualAccount?.label??run.actualAccount?.id??'unknown'}; model ${run.effectiveSelection?.model??run.launchSelection?.model??'unknown'}; effort ${run.effectiveSelection?.effort??run.launchSelection?.effort??'none'}; ${run.waitingPerson?.what??run.waitingFor?.what??run.message??''}`));
+          if(!runs.length) line(stdout,'No saved runs.');
+        }
+        return 0;
+      }catch {line(stderr,'Saved run status is unavailable. Retry after checking local records.');return 1;}
+    }
+    case 'workflow-clean': {
+      try {const mod=workflowCleaner??await import('./workflow-clean.mjs');
+        const result=await mod.cleanWorkflowRuns({cwd,now:Date.now(),dryRun:plan.options['--dry-run']===true},ports);
+        if(!Array.isArray(result?.removed)||!Array.isArray(result?.retained)) throw Error();
+        for(const [kind,rows] of [['Removed',result.removed],['Retained',result.retained]]) for(const value of rows) line(stdout,`${kind}: ${safeLabel(typeof value==='string'?value:JSON.stringify(value))}`);
+        for(const warning of result.warnings??[]) line(stderr,safeLabel(warning));return 0;
+      }catch {line(stderr,'Run cleanup could not be confirmed. Inspect local runs before retrying.');return 1;}
+    }
+    case 'workflow-upgrade': {
+      try {const {runs,entries}=await statuses(plan.operands[0]);if(!runs.length) {line(stderr,'Run not found');return 1;}
+        const old=runs[0],target=dependencies.upgradeTarget?await dependencies.upgradeTarget():await (await import('./versions.mjs')).resolveRuntime({home});
+        if(!target || !Number.isSafeInteger(old.rev) || old.rev<1) {line(stderr,'A verified target runtime and current stopped revision are required.');return 1;}
+        line(stdout,`Upgrade run rev ${old.rev}: ${safeLabel(old.runtime?.releaseId)} -> ${safeLabel(target.releaseId)}`);
+        if(await (dependencies.confirmUpgrade??confirmRuntimeUpgrade)({old:old.runtime,target,expectedRev:old.rev,stdout,stderr})!==true) {line(stdout,'Upgrade cancelled.');return 0;}
+        const mod=workflowRuntime??await import('./workflow-runtime.mjs');
+        const result=await mod.upgradeWorkflowRuntime({runDir:entries[0].runDir,expectedRev:old.rev,target},ports);
+        line(result.state==='upgraded'?stdout:stderr,safeLabel(result.state==='upgraded'?'Run runtime upgraded.':result.code));return result.state==='upgraded'?0:1;
+      }catch {line(stderr,'Run runtime upgrade could not be confirmed. Inspect the saved run.');return 1;}
+    }
+    case 'runs-keeper': {
+      try {const mod=workflowKeeper??await import('./workflow-keeper.mjs');const result=await mod.runWorkflowKeeper({home},ports);
+        if(Number.isInteger(result))return result;
+        if(Number.isInteger(result?.exitCode) && !result.message)return result.exitCode;
+        if(result?.message)return printResult(result);
+        if(result && Array.isArray(result.results)) {for(const row of result.results) line(stdout,safeLabel(row.message??row.state));return result.results.some(r=>['failed','recovery_required'].includes(r.state))?1:0;}
+        throw Error();
+      }catch {line(stderr,'Local run recovery is unavailable. Inspect saved recovery records.');return 1;}
+    }
+    case 'workflow-decide': {
+      try {
+        const decider = workflowDecider ?? await import('./workflow-decide.mjs');
+        if (typeof decider.decideWorkflow !== 'function') throw Error('Missing decision module');
+        const result = await decider.decideWorkflow({runId:plan.operands[0], decision:plan.options['--decision'], decisionId:plan.options['--id'], ...(plan.options['--rev']?{expectedRev:Number(plan.options['--rev'])}:{}), ...(plan.options['--expect-stage']?{expectStage:plan.options['--expect-stage'],expectSeq:Number(plan.options['--expect-seq'])}:{}), cwd, packageRoot}, ports);
+        if (!result || !['recorded','started','refused','uncertain','failed'].includes(result.state) || !Number.isInteger(result.exitCode)) throw Error('Invalid decision reply');
+        if (plan.options['--json']) line(stdout, JSON.stringify({...result, exitCode:undefined, v:1}, (_,v)=>v===undefined?undefined:v));
+        else line(stdout, result.message);
         return result.exitCode;
-      } catch {
-        line(stderr,'The local workflow runner could not confirm this operation. Inspect its saved state before repeating a mutation; no automatic retry was sent.');
-        return 1;
-      }
+      } catch { line(stderr, 'The workflow decision could not be confirmed. Inspect the saved intent before repeating it.'); return 1; }
+    }
+    case 'setup': {
+      try {
+        const modules=dependencies.setupModules??{};
+        const versions=modules.versions??await import('./versions.mjs');
+        const lock=modules.lock??await import('./update-lock.mjs');
+        const launcher=modules.launcher??await import('./pdd-launch.mjs');
+        const runtime=await versions.resolveRuntime({home,versionRoot:packageRoot},ports);
+        const result=await lock.withUpdateLock({home},async lease=>{
+          const support=await launcher.installLauncherSupport({home,runtime,lease},ports);
+          if(support?.code!==null)return support;
+          return launcher.provisionRecoveryService({home,runtime,lease},ports);
+        },ports);
+        if(result?.code!==null)throw Error();
+        if(clientAdapter?.runSetupCommand) {
+          const exit=await clientAdapter.runSetupCommand(argv.slice(1),{...ports,cwd,packageRoot});
+          if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();return exit;
+        }
+        line(stdout,'Public recovery service ready.');return 0;
+      }catch {line(stderr,'Public setup could not be completed. Use the verified PDD installer or ~/.pdd/launcher/pdd-launch recover, then rerun pdd setup.');return 1;}
+    }
+    case 'doctor': {
+      try {const mod=doctorModule??await import('./doctor.mjs');const exitCode=await mod.runDoctorCommand(argv.slice(1),{...(clientAdapter?.doctorChecks?{clientAdapter}:{}),...doctorDeps,cwd,packageRoot,stdout,stderr});if(![0,1,2].includes(exitCode))throw Error();return exitCode;}
+      catch {line(stderr,'Public diagnostics unavailable. Check the selected package.');return 1;}
+    }
+    case 'projects': case 'models': {
+      try {
+        const target=plan.options['--on']??machineId;
+        if(plan.local==='projects') {const mod=workflowProjects??await import('./workflow-projects.mjs');const result=await mod.listWorkflowProjects({machineId:target},await projects());
+          if(!result.projects.length) line(stdout,'No projects found');
+          for(const p of result.projects) line(stdout,safeLabel(`${p.name} (${p.id}) — ${p.availability}; ${p.sources.join(', ')}`));
+          for(const w of result.warnings??[]) line(stderr,`Project source ${safeLabel(w.source)}: ${safeLabel(w.code)}`);return 0;
+        }
+        const mod=workflowModels??await import('./workflow-models.mjs');const result=await mod.listWorkflowModels({machineId:target,agent:plan.options['--agent']},await localModels());
+        if(result.state!=='listed') {line(stderr,'Model catalog unavailable. Retry after checking the target CLI adapter.');return 1;}
+        for(const m of result.catalog.models) line(stdout,safeLabel(`${m.label} (${m.id}): ${m.efforts.join(', ')||'no effort control'}; machine ${result.catalog.machineId}`));return 0;
+      }catch {line(stderr,'Local discovery unavailable. Check the machine source adapter.');return 1;}
+    }
+    case 'settings': {
+      try {if(!settings)return unsupported();const target=plan.options['--machine']??machineId,agent=plan.options['--tool'];
+        if(!plan.operands.length) {const value=await settings.read({machineId:target,agent});line(stdout,safeLabel(JSON.stringify(value)));return 0;}
+        const [key,value]=plan.operands;let selection;
+        if(['model','effort'].includes(key)) {const mod=workflowModels??await import('./workflow-models.mjs');const result=await mod.resolveWorkflowModel({machineId:target,agent,selection:{[key]:value}},await localModels());
+          if(result.state!=='selected') {line(stderr,'Settings model/effort pair unavailable or unsupported.');return result.code==='bad_args'?2:1;}selection={model:result.selection.model,effort:result.selection.effort};}
+        const result=await settings.write({machineId:target,agent,key,value,...(selection?{selection}:{})});
+        if(result?.ok!==true) {line(stderr,'Settings change unconfirmed. Inspect machine Settings.');return 1;}
+        line(stdout,'Settings updated.');return 0;
+      }catch {line(stderr,'Machine Settings unavailable. Check the settings adapter.');return 1;}
+    }
+    case 'update': {
+      try {const mod=updateModule??await import('./updates/updater.mjs');const action=Object.keys(plan.options).find(k=>!['--fleet','--force'].includes(k));
+        const result=await mod.runUpdateCommand({action:action?.slice(2)??null,value:action && plan.options[action]!==true?plan.options[action]:null,fleet:!!plan.options['--fleet'],force:!!plan.options['--force']},ports);
+        if(!result || ![0,1,2].includes(result.code) || typeof result.message!=='string')throw Error();line(result.code===0?stdout:stderr,result.message);return result.code;
+      }catch {line(stderr,'Update operation unconfirmed. Inspect local update state before retrying.');return 1;}
     }
     case 'session': {
+      let launch;
+      try {launch=await launchInput(plan);if(launch.exitCode!==undefined)return launch.exitCode;}
+      catch {line(stderr,'Launch selection unavailable. Check the local adapters.');return 1;}
       let context;
-      try { context = loadGuidance({ packageRoot, cwd, workflows: true, workflowName: plan.workflowName }); }
+      try { context = loadGuidance({ packageRoot, cwd: launch.cwd, workflows: true, workflowName: plan.workflowName }); }
       catch { return guidanceError(stderr); }
-      return nativeSession({ agent: plan.options['--agent'] ?? 'codex', cwd, context,
+      return nativeSession({ agent: launch.agent, cwd: launch.cwd, context, ...(launch.launchSelection?{selection:launch.launchSelection}:{}),
         request: plan.operands.join(' '), stderr });
     }
     case 'completion': stdout.write(renderCompletion(plan.operands[0]));return 0;
@@ -84,6 +303,30 @@ export async function runPdd(argv, { stdout = process.stdout, stderr = process.s
         if (!Array.isArray(workflows)) throw Error('Invalid definition listing');
         line(stdout,formatLocalWorkflows({workflows,default:null},{json:plan.options['--json']===true}));return 0;
       } catch { line(stderr,'Workflow definitions could not be read or validated. Check the selected project definitions and bundled package.');return 1; }
-    default: line(stderr, 'Unsupported command in PDD Alpha. Run pdd --help.');return 2;
+    default: {
+      try {
+        const family=plan.commandId.split('.')[0];
+        const binding={phone:'runPhoneCommand',link:'runLinkCommand',fleet:'runFleetCommand',agents:'runAgentCommand',agent:'runAgentCommand',open:'runAgentCommand',accounts:'runAccountsCommand',setup:'runSetupCommand',join:'runJoinCommand'}[family];
+        if(!binding || typeof clientAdapter?.[binding]!=='function') return unsupported();
+        const raw=['agents','agent','open'].includes(family)?argv:argv.slice(1);
+        const result=await clientAdapter[binding](raw,{...ports,cwd,packageRoot});
+        if(!Number.isInteger(result)||result<0||result>255)throw Error();return result;
+      }catch {line(stderr,'Optional client command unconfirmed. Inspect local state before retrying.');return 1;}
+    }
   }
+}
+
+function persistStart(home,input) {
+  const directory=join(home,input.kind==='session'?'.pdd/sessions/starts':'.pdd/runs/starts');mkdirSync(directory,{recursive:true,mode:0o700});
+  const fd=openSync(join(directory,`${input.startId}.json`),'wx',0o600);
+  try {writeSync(fd,JSON.stringify({v:1,...input})+'\n');fsyncSync(fd);}finally{closeSync(fd);}
+  const dir=openSync(directory,'r');try{fsyncSync(dir);}finally{closeSync(dir);}
+}
+
+async function confirmRuntimeUpgrade({stdout,stderr}) {
+  if(!process.stdin.isTTY) {line(stderr,'Run workflow upgrade interactively to review and confirm this transition.');return false;}
+  const {createInterface}=await import('node:readline/promises');
+  const terminal=createInterface({input:process.stdin,output:stdout});
+  try {return (await terminal.question('Record this stopped run runtime upgrade? [y/N] ')).trim().toLowerCase()==='y';}
+  catch {return false;} finally {terminal.close();}
 }

@@ -1,0 +1,1530 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-run-records.prompt.md",
+  "story": "../../story/cli/WORKFLOW-RUN-RECORDS.md",
+  "note": "Synthetic cases. Shape is local to these cases, not a PDD execution schema. 'fixtures' holds shared journal states; a 'state' given as a fixture name plus 'with' means that fixture with those top-level fields replaced. {\"$repeat\": [c, n]} means the string of n copies of c. 'home' is /home/user. Clock values are ms since the epoch. An 'expected' object lists the fields that are checked; fields it does not name are not checked unless a case says so. RUNDIR stands for fixtures.runDir.",
+  "fixtures": {
+    "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "runDir": "/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "D": [
+      {
+        "id": "understand",
+        "kind": "agent"
+      },
+      {
+        "id": "visual",
+        "kind": "agent",
+        "optional": true
+      },
+      {
+        "id": "approve",
+        "kind": "human"
+      },
+      {
+        "id": "prompt-pr",
+        "kind": "pr",
+        "optional": true
+      },
+      {
+        "id": "prompt-merge",
+        "kind": "merge",
+        "prStage": "prompt-pr"
+      }
+    ],
+    "S_human": {
+      "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+      "seq": 12,
+      "name": "feature-lite",
+      "agent": "codex",
+      "repo": "octo/app",
+      "issue": {
+        "number": 7,
+        "url": "https://github.com/octo/app/issues/7"
+      },
+      "definitions": "D",
+      "index": 2,
+      "completed": [
+        {
+          "id": "understand",
+          "kind": "agent"
+        },
+        {
+          "id": "visual",
+          "kind": "agent",
+          "skipped": true
+        }
+      ],
+      "optional": {
+        "visual": {
+          "decision": "skip"
+        }
+      },
+      "pending": null
+    }
+  },
+  "cases": [
+    {
+      "id": "index-append-line",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "files": {}
+      },
+      "when": {
+        "call": "appendRunIndex",
+        "entry": {
+          "v": 1,
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "workflow": "feature-lite",
+          "repo": "octo/app",
+          "issue": {
+            "number": 7,
+            "url": "https://github.com/octo/app/issues/7"
+          },
+          "agent": "codex",
+          "root": "/home/user/app.pdd-worktrees/w1",
+          "runDir": "/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "startedAt": 1792820000000,
+          "pdd": {
+            "node": "/usr/local/bin/node",
+            "bin": "/usr/local/lib/node_modules/pdd/bin/pdd.mjs",
+            "version": "0.0.312"
+          }
+        }
+      },
+      "expected": {
+        "result": {
+          "ok": true
+        },
+        "dirs": {
+          "/home/user/.pdd/runs": {
+            "mode": "0700"
+          }
+        },
+        "files": {
+          "/home/user/.pdd/runs/index.jsonl": {
+            "mode": "0600",
+            "lineCount": 1,
+            "endsWithNewline": true,
+            "line0": {
+              "v": 1,
+              "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+              "workflow": "feature-lite",
+              "repo": "octo/app",
+              "issue": {
+                "number": 7,
+                "url": "https://github.com/octo/app/issues/7"
+              },
+              "agent": "codex",
+              "root": "/home/user/app.pdd-worktrees/w1",
+              "runDir": "/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+              "startedAt": 1792820000000,
+              "pdd": {
+                "node": "/usr/local/bin/node",
+                "bin": "/usr/local/lib/node_modules/pdd/bin/pdd.mjs",
+                "version": "0.0.312"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "index-append-too-large",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "files": {
+          "/home/user/.pdd/runs/index.jsonl": ""
+        }
+      },
+      "when": {
+        "call": "appendRunIndex",
+        "entry": {
+          "v": 1,
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "workflow": {
+            "$repeat": [
+              "w",
+              5000
+            ]
+          },
+          "runDir": "/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e"
+        }
+      },
+      "expected": {
+        "result": {
+          "ok": false,
+          "code": "too_large"
+        },
+        "files": {
+          "/home/user/.pdd/runs/index.jsonl": ""
+        },
+        "threw": false
+      }
+    },
+    {
+      "id": "index-read-lenient-and-duplicates",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "files": {
+          "/home/user/.pdd/runs/index.jsonl": [
+            "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"workflow\":\"old\",\"runDir\":\"/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\"}\n",
+            "not json\n",
+            "{\"v\":1,\"workflow\":\"feature\",\"runDir\":\"/home/user/x/pdd/workflows/none\"}\n",
+            "{\"v\":1,\"runId\":\"0b1e7a52-3c94-4d1f-a2b8-5e6f7a8b9c0d\",\"runDir\":\"/home/user/elsewhere\"}\n",
+            "{\"v\":1,\"runId\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"workflow\":\"bug\",\"runDir\":\"/home/user/b/.git/pdd/workflows/9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"extra\":true}\n",
+            "{\"v\":2,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"workflow\":\"feature-lite\",\"runDir\":\"/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\"}\n",
+            "{\"v\":1,\"runId\":\"1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f\""
+          ]
+        }
+      },
+      "when": {
+        "call": "readRunIndex"
+      },
+      "expected": {
+        "dropped": 3,
+        "entries": [
+          {
+            "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+            "workflow": "feature-lite",
+            "runDir": "/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+            "repo": null,
+            "issue": null,
+            "agent": null,
+            "root": null,
+            "startedAt": null,
+            "pdd": null
+          },
+          {
+            "runId": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+            "workflow": "bug",
+            "runDir": "/home/user/b/.git/pdd/workflows/9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+            "repo": null,
+            "issue": null,
+            "agent": null,
+            "root": null,
+            "startedAt": null,
+            "pdd": null
+          }
+        ],
+        "entryLacksField": [
+          "extra"
+        ]
+      }
+    },
+    {
+      "id": "index-read-missing-file",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "files": {}
+      },
+      "when": {
+        "call": "readRunIndex"
+      },
+      "expected": {
+        "entries": [],
+        "dropped": 0
+      }
+    },
+    {
+      "id": "status-exit-human-wait",
+      "criteria": [
+        "AC3",
+        "AC4",
+        "AC5",
+        "AC6"
+      ],
+      "given": {
+        "state": "S_human"
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "waiting",
+            "message": "waiting: run 6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e / approve. Review the exact current proposal."
+          },
+          "controller": {
+            "herdrSession": "default",
+            "paneId": "w1:p2"
+          }
+        }
+      },
+      "expected": {
+        "v": 1,
+        "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+        "workflow": "feature-lite",
+        "state": "waiting",
+        "stage": {
+          "id": "approve",
+          "kind": "human",
+          "index": 2,
+          "total": 5
+        },
+        "waitingFor": {
+          "decisions": [
+            "approve"
+          ],
+          "what": "Approve the current proposal and test plan"
+        },
+        "resumeDecisions": [
+          "approve"
+        ],
+        "steps": [
+          {
+            "id": "understand",
+            "kind": "agent",
+            "state": "done",
+            "optional": false
+          },
+          {
+            "id": "visual",
+            "kind": "agent",
+            "state": "skipped",
+            "optional": true
+          },
+          {
+            "id": "approve",
+            "kind": "human",
+            "state": "current",
+            "optional": false
+          },
+          {
+            "id": "prompt-pr",
+            "kind": "pr",
+            "state": "next",
+            "optional": true
+          },
+          {
+            "id": "prompt-merge",
+            "kind": "merge",
+            "state": "next",
+            "optional": false
+          }
+        ],
+        "pr": [],
+        "stageAgent": null,
+        "controller": {
+          "herdrSession": "default",
+          "paneId": "w1:p2"
+        },
+        "message": "waiting: run 6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e / approve. Review the exact current proposal.",
+        "journalSeq": 12,
+        "updatedAt": 1792820911000
+      }
+    },
+    {
+      "id": "status-exit-optional-undecided",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "index": 1,
+            "completed": [
+              {
+                "id": "understand",
+                "kind": "agent"
+              }
+            ],
+            "optional": {}
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "waiting",
+            "message": "waiting: optional step."
+          }
+        }
+      },
+      "expected": {
+        "state": "waiting",
+        "stage": {
+          "id": "visual",
+          "kind": "agent",
+          "index": 1,
+          "total": 5
+        },
+        "waitingFor": {
+          "decisions": [
+            "approve",
+            "skip"
+          ],
+          "what": "Run or skip visual"
+        },
+        "resumeDecisions": [
+          "approve",
+          "skip"
+        ],
+        "controller": null
+      }
+    },
+    {
+      "id": "status-record-agent-running",
+      "criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "seq": 3,
+            "index": 0,
+            "completed": [],
+            "optional": {},
+            "pending": {
+              "kind": "agent",
+              "stage": "understand",
+              "backend": {
+                "session": "pdd-ab12",
+                "paneId": "w3:p4",
+                "nativeSession": {
+                  "kind": "id",
+                  "value": "01a16c74-1215-76d3-b090-053140322768"
+                }
+              }
+            }
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "record",
+          "now": 1792820100000
+        }
+      },
+      "expected": {
+        "state": "running",
+        "waitingFor": {
+          "decisions": [],
+          "what": null
+        },
+        "message": null,
+        "journalSeq": 3,
+        "stageAgent": {
+          "kind": "codex",
+          "nativeSessionId": "01a16c74-1215-76d3-b090-053140322768",
+          "herdrSession": "pdd-ab12",
+          "paneId": "w3:p4"
+        },
+        "steps": [
+          {
+            "id": "understand",
+            "kind": "agent",
+            "state": "current",
+            "optional": false
+          },
+          {
+            "id": "visual",
+            "kind": "agent",
+            "state": "next",
+            "optional": true
+          },
+          {
+            "id": "approve",
+            "kind": "human",
+            "state": "next",
+            "optional": false
+          },
+          {
+            "id": "prompt-pr",
+            "kind": "pr",
+            "state": "next",
+            "optional": true
+          },
+          {
+            "id": "prompt-merge",
+            "kind": "merge",
+            "state": "next",
+            "optional": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "status-path-native-session-has-no-id",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "index": 0,
+            "completed": [],
+            "pending": {
+              "kind": "cleanup",
+              "stage": "understand",
+              "backend": {
+                "session": "pdd-ab12",
+                "paneId": "w3:p4",
+                "nativeSession": {
+                  "kind": "path",
+                  "value": "/home/user/.codex/sessions/2026/10/24/rollout-x.jsonl"
+                }
+              }
+            }
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "record",
+          "now": 1792820100000
+        }
+      },
+      "expected": {
+        "stageAgent": {
+          "kind": "codex",
+          "nativeSessionId": null,
+          "herdrSession": "pdd-ab12",
+          "paneId": "w3:p4"
+        }
+      }
+    },
+    {
+      "id": "status-record-completed-with-pr",
+      "criteria": [
+        "AC3",
+        "AC4",
+        "AC6"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "seq": 30,
+            "index": 5,
+            "completed": [
+              {
+                "id": "understand",
+                "kind": "agent"
+              },
+              {
+                "id": "visual",
+                "kind": "agent",
+                "skipped": true
+              },
+              {
+                "id": "approve",
+                "kind": "human"
+              },
+              {
+                "id": "prompt-pr",
+                "kind": "pr",
+                "pr": {
+                  "number": 41,
+                  "url": "https://github.com/octo/app/pull/41"
+                }
+              },
+              {
+                "id": "prompt-merge",
+                "kind": "merge",
+                "pr": {
+                  "number": 41,
+                  "url": "https://github.com/octo/app/pull/41"
+                },
+                "mergeCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "record",
+          "now": 1792829000000
+        }
+      },
+      "expected": {
+        "state": "completed",
+        "stage": null,
+        "waitingFor": {
+          "decisions": [],
+          "what": null
+        },
+        "resumeDecisions": [],
+        "pr": [
+          {
+            "stage": "prompt-pr",
+            "number": 41,
+            "url": "https://github.com/octo/app/pull/41"
+          }
+        ],
+        "steps": [
+          {
+            "id": "understand",
+            "kind": "agent",
+            "state": "done",
+            "optional": false
+          },
+          {
+            "id": "visual",
+            "kind": "agent",
+            "state": "skipped",
+            "optional": true
+          },
+          {
+            "id": "approve",
+            "kind": "human",
+            "state": "done",
+            "optional": false
+          },
+          {
+            "id": "prompt-pr",
+            "kind": "pr",
+            "state": "done",
+            "optional": true
+          },
+          {
+            "id": "prompt-merge",
+            "kind": "merge",
+            "state": "done",
+            "optional": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "status-exit-failed-marks-current-step",
+      "criteria": [
+        "AC3",
+        "AC4"
+      ],
+      "given": {
+        "state": "S_human"
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "failed",
+            "message": "failed: run 6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e / approve. A complete independent proposal is required."
+          }
+        }
+      },
+      "expected": {
+        "state": "failed",
+        "waitingFor": {
+          "decisions": [],
+          "what": null
+        },
+        "stepStateOf": {
+          "approve": "failed",
+          "prompt-pr": "next"
+        }
+      }
+    },
+    {
+      "id": "status-exit-merge-wait",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "index": 4
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "waiting",
+            "message": "waiting: merge."
+          }
+        }
+      },
+      "expected": {
+        "waitingFor": {
+          "decisions": [],
+          "what": "Merge the PR on GitHub"
+        },
+        "resumeDecisions": []
+      }
+    },
+    {
+      "id": "status-exit-supplied-decisions-win",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "index": 0,
+            "completed": []
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "waiting",
+            "message": "waiting: saved input is current.",
+            "decisions": [
+              "approve"
+            ],
+            "what": "Approve to advance"
+          }
+        }
+      },
+      "expected": {
+        "waitingFor": {
+          "decisions": [
+            "approve"
+          ],
+          "what": "Approve to advance"
+        },
+        "resumeDecisions": []
+      }
+    },
+    {
+      "id": "status-exit-agent-wait-without-decisions-is-unknown",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "state": {
+          "fixture": "S_human",
+          "with": {
+            "index": 0,
+            "completed": []
+          }
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "waiting",
+            "message": "waiting: saved input is current."
+          }
+        }
+      },
+      "expected": {
+        "waitingFor": null
+      }
+    },
+    {
+      "id": "status-journal-phase",
+      "criteria": [
+        "AC3",
+        "AC5"
+      ],
+      "given": {
+        "state": "S_human"
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "journal",
+          "now": 1792820999000
+        }
+      },
+      "expected": {
+        "state": "unknown",
+        "waitingFor": null,
+        "resumeDecisions": [
+          "approve"
+        ],
+        "message": null,
+        "controller": null,
+        "journalSeq": 12,
+        "updatedAt": 1792820999000
+      }
+    },
+    {
+      "id": "status-exit-unknown-outcome-text",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "state": "S_human"
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "paused",
+            "message": "x"
+          }
+        }
+      },
+      "expected": {
+        "state": "unknown",
+        "waitingFor": null
+      }
+    },
+    {
+      "id": "status-message-cut-to-300",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "state": "S_human"
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "exit",
+          "now": 1792820911000,
+          "outcome": {
+            "state": "waiting",
+            "message": {
+              "$repeat": [
+                "a",
+                350
+              ]
+            }
+          }
+        }
+      },
+      "expected": {
+        "message": {
+          "$repeat": [
+            "a",
+            300
+          ]
+        }
+      }
+    },
+    {
+      "id": "status-lenient-bad-state",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "state": {
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "definitions": "not a list",
+          "index": "2",
+          "completed": null
+        }
+      },
+      "when": {
+        "call": "runStatusFromState",
+        "extras": {
+          "phase": "record",
+          "now": 1792820911000
+        }
+      },
+      "expected": {
+        "threw": false,
+        "state": "unknown",
+        "stage": null,
+        "steps": [],
+        "resumeDecisions": [],
+        "pr": [],
+        "stageAgent": null,
+        "journalSeq": 0,
+        "workflow": null
+      }
+    },
+    {
+      "id": "status-write-atomic-replace",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "randomBytes": "0102030405060708",
+        "files": {
+          "RUNDIR/journal.jsonl": "<12 lines>",
+          "RUNDIR/status.json": "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"journalSeq\":11}\n"
+        },
+        "RUNDIR": "fixtures.runDir"
+      },
+      "when": {
+        "call": "writeRunStatus",
+        "runDir": "fixtures.runDir",
+        "status": {
+          "v": 1,
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "state": "waiting",
+          "journalSeq": 12,
+          "updatedAt": 1792820911000
+        }
+      },
+      "expected": {
+        "result": {
+          "ok": true
+        },
+        "fsCallsInOrder": [
+          "open RUNDIR/.status.json.0102030405060708.tmp exclusive nofollow 0600",
+          "write",
+          "fsync",
+          "rename RUNDIR/.status.json.0102030405060708.tmp -> RUNDIR/status.json"
+        ],
+        "files": {
+          "RUNDIR/status.json": "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"state\":\"waiting\",\"journalSeq\":12,\"updatedAt\":1792820911000}\n",
+          "RUNDIR/journal.jsonl": "<12 lines, unchanged>"
+        },
+        "pathsNeverOpened": [
+          "RUNDIR/journal.jsonl",
+          "RUNDIR/input.jsonl",
+          "RUNDIR/attachments.jsonl"
+        ]
+      }
+    },
+    {
+      "id": "status-write-rename-fails-keeps-old-file",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "randomBytes": "0102030405060708",
+        "fsFails": {
+          "rename": "EIO"
+        },
+        "files": {
+          "RUNDIR/status.json": "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"journalSeq\":11}\n"
+        },
+        "RUNDIR": "fixtures.runDir"
+      },
+      "when": {
+        "call": "writeRunStatus",
+        "runDir": "fixtures.runDir",
+        "status": {
+          "v": 1,
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "journalSeq": 12
+        }
+      },
+      "expected": {
+        "threw": false,
+        "result": {
+          "ok": false
+        },
+        "files": {
+          "RUNDIR/status.json": "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"journalSeq\":11}\n"
+        },
+        "filesAbsent": [
+          "RUNDIR/.status.json.0102030405060708.tmp"
+        ]
+      }
+    },
+    {
+      "id": "status-write-too-large",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "files": {},
+        "RUNDIR": "fixtures.runDir"
+      },
+      "when": {
+        "call": "writeRunStatus",
+        "runDir": "fixtures.runDir",
+        "status": {
+          "v": 1,
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "journalSeq": 12,
+          "message": {
+            "$repeat": [
+              "m",
+              300000
+            ]
+          }
+        }
+      },
+      "expected": {
+        "result": {
+          "ok": false,
+          "code": "too_large"
+        },
+        "filesAbsent": [
+          "RUNDIR/status.json"
+        ]
+      }
+    },
+    {
+      "id": "runner-outcome-unchanged-when-writes-fail",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "twoRunsOfTheSameScript": "a small-change resume that records one decision and then waits",
+        "runA": {
+          "recordsWrites": "work"
+        },
+        "runB": {
+          "appendRunIndex": {
+            "ok": false,
+            "code": "EACCES"
+          },
+          "writeRunStatus": {
+            "ok": false,
+            "code": "ENOSPC"
+          }
+        }
+      },
+      "when": {
+        "call": "resumeWorkflow",
+        "decision": "approve"
+      },
+      "expected": {
+        "runB.exitCode": "same as runA",
+        "runB.state": "same as runA",
+        "runB.stage": "same as runA",
+        "runB.message": "same as runA",
+        "runB.journalBytes": "same as runA",
+        "runB.stdout": "same as runA",
+        "runB.stderr": "same as runA"
+      }
+    },
+    {
+      "id": "status-read-lenient",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "files": {
+          "RUNDIR/status.json": "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"state\":\"sleeping\",\"journalSeq\":57,\"steps\":[{\"id\":\"a\",\"kind\":\"agent\",\"state\":\"done\"},{\"kind\":\"agent\"},{\"id\":\"b\",\"kind\":\"agent\",\"state\":\"later\"}],\"future\":1}\n"
+        }
+      },
+      "when": {
+        "call": "readRunStatus",
+        "runDir": "fixtures.runDir"
+      },
+      "expected": {
+        "value": {
+          "v": 1,
+          "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+          "state": "unknown",
+          "journalSeq": 57,
+          "waitingFor": null,
+          "steps": [
+            {
+              "id": "a",
+              "kind": "agent",
+              "state": "done"
+            },
+            {
+              "id": "b",
+              "kind": "agent",
+              "state": "unknown"
+            }
+          ]
+        },
+        "warningsInclude": [
+          "unknown_field:future",
+          "dropped_item:steps"
+        ]
+      }
+    },
+    {
+      "id": "status-read-run-mismatch",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "files": {
+          "RUNDIR/status.json": "{\"v\":1,\"runId\":\"0b1e7a52-3c94-4d1f-a2b8-5e6f7a8b9c0d\",\"journalSeq\":3}\n"
+        }
+      },
+      "when": {
+        "call": "readRunStatus",
+        "runDir": "fixtures.runDir"
+      },
+      "expected": {
+        "value": null,
+        "warningsInclude": [
+          "run_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "status-read-missing-and-bad",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "variants": [
+          {
+            "files": {}
+          },
+          {
+            "files": {
+              "RUNDIR/status.json": "{bad"
+            }
+          },
+          {
+            "files": {
+              "RUNDIR/status.json": "{\"v\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"journalSeq\":-1}\n"
+            }
+          }
+        ]
+      },
+      "when": {
+        "call": "readRunStatus",
+        "runDir": "fixtures.runDir"
+      },
+      "expected": {
+        "variants": [
+          {
+            "value": null,
+            "warningsInclude": [
+              "missing"
+            ]
+          },
+          {
+            "value": null,
+            "warningsInclude": [
+              "bad_json"
+            ]
+          },
+          {
+            "value": null,
+            "warningsInclude": [
+              "bad_record"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "journal-last-ignores-partial-tail",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "files": {
+          "RUNDIR/journal.jsonl": [
+            "{\"seq\":1,\"event\":\"run.started\",\"state\":{\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"seq\":1}}\n",
+            "{\"seq\":2,\"event\":\"agent.intent\",\"state\":{\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"seq\":2,\"pad\":{\"$repeat\":[\"p\",2500000]}}}\n",
+            "{\"seq\":3,\"event\":\"agent.backend\",\"sta"
+          ]
+        }
+      },
+      "when": {
+        "call": "readJournalLast",
+        "runDir": "fixtures.runDir"
+      },
+      "expected": {
+        "value": {
+          "seq": 2,
+          "event": "agent.intent"
+        },
+        "warningsInclude": [
+          "partial_line"
+        ],
+        "neverReadsWholeFileAtOnce": true
+      }
+    },
+    {
+      "id": "journal-last-bad-line-no-fallback",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "files": {
+          "RUNDIR/journal.jsonl": [
+            "{\"seq\":1,\"event\":\"run.started\",\"state\":{\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"seq\":1}}\n",
+            "garbage\n"
+          ]
+        }
+      },
+      "when": {
+        "call": "readJournalLast",
+        "runDir": "fixtures.runDir"
+      },
+      "expected": {
+        "value": null,
+        "warningsInclude": [
+          "bad_json"
+        ]
+      }
+    },
+    {
+      "id": "journal-since-collects-after-seq",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "files": {
+          "RUNDIR/journal.jsonl": [
+            "{\"seq\":11,\"event\":\"agent.completed\",\"state\":{}}\n",
+            "{\"seq\":12,\"event\":\"agent.completed\",\"state\":{}}\n",
+            "{\"seq\":13,\"event\":\"human.approved\",\"decisionId\":\"9d8c7b6a-5f4e-4d3c-b2a1-0f9e8d7c6b5a\",\"state\":{}}\n",
+            "{\"seq\":14,\"event\":\"agent.intent\",\"state\":{}}\n"
+          ]
+        }
+      },
+      "when": {
+        "call": "readJournalSince",
+        "runDir": "fixtures.runDir",
+        "afterSeq": 12
+      },
+      "expected": {
+        "complete": true,
+        "records": [
+          {
+            "seq": 13,
+            "event": "human.approved",
+            "decisionId": "9d8c7b6a-5f4e-4d3c-b2a1-0f9e8d7c6b5a"
+          },
+          {
+            "seq": 14,
+            "event": "agent.intent",
+            "decisionId": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "journal-since-nothing-new",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "RUNDIR": "fixtures.runDir",
+        "files": {
+          "RUNDIR/journal.jsonl": [
+            "{\"seq\":11,\"event\":\"agent.completed\",\"state\":{}}\n",
+            "{\"seq\":12,\"event\":\"agent.completed\",\"state\":{}}\n"
+          ]
+        }
+      },
+      "when": {
+        "call": "readJournalSince",
+        "runDir": "fixtures.runDir",
+        "afterSeq": 12
+      },
+      "expected": {
+        "complete": true,
+        "records": []
+      }
+    },
+    {
+      "id": "assigned-runs-from-issue-claims",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "files": {
+          "/home/user/app/.git/pdd/worktree-assignments/issues/7.json": "{\"version\":1,\"runId\":\"6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e\",\"repository\":\"octo/app\",\"issueNumber\":7,\"workflowName\":\"feature\",\"commonDir\":\"/home/user/app/.git\",\"sourceRoot\":\"/home/user/app\",\"worktreePath\":\"/home/user/app.pdd-worktrees/w1\",\"gitDir\":\"/home/user/app/.git/worktrees/w1\",\"branch\":\"pdd/feature-7-6f1c\",\"baseRef\":\"main\",\"baseSha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}\n",
+          "/home/user/app/.git/pdd/worktree-assignments/issues/8.json": "{\"version\":1,\"runId\":\"not-a-uuid\",\"gitDir\":\"/x\",\"worktreePath\":\"/y\"}\n",
+          "/home/user/app/.git/pdd/worktree-assignments/issues/9.json": "{bad"
+        }
+      },
+      "when": {
+        "call": "readAssignedRuns",
+        "commonDir": "/home/user/app/.git"
+      },
+      "expected": {
+        "dropped": 2,
+        "entries": [
+          {
+            "v": 1,
+            "runId": "6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+            "workflow": "feature",
+            "repo": "octo/app",
+            "issue": {
+              "number": 7,
+              "url": null
+            },
+            "agent": null,
+            "root": "/home/user/app.pdd-worktrees/w1",
+            "runDir": "/home/user/app/.git/worktrees/w1/pdd/workflows/6f1c2d3e-4a5b-4c6d-8e7f-901a2b3c4d5e",
+            "startedAt": null,
+            "pdd": null
+          }
+        ],
+        "filesWritten": []
+      }
+    },
+    {
+      "id": "assigned-runs-missing-folder",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "files": {}
+      },
+      "when": {
+        "call": "readAssignedRuns",
+        "commonDir": "/home/user/other/.git"
+      },
+      "expected": {
+        "entries": [],
+        "dropped": 0
+      }
+    },
+    {
+      "id": "p1-derived-runtime-rev",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "journal": {
+          "seq": 60,
+          "rev": 57,
+          "runtime": {
+            "pddVersion": "0.1.0",
+            "node": "/owned/node"
+          },
+          "backendGen": 2,
+          "machineId": "machine-a",
+          "startId": "saved-start",
+          "actualAccount": "account-a"
+        },
+        "heartbeatAt": 1000
+      },
+      "when": {
+        "call": "runStatusFromState"
+      },
+      "expected": {
+        "rev": 57,
+        "journalSeq": 60,
+        "heartbeatAt": 1000,
+        "runtimeSource": "journal",
+        "journalWrites": 0
+      }
+    },
+    {
+      "id": "p1-unknown-control",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "controlState": "future-control"
+      },
+      "when": {
+        "call": "runStatusFromState"
+      },
+      "expected": {
+        "controlState": "unknown",
+        "effectsAuthorized": false
+      }
+    },
+    {
+      "id": "p1-archive-locator",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "runId": "6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f",
+        "archived": true,
+        "runDir": "/home/user/.pdd/runs/archive/6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f"
+      },
+      "when": {
+        "call": "readRunIndex"
+      },
+      "expected": {
+        "accepted": true,
+        "journalRewritten": false
+      }
+    },
+    {
+      "id": "actual-account-and-machine-target",
+      "criteria": [
+        "AC17"
+      ],
+      "given": {
+        "actualAccount": "a",
+        "machineToolPolicy": {
+          "revision": 8,
+          "mode": "auto",
+          "targetAccountId": "b"
+        },
+        "accountTransition": {
+          "revision": 8,
+          "targetAccountId": "b",
+          "state": "pending"
+        }
+      },
+      "when": {
+        "operation": "workflow-run-records"
+      },
+      "expected": {
+        "actualAccount": "a",
+        "machineTarget": "b",
+        "displayDoesNotApplyPolicy": true
+      }
+    },
+    {
+      "id": "blocked-runtime-notice",
+      "criteria": [
+        "AC18"
+      ],
+      "given": {
+        "journalRuntimeNotice": "Needs you: Upgrade run"
+      },
+      "when": {
+        "operation": "workflow-run-records"
+      },
+      "expected": {
+        "runtimeNotice": "Needs you: Upgrade run",
+        "updaterWritesRunJournal": false
+      }
+    },
+    {
+      "id": "quota-waiting-for",
+      "criteria": [
+        "AC19"
+      ],
+      "given": {
+        "controlState": "waiting_person",
+        "origin": "quota",
+        "questionId": "question-a",
+        "rev": 57,
+        "decisions": [
+          "continue",
+          "wait"
+        ]
+      },
+      "when": {
+        "call": "runStatusFromState"
+      },
+      "expected": {
+        "waitingFor": {
+          "decisions": [
+            "continue",
+            "wait"
+          ],
+          "questionId": "question-a",
+          "rev": 57
+        },
+        "ordinaryWorkflowApprovalGranted": false
+      }
+    },
+    {
+      "id": "names-and-model-frozen",
+      "criteria": [
+        "AC20"
+      ],
+      "given": {
+        "journal": {
+          "project": {
+            "id": "p1",
+            "name": "Calendar"
+          },
+          "launchSelection": {
+            "model": "a",
+            "effort": "high",
+            "source": "defaults"
+          }
+        },
+        "settingsNow": {
+          "model": "b",
+          "effort": "low"
+        }
+      },
+      "when": {
+        "operation": "runStatusFromState"
+      },
+      "expected": {
+        "project": {
+          "id": "p1",
+          "name": "Calendar"
+        },
+        "launchSelection": {
+          "model": "a",
+          "effort": "high",
+          "source": "defaults"
+        },
+        "settingsAppliedToRun": false
+      }
+    },
+    {
+      "id": "legacy-choice-fields-dropped",
+      "criteria": [
+        "AC21"
+      ],
+      "given": {
+        "statusFields": {
+          "stageMode": "auto",
+          "pendingMode": "account:b",
+          "actualAccount": "a"
+        }
+      },
+      "when": {
+        "operation": "readRunStatus"
+      },
+      "expected": {
+        "actualAccount": "a",
+        "warnings": [
+          "unknown_field:stageMode",
+          "unknown_field:pendingMode"
+        ],
+        "accountSelectionOffered": false
+      }
+    },
+    {
+      "id": "successor-model-observed-separately",
+      "criteria": [
+        "AC22"
+      ],
+      "given": {
+        "launchSelection": {
+          "agent": "codex",
+          "model": "codex-a",
+          "effort": "high"
+        },
+        "backend": {
+          "agentKind": "claude",
+          "launchSelection": {
+            "agent": "claude",
+            "model": "claude-b",
+            "effort": "low"
+          }
+        }
+      },
+      "when": {
+        "operation": "runStatusFromState"
+      },
+      "expected": {
+        "launchSelection": {
+          "agent": "codex",
+          "model": "codex-a",
+          "effort": "high"
+        },
+        "effectiveSelection": {
+          "agent": "claude",
+          "model": "claude-b",
+          "effort": "low"
+        },
+        "originalSelectionRewritten": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Generated from prompts/cli/pdd-launch.prompt.md (sha256: 56a04dc8c0bf164972c47d2e432a88854953e312307149008c426d93f22f8aba).
+set -eu
+case "$0" in */*) pdd_launcher_path=${0%/*} ;; *) pdd_launcher_path=. ;; esac
+pdd_launcher_dir=$(CDPATH= cd -P -- "$pdd_launcher_path" && pwd)
+if [ ! -x "$pdd_launcher_dir/support/node" ] || [ ! -f "$pdd_launcher_dir/support/launcher/support-entry.mjs" ]; then
+  printf '%s\n' 'runtime_unavailable: Obtain the verified launcher support release and rerun pdd setup.' >&2
+  exit 1
+fi
+exec "$pdd_launcher_dir/support/node" "$pdd_launcher_dir/support/launcher/support-entry.mjs" "$@"

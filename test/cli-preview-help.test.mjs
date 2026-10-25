@@ -21,7 +21,7 @@ test('launch help is local and preserves execution warnings for root and exact r
   assert.equal(exit,0,words.join(' '));assert.equal(stderr.text,'');
   assert.doesNotMatch(stdout.text,/PREVIEW|real workflow PR is not yet proven/i);
   if(words[0]==='workflow'&&['run','resume','attach'].includes(words[1])){
-   const description=stdout.text.split('\n').find(line=>line.startsWith('  pdd workflow '+words[1]+' '));
+   const description=stdout.text.split('\n').find(line=>line.startsWith('Usage: pdd workflow '+words[1]+' '));
    assert.ok(description,words.join(' '));assert.doesNotMatch(description,/PREVIEW:/);
   }
   assert.match(stdout.text,/may push branches and create real PRs/);

@@ -1,0 +1,281 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/bin-entry.prompt.md",
+  "story": "../../story/cli/BIN-ENTRY.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "uninstalled-local",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "managedInstall": false,
+        "runPddReturn": 2,
+        "argv": [
+          "unknown",
+          "--help"
+        ]
+      },
+      "when": "Invoke package bin",
+      "expected": {
+        "dispatcher": "local",
+        "argv": [
+          "unknown",
+          "--help"
+        ],
+        "exitCode": 2,
+        "installEffects": []
+      }
+    },
+    {
+      "id": "npx-newer-than-managed",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "invokedPackage": "R3",
+        "current": "R1",
+        "argv": [
+          "--version"
+        ]
+      },
+      "when": "Invoke ordinary npx bin",
+      "expected": {
+        "dispatcherRuntime": "R1",
+        "handoffCount": 1,
+        "R3DispatcherImported": false
+      }
+    },
+    {
+      "id": "same-resolved-entry",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "invokedEntry": "/home/user/.pdd/versions/R1/bin/pdd.mjs",
+        "selectedRuntime": "R1"
+      },
+      "when": "Enter already selected target",
+      "expected": {
+        "recursiveHandoff": false,
+        "dispatcherRuntime": "R1"
+      }
+    },
+    {
+      "id": "pinned-old-controller",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "recordedRunRuntime": "R1",
+        "current": "R5",
+        "explicitEntry": "R1/bin/pdd.mjs"
+      },
+      "when": "Start saved controller",
+      "expected": {
+        "dispatcherRuntime": "R1",
+        "importsFromR5": false
+      }
+    },
+    {
+      "id": "current-changes-after-selection",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "selectedRuntime": "R2"
+      },
+      "when": "Flip current to R3 before next import",
+      "expected": {
+        "processRuntime": "R2",
+        "secondCurrentLookup": false
+      }
+    },
+    {
+      "id": "broken-current",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "managedInstall": true,
+        "currentTargetMissing": true,
+        "fetchedPackage": "R3"
+      },
+      "when": "Invoke ordinary npx entry",
+      "expected": {
+        "code": "runtime_unavailable",
+        "R3DispatcherImported": false,
+        "repairStepPresent": true
+      }
+    },
+    {
+      "id": "environment-guard-is-not-proof",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "envClaimsPinned": true,
+        "recordedRuntime": null,
+        "explicitVersionEntry": false,
+        "current": "R2"
+      },
+      "when": "Invoke arbitrary fetched package",
+      "expected": {
+        "pinnedClaimAccepted": false,
+        "dispatcherRuntime": "R2"
+      }
+    },
+    {
+      "id": "argv-cwd-exit",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "cwd": "/home/user/a b",
+        "argv": [
+          "session",
+          "literal; $(echo bad)"
+        ],
+        "childExit": 7
+      },
+      "when": "Handoff to installed runtime",
+      "expected": {
+        "cwd": "/home/user/a b",
+        "argv": [
+          "session",
+          "literal; $(echo bad)"
+        ],
+        "exitCode": 7,
+        "inheritedStdio": true,
+        "shellEvaluation": false
+      }
+    },
+    {
+      "id": "directed-signal",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "handoffChildLive": true
+      },
+      "when": "Send SIGTERM to entry wrapper",
+      "expected": {
+        "childReceivesDirectedSignal": true,
+        "exitSemanticsPreserved": true,
+        "credentialReads": 0,
+        "serviceWrites": 0
+      }
+    },
+    {
+      "id": "project-name-selector-stays-one-argument",
+      "criteria": [
+        "AC5",
+        "AC6"
+      ],
+      "given": {
+        "current": "R2",
+        "cwd": "/home/user/start here",
+        "argv": [
+          "session",
+          "--project",
+          "demo notes"
+        ]
+      },
+      "when": "Handoff to installed runtime",
+      "expected": {
+        "argv": [
+          "session",
+          "--project",
+          "demo notes"
+        ],
+        "cwd": "/home/user/start here",
+        "nameRewrittenToFolder": false,
+        "accountSelectionInjected": false,
+        "modelEffortDefaultsInjected": false
+      }
+    },
+    {
+      "id": "projects-command-delegates-discovery",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "current": "R2",
+        "argv": [
+          "projects"
+        ]
+      },
+      "when": "Handoff to installed runtime",
+      "expected": {
+        "argv": [
+          "projects"
+        ],
+        "entryPerformsProjectScan": false,
+        "dispatcherOwnsDiscovery": true
+      }
+    },
+    {
+      "id": "model-effort-overrides-pass-to-dispatcher",
+      "criteria": [
+        "AC5",
+        "AC6"
+      ],
+      "given": {
+        "current": "R2",
+        "argv": [
+          "workflow",
+          "run",
+          "feature",
+          "7",
+          "--model",
+          "native M1",
+          "--effort",
+          "native E1"
+        ]
+      },
+      "when": "Handoff to installed dispatcher",
+      "expected": {
+        "argv": [
+          "workflow",
+          "run",
+          "feature",
+          "7",
+          "--model",
+          "native M1",
+          "--effort",
+          "native E1"
+        ],
+        "entryReplacesModelEffort": false,
+        "entryQueriesCapabilityList": false,
+        "accountChoiceInjected": false
+      }
+    },
+    {
+      "id": "retired-account-flags-rejected-by-current-dispatcher",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "currentDispatcherPolicy": "machine/tool accounts only",
+        "argv": [
+          "session",
+          "--account",
+          "A1"
+        ]
+      },
+      "when": "Forward unchanged to current dispatcher",
+      "expected": {
+        "argv": [
+          "session",
+          "--account",
+          "A1"
+        ],
+        "dispatcherExitCode": 2,
+        "diagnostic": "Set accounts per machine and tool in Settings",
+        "nativeLaunchEffect": false,
+        "entrySilentlyConvertsToMachineSetting": false
+      }
+    }
+  ]
+}

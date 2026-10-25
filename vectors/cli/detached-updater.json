@@ -1,0 +1,449 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/detached-updater.prompt.md",
+  "story": "../../story/cli/DETACHED-UPDATER.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "independent-linux-unit",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "platform": "linux",
+        "callerCgroup": "pdd-link.service",
+        "requestId": "Q1"
+      },
+      "when": "startUpdate and prove launch",
+      "expected": {
+        "updaterCgroupDifferent": true,
+        "acceptedIdentityDurable": true,
+        "inlineUpdate": false
+      }
+    },
+    {
+      "id": "mac-ssh-disconnect",
+      "criteria": [
+        "AC1",
+        "AC5"
+      ],
+      "given": {
+        "platform": "darwin",
+        "updateAccepted": true,
+        "agentPids": [
+          101,
+          102
+        ],
+        "controllerPid": 103
+      },
+      "when": "Close invoking SSH terminal during download",
+      "expected": {
+        "updateContinues": true,
+        "agentPids": [
+          101,
+          102
+        ],
+        "controllerPid": 103
+      }
+    },
+    {
+      "id": "same-request",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "requestId": "Q1",
+        "existingTransaction": "T1"
+      },
+      "when": "startUpdate again with Q1",
+      "expected": {
+        "transactionId": "T1",
+        "secondUpdaterStarted": false
+      }
+    },
+    {
+      "id": "detach-fails",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "independentLaunchPossible": false
+      },
+      "when": "startUpdate",
+      "expected": {
+        "code": "detach_failed",
+        "inlineUpdate": false,
+        "currentChanged": false
+      }
+    },
+    {
+      "id": "launch-proof-uncertain",
+      "criteria": [
+        "AC1",
+        "AC6"
+      ],
+      "given": {
+        "recordedTransaction": "T1",
+        "updaterProcessProof": "unavailable"
+      },
+      "when": "Repeat update request",
+      "expected": {
+        "blindSecondUpdater": false,
+        "currentChanged": false,
+        "recoveryRequired": true
+      }
+    },
+    {
+      "id": "stage-low-disk",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "current": "R1",
+        "freeBytesAfterDownload": 1073741823
+      },
+      "when": "runUpdate R2",
+      "expected": {
+        "code": "disk_low",
+        "current": "R1",
+        "restartCount": 0
+      }
+    },
+    {
+      "id": "stage-one-gib-boundary",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "freeBytesAfterDownload": 1073741824,
+        "otherChecksPass": true
+      },
+      "when": "Evaluate staging disk gate",
+      "expected": {
+        "diskGatePasses": true
+      }
+    },
+    {
+      "id": "self-test-read-only",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "candidate": "R2",
+        "journalsHash": "J",
+        "vaultHash": "V",
+        "cacheHash": "C"
+      },
+      "when": "Run candidate doctor --check-only",
+      "expected": {
+        "journalsHash": "J",
+        "vaultHash": "V",
+        "cacheHash": "C",
+        "credentialRefreshes": 0,
+        "tokenOutput": false
+      }
+    },
+    {
+      "id": "helper-mismatch",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "currentHelperResult": "synthetic token A",
+        "candidateHelperResult": "synthetic token B",
+        "approvedFormatChange": false
+      },
+      "when": "Run read-only helper comparison",
+      "expected": {
+        "code": "stage_failed",
+        "currentChanged": false,
+        "secretLogged": false
+      }
+    },
+    {
+      "id": "retained-old-run-incompatible",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "current": "R4",
+        "candidate": "R5",
+        "compatiblePrevious": true,
+        "retainedR1Compatible": false
+      },
+      "when": "Check compatibility",
+      "expected": {
+        "activationAllowed": false,
+        "oldRunRuntime": "R1"
+      }
+    },
+    {
+      "id": "new-action-during-drain",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "barrierClosing": true,
+        "inflightAction": "A1"
+      },
+      "when": "Receive action A2 before current flip",
+      "expected": {
+        "A2EffectStarted": false,
+        "A1ResultOrUncertaintyDurableBeforeBarrierAck": true,
+        "unsafeFlip": false
+      }
+    },
+    {
+      "id": "twenty-four-hour-boundary",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "checkedAgeHours": 25,
+        "inflightAction": "A1",
+        "joinActive": false,
+        "signInActive": false
+      },
+      "when": "Retry activation",
+      "expected": {
+        "drainBypassed": false,
+        "durabilityBypassed": false,
+        "forcedPaneTermination": false
+      }
+    },
+    {
+      "id": "person-check-active",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "checkedAgeHours": 25,
+        "personCheckActive": true
+      },
+      "when": "Retry activation",
+      "expected": {
+        "currentChanged": false,
+        "LinkRestarted": false
+      }
+    },
+    {
+      "id": "target-blocked-after-stage",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "checkedTarget": "R2",
+        "freshAuthorization": "blocked"
+      },
+      "when": "Revalidate before flip",
+      "expected": {
+        "activationAllowed": false,
+        "currentChanged": false
+      }
+    },
+    {
+      "id": "cli-only-release",
+      "criteria": [
+        "AC4",
+        "AC5"
+      ],
+      "given": {
+        "runningLinkClientDigest": "C1",
+        "targetClientDigest": "C1",
+        "runningNode": "N1",
+        "targetNode": "N1",
+        "current": "R1",
+        "target": "R2"
+      },
+      "when": "Activate authorized target at barrier",
+      "expected": {
+        "current": "R2",
+        "previous": "R1",
+        "LinkRestarts": 0,
+        "agentSignals": 0,
+        "controllerSignals": 0
+      }
+    },
+    {
+      "id": "running-link-older-than-current",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "runningLinkClientDigest": "C1",
+        "runningNode": "N1",
+        "current": "R2",
+        "target": "R3",
+        "targetClientDigest": "C2",
+        "targetNode": "N1"
+      },
+      "when": "Activate target",
+      "expected": {
+        "compareAgainst": "running Link runtime",
+        "LinkRestarts": 1
+      }
+    },
+    {
+      "id": "node-only-change",
+      "criteria": [
+        "AC4",
+        "AC5"
+      ],
+      "given": {
+        "runningLinkClientDigest": "C1",
+        "targetClientDigest": "C1",
+        "runningNode": "N1",
+        "targetNode": "N2"
+      },
+      "when": "Activate target",
+      "expected": {
+        "LinkRestarts": 1,
+        "HerdrRestarts": 0,
+        "agentSignals": 0,
+        "controllerSignals": 0
+      }
+    },
+    {
+      "id": "kill-after-current-flip",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "recordPhase": "activating",
+        "current": "R2",
+        "previous": "R1",
+        "to": "R2",
+        "newLinkLiveProof": true
+      },
+      "when": "Recover updater",
+      "expected": {
+        "current": "R2",
+        "previous": "R1",
+        "secondLinkStart": false,
+        "repeatBlindFlip": false
+      }
+    },
+    {
+      "id": "unknown-pointer-state",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "recordFrom": "R1",
+        "recordTo": "R2",
+        "current": "R9"
+      },
+      "when": "recoverUpdate",
+      "expected": {
+        "code": "recovery_required",
+        "pointerMutation": false,
+        "evidencePreserved": true
+      }
+    },
+    {
+      "id": "alpha-alone",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "clientInstalled": false,
+        "targetIncludesClient": false,
+        "checksPass": true
+      },
+      "when": "Activate target",
+      "expected": {
+        "privateImportRequired": false,
+        "LinkStarted": false,
+        "phase": "ready"
+      }
+    },
+    {
+      "id": "hung-link-uses-launcher-deadline",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "phase": "link_restarted",
+        "LinkAlive": true,
+        "localReady": false,
+        "elapsedMs": 600000
+      },
+      "when": "Launcher deadline and updater recovery reconcile",
+      "expected": {
+        "launcherStartupFailureCounted": true,
+        "updaterAddsTimer": false,
+        "extraProbation": false,
+        "lockHeldWaitingForReady": false
+      }
+    },
+    {
+      "id": "downloads-outside-activation-lock",
+      "criteria": [
+        "AC2",
+        "AC8"
+      ],
+      "given": {
+        "setupOwnsUpdateLock": true,
+        "candidate": "R2"
+      },
+      "when": "Download and read-only self-test candidate",
+      "expected": {
+        "downloadMayProceed": true,
+        "candidateTestUsesVerifiedTemporaryPaths": true,
+        "currentChanged": false,
+        "updateLockHeldByDownload": false
+      }
+    },
+    {
+      "id": "publish-final-paths-under-lock",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "verifiedStagingComplete": true,
+        "activationLeaseHeld": true
+      },
+      "when": "Publish immutable runtime",
+      "expected": {
+        "networkRequestsWhileLocked": 0,
+        "finalRuntimePathsAbsolute": true,
+        "conflictingExistingBytesOverwritten": false
+      }
+    },
+    {
+      "id": "join-after-twenty-four-hours",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "checkedAgeHours": 25,
+        "joinActive": true,
+        "personCheckActive": false
+      },
+      "when": "Acquire drain barrier",
+      "expected": {
+        "waitForJoinCompletionRequired": false,
+        "joinEffectsDrainedOrUncertaintyDurable": true,
+        "drainBypassed": false
+      }
+    },
+    {
+      "id": "public-npm-client-no-token",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "clientPackage": "@promptdriven/pdd-fleet",
+        "registry": "public npm",
+        "userNpmToken": null,
+        "signedManifestValid": true,
+        "npmIntegrityValid": true
+      },
+      "when": "Stage client artifact",
+      "expected": {
+        "clientArtifactAccepted": true,
+        "userRegistrySignInRequired": false
+      }
+    }
+  ]
+}

@@ -16,7 +16,7 @@ Before drafting any Story, read the **entire** [Prompting guide](../../../docs/p
 4. [Prepare one reviewable change](open-pr.md)
 5. [Leave merge to the normal process](wait-merge.md)
 
-A new Story or broad prompt adoption is unnecessary for a small edit. If a Story is useful, load the guide before drafting it. Update an existing owning prompt first when its behavior changes. Keep prompt/code/tests together unless the person requests another review route. If impact or rollback is unclear, propose the feature or bug recipe before expanding scope.
+In manual use, a new Story or broad prompt adoption is unnecessary for a small edit. An explicit saved workflow run requires prompt, Story and independent case artifacts plus its concrete test plan before implementation. If a Story is useful, load the guide before drafting it. Update an existing owning prompt first when its behavior changes. Keep prompt/code/tests together unless the person requests another review route. If impact or rollback is unclear, propose the feature or bug recipe before expanding scope.
 
 ## Editable runner definition
 

@@ -1,9 +1,10 @@
-// Generated from prompts/cli/native-session.prompt.md (sha256: 153c4b7ed5509736753afcf6f1cbc537f19fc35c95fc31bcfec94038a47f89a8).
+// Generated from prompts/cli/native-session.prompt.md (sha256: ccd589b105544ab3fd80e927c770a6524796b88d0a9f9aaa9bd7b58778bf6ad3).
 import { spawn as spawnChild } from 'node:child_process';
 import { constants } from 'node:os';
 import { resolve as resolvePath } from 'node:path';
+import { nativeArgs } from './native-flags.mjs';
 
-export function launchNativeSession({ agent, cwd, context, request = '', stderr = process.stderr },
+export function launchNativeSession({ agent, cwd, context, request = '', selection = null, stderr = process.stderr },
   { spawn = spawnChild, signals = process, stdinIsTTY = Boolean(process.stdin.isTTY) } = {}) {
   if (!['codex', 'claude'].includes(agent)) return Promise.resolve(2);
   const prompt = `${context}\n\n# Person request\n${request || 'Summarize the relevant Prompting guide method and available manual workflows, then ask what I want to work on. Do not draft a Story before that summary.'}`;
@@ -21,9 +22,10 @@ export function launchNativeSession({ agent, cwd, context, request = '', stderr 
         ? `The native ${agent} CLI is not on PATH. Install and sign in with that native tool, then run pdd session again.\n`
         : `The native ${agent} session could not be launched. Check that tool and the size of the bundled instructions.\n`);
     };
-    try { child = spawn(agent, agent === 'codex'
-      ? ['--no-daemon', '--dangerously-bypass-approvals-and-sandbox', '-c', `projects={${JSON.stringify(resolvePath(cwd))}={trust_level="trusted"}}`, prompt]
-      : ['--dangerously-skip-permissions', prompt], { cwd, stdio: 'inherit', shell: false }); }
+    try {
+      const resolvedCwd = resolvePath(cwd);
+      child = spawn(agent, [...nativeArgs({ agent, cwd: resolvedCwd, selection }), prompt], { cwd, stdio: 'inherit', shell: false });
+    }
     catch (error) { failed(error); finish(error.code === 'ENOENT' ? 127 : 1); return; }
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
       const fn = () => {
