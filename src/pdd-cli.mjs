@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: ee10e1fd37c7beaa757b12e03cd0438a3ee64d585b62566f5e541a8912ac7fba).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: a7ed5262e4cb839c7f09f76c7cd19f4957d01dcf8d333db14489aed1b65d82e0).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -65,7 +65,7 @@ export async function createPddCliPorts(ports = {}, {capability, ...options} = {
 export async function runPdd(argv, dependencies = {}) {
   const {stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
     nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages, workflowDecider,
-    phoneCli, clientAdapter = phoneCli, workflowController, workflowHerdrBoot, workflowKeeper, workflowCleaner, workflowRuntime,
+    phoneCli, clientAdapter = phoneCli, workflowController, workflowHerdrBoot, workflowKeeper, workflowCleaner, workflowRuntime, nativeAgentAuth,
     workflowRecords, workflowProjects, workflowModels, workflowPlacement, machinePlacement,
     machineId = 'local', home = homedir(), projectPorts, modelPorts, settings,
     updateModule, doctorModule, doctorDeps = {}, ports: suppliedPorts = {}} = dependencies;
@@ -97,6 +97,22 @@ export async function runPdd(argv, dependencies = {}) {
     line(stderr,method==='ensureHerdrInstalled'?'Herdr installation or PATH could not be confirmed. Install Herdr from https://herdr.dev/ and make herdr available on PATH, then rerun pdd setup.':'Herdr is not running and could not be started. Check Herdr and the user service, then inspect the saved run before retrying.');return false;
   }
   const safeLabel = value => String(value??'unknown').replace(/[\x00-\x1f\x7f-\x9f]/g,'');
+  async function nativeLogin(agent,selectedCwd) {
+    const unknown={state:'unavailable',code:'agent_auth_status_unavailable',agent};
+    try {
+      const owner=nativeAgentAuth??await import('./native-agent-auth.mjs');
+      const result=await owner.checkNativeAgentAuth({agent,cwd:selectedCwd},ports);
+      return result?.agent===agent&&((result.state==='ready'&&result.code===null)
+        ||(result.state==='blocked'&&result.code==='agent_sign_in_required')
+        ||(result.state==='unavailable'&&['native_agent_missing','agent_auth_status_unavailable'].includes(result.code)))?result:unknown;
+    } catch {return unknown;}
+  }
+  function nativeLoginFailure(result) {
+    const {agent,code}=result,login=agent==='codex'?'codex login':'claude auth login';
+    line(stderr,code==='agent_sign_in_required'?`${agent} is not signed in. Run ${login} before starting a workflow.`
+      :code==='native_agent_missing'?`${agent} is not installed. Install it and run ${login}.`
+      :`${agent} sign-in status is unavailable. Check ${agent==='codex'?'codex login status':'claude auth status'} before starting a workflow.`);
+  }
   async function statuses(runId, journal=true) {
     const records=workflowRecords??await import('./workflow-run-records.mjs');
     const index=await records.readRunIndex(ports);
@@ -215,6 +231,10 @@ export async function runPdd(argv, dependencies = {}) {
         let prepared;
         if(plan.local==='workflow-run') {
           const launch=await launchInput(plan); if(launch.exitCode!==undefined) return launch.exitCode;
+          if(!workflowRunner||nativeAgentAuth){
+            const auth=await nativeLogin(launch.agent,launch.cwd);
+            if(auth.state!=='ready'){nativeLoginFailure(auth);return 1;}
+          }
           const request={name:plan.operands[0],issue:plan.operands[1],packageRoot,...launch};
           prepared=await traceHerdrRequest({operation:'workflow.prepare',request},()=>runner.prepareWorkflow(request,ports),ports);
         } else prepared=await traceHerdrRequest({operation:'workflow.resume',request:input},()=>runner.resumeWorkflow(input,ports),ports);
@@ -303,6 +323,13 @@ export async function runPdd(argv, dependencies = {}) {
         const lock=modules.lock??await import('./update-lock.mjs');
         const launcher=modules.launcher??await import('./pdd-launch.mjs');
         let runtime=await versions.resolveRuntime({home,versionRoot:packageRoot},ports);
+        if(!dependencies.setupModules||nativeAgentAuth){
+          const checks=[];
+          for(const agent of ['codex','claude'])checks.push(await nativeLogin(agent,cwd));
+          const failure=checks.find(result=>result.state!=='ready'&&result.code!=='native_agent_missing')
+            ??(!checks.some(result=>result.state==='ready')?checks[0]:null);
+          if(failure){nativeLoginFailure(failure);return 1;}
+        }
         if(!await readyHerdr('ensureHerdrInstalled'))return 1;
         const result=await lock.withUpdateLock({home},async lease=>{
           const binding=modules.herdrRuntime??await import('./workflow-herdr-executable.mjs');

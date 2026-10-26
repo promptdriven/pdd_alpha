@@ -64,7 +64,8 @@ for(const c of await cases('bin-entry-runtime'))test(c.id,async t=>{
   await put(join(cwd,'README.md'),'Preserved input.\n');await git('add','.');await git('commit','-m','initial');
   await git('remote','add','origin','https://github.com/example/project.git');await git('update-ref','refs/remotes/origin/main',await git('rev-parse','HEAD'));
   const tools=join(home,'tools');await fs.mkdir(tools);
-  await put(join(tools,'codex'),'#!/bin/sh\nexit 1\n',0o755);
+  // SYNTHETIC OFFLINE native status only; every other invocation still refuses.
+  await put(join(tools,'codex'),'#!/bin/sh\nprintf "<%s>\\n" "$@" >> "$NATIVE_STATUS_CALLS"\n[ "$#" = 2 ] && [ "$1" = login ] && [ "$2" = status ] || exit 1\nprintf "Logged in using ChatGPT\\n"\n',0o755);
   await put(join(tools,'herdr'),`#!/bin/sh
 if [ "$*" != "--session default workspace list" ]; then exit 91; fi
 printf '%s\\n' probe >> "$HERDR_PROBES"
@@ -72,7 +73,8 @@ printf '%s\\n' '{"result":{"workspaces":[]}}'
 `,0o755);
   await put(join(tools,'systemd-run'),'#!/bin/sh\nprintf start >> "$HERDR_STARTS"\nexit 92\n',0o755);
   const paths=Object.fromEntries(['PREPARE_INPUT','PREPARE_RESULT','CONTROLLER','COMMANDS','HERDR_PROBES','HERDR_STARTS'].map(n=>[n,join(home,n+'.json')]));
-  const env={...process.env,HOME:home,PATH:tools+':'+process.env.PATH,...paths,PDD_PINNED_RUNTIME:'1'};
+  const nativeStatusCalls=join(home,'native-status-calls');
+  const env={...process.env,HOME:home,PATH:tools+':'+process.env.PATH,...paths,NATIVE_STATUS_CALLS:nativeStatusCalls,PDD_PINNED_RUNTIME:'1'};
   let selected,entry=join(local,'bin/pdd.mjs');
   if(c.given.current){
     const version=JSON.parse(await fs.readFile(join(repo,'package.json'))).version;
@@ -89,6 +91,8 @@ printf '%s\\n' '{"result":{"workspaces":[]}}'
   try{result=await execute(process.execPath,[entry,'workflow','run','small-change','17','--agent','codex'],{cwd,env,timeout:20000});}
   catch(e){result=e;}
   const exists=async path=>fs.stat(path).then(()=>true,()=>false);
+  // Existing version probes still fail; require exactly one successful status query.
+  if(!c.given.invalidNode)assert.equal((await fs.readFile(nativeStatusCalls,'utf8')).replaceAll('<--version>\n',''),'<login>\n<status>\n');
   if(c.expected.prepared){
     const observed=JSON.parse(await fs.readFile(paths.PREPARE_INPUT));assert.deepEqual(observed.runtime,selected);
     const prepared=JSON.parse(await fs.readFile(paths.PREPARE_RESULT));assert.equal(prepared.state,'prepared',prepared.message);

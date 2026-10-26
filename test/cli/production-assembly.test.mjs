@@ -37,8 +37,13 @@ async function fixture(t){
  await git('remote','add','origin','https://github.com/example/project.git');
  const remote=join(home,'remote.git');await git('clone','--quiet','--bare',cwd,remote);
  await git('update-ref','refs/remotes/origin/main',await git('rev-parse','HEAD'));
- const codex=join(tools,'codex');await fs.writeFile(codex,`#!${process.execPath}
+ const codex=join(tools,'codex'),authLog=join(home,'native-status.jsonl');await fs.writeFile(codex,`#!${process.execPath}
 const {createInterface}=await import('node:readline');
+// SYNTHETIC OFFLINE native status; the real public auth helper still executes.
+if(process.argv.length===4&&process.argv[2]==='login'&&process.argv[3]==='status'){
+ const fs=await import('node:fs');fs.appendFileSync(process.env.AUTH_EDGE_LOG,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),home:process.env.HOME})+'\\n');
+ console.log('Logged in using ChatGPT');process.exit(0);
+}
 if(process.argv[2]==='--version'){console.log('codex-cli 1.2.3');process.exit(0);}
 if(process.argv[2]!=='app-server')process.exit(92);
 createInterface({input:process.stdin}).on('line',text=>{const r=JSON.parse(text);if(r.method==='initialized')return;
@@ -47,7 +52,10 @@ if(r.method==='model/list')result={data:[{model:'synthetic',displayName:'Synthet
 if(!['initialize','config/read','model/list'].includes(r.method))process.exit(93);console.log(JSON.stringify({id:r.id,result}));});
 `,{mode:0o700});
  await fs.writeFile(join(tools,'herdr'),'#!/bin/sh\nexit 94\n',{mode:0o700});
- const env={...process.env,HOME:home,PATH:tools+':'+process.env.PATH,PDD_TRACE:'herdr,git'};
+ // Keep native status probes inside disposable tools, including absent Claude.
+ const gitBinary=(await execute('/bin/sh',['-c','command -v git'])).stdout.trim();
+ await fs.symlink(gitBinary,join(tools,'git'));
+ const env={...process.env,HOME:home,PATH:tools,AUTH_EDGE_LOG:authLog,PDD_TRACE:'herdr,git'};
  const stdout=capture(),stderr=capture(),calls=[];let broken=false,panes=[];
  const ports={home,env,runtime,execFile:async(file,args,options={})=>{
   calls.push([basename(file),args]);
@@ -73,12 +81,13 @@ if(!['initialize','config/read','model/list'].includes(r.method))process.exit(93
   }
   // Only the remote transport is redirected: Git itself performs a genuine
   // fetch, FETCH_HEAD/tracking update, worktree creation and identity reads.
+  if(file===codex){assert.deepEqual(args,['login','status']);return execute(file,args,options);}
   if(file==='git'&&args[0]==='fetch')return execute(file,['fetch',remote,`+refs/heads/${args[2]}:refs/remotes/origin/${args[2]}`],options);
   assert.equal(file,'git','Only external GitHub/Herdr requests may be faked');
   assert.ok(!['push','pull','clone','ls-remote'].includes(args[0]),'No other Git network operation is authorized');
   return execute(file,args,options);
  }};
- return {home,cwd,tools,versionRoot,runtime,env,stdout,stderr,calls,ports,git,
+ return {home,cwd,tools,authLog,versionRoot,runtime,env,stdout,stderr,calls,ports,git,
   deps:{home,cwd,packageRoot:versionRoot,stdout,stderr,ports},setBroken:x=>{broken=x;},setPanes:x=>{panes=x;}};
 }
 
@@ -89,6 +98,7 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
  f.stdout.text='';f.stderr.text='';
  assert.equal(await runPdd(['workflow','run','small-change','17'],f.deps),1,f.stderr.text);
  assert.match(f.stderr.text,/Workflow controller not started: refused \(herdr_identity_unavailable\)/);
+ assert.deepEqual((await fs.readFile(f.authLog,'utf8')).trim().split('\n').map(JSON.parse),[{args:['login','status'],cwd:f.cwd,home:f.home}]);
  const index=await readRunIndex({home:f.home});assert.equal(index.entries.length,1);const entry=index.entries[0];
  const spec={runDir:entry.runDir},journal=await readWorkflowJournal(spec);
  assert.equal(journal.state.controlState,'running');assert.equal(journal.state.runtime.node,f.runtime.node);
@@ -157,6 +167,7 @@ process.exitCode=await runPdd(['setup'],{home:process.env.HOME,cwd:process.env.H
  const env={...f.env,SERVICE_EDGE_LOG:log,PACKAGE_EDGE_ROOT:f.versionRoot,DBUS_SESSION_BUS_ADDRESS:'unix:path=/nonexistent/pdd-test-bus'};
  const result=await execute(process.execPath,['--input-type=module','--eval',script],{env,timeout:15000});
  assert.match(result.stdout,/Public recovery service ready/);assert.equal(result.stderr,'');
+ assert.deepEqual((await fs.readFile(f.authLog,'utf8')).trim().split('\n').map(JSON.parse),[{args:['login','status'],cwd:f.home,home:f.home}]);
  assert.deepEqual((await fs.readFile(log,'utf8')).trim().split('\n').map(JSON.parse),[['--user','daemon-reload'],['--user','enable','--now','pdd-runs-keeper.service']]);
  assert.match(await fs.readFile(join(f.home,'.config/systemd/user/pdd-runs-keeper.service'),'utf8'),/cli runs-keeper/);
  assert.ok((await fs.stat(join(f.home,'.pdd/launcher/pdd-launch'))).mode&0o100);

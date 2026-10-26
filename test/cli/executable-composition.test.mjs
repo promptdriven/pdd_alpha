@@ -14,10 +14,15 @@ function fixture(t) {
   const temp=mkdtempSync(join(tmpdir(),'pdd-executable-'));t.after(()=>rmSync(temp,{recursive:true,force:true}));
   const tools=join(temp,'tools'),cwd=join(temp,'demo'),home=join(temp,'home'),log=join(temp,'protocol.jsonl');
   for(const dir of [tools,cwd,home])mkdirSync(dir);
-  const executable=join(tools,'codex');
+  const executable=join(tools,'codex'),authLog=join(temp,'native-status.jsonl');
   writeFileSync(executable,`#!${process.execPath}
 import {createInterface} from 'node:readline';
 import {appendFileSync} from 'node:fs';
+// SYNTHETIC OFFLINE native status; no login, credentials or model request.
+if(process.argv.length===4&&process.argv[2]==='login'&&process.argv[3]==='status'){
+ appendFileSync(process.env.PROBE_AUTH_LOG,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),home:process.env.HOME})+'\\n');
+ console.log('Logged in using ChatGPT');process.exit(0);
+}
 if(process.argv[2]==='--version'){console.log('codex-cli 1.2.3');process.exit(0);}
 if(process.argv.slice(2).join(' ')!=='app-server')process.exit(9);
 const mode=process.env.PROBE_MODE;
@@ -42,8 +47,8 @@ printf '%s\\n' probe >> "$PROBE_HERDR_LOG"
 printf '%s\\n' '{"result":{"workspaces":[]}}'
 `,{mode:0o755});
   writeFileSync(join(tools,'systemd-run'),'#!/bin/sh\nprintf start >> "$PROBE_HERDR_STARTS"\nexit 92\n',{mode:0o755});
-  const env={...process.env,PATH:tools+':'+process.env.PATH,HOME:home,PROBE_LOG:log,PROBE_HERDR_LOG:herdrLog,PROBE_HERDR_STARTS:startLog};
-  return {temp,tools,cwd,home,log,env,executable,herdrLog,startLog};
+  const env={...process.env,PATH:tools+':'+process.env.PATH,HOME:home,PROBE_LOG:log,PROBE_AUTH_LOG:authLog,PROBE_HERDR_LOG:herdrLog,PROBE_HERDR_STARTS:startLog};
+  return {temp,tools,cwd,home,log,authLog,env,executable,herdrLog,startLog};
 }
 test('installed Codex adapter pages native models and uses observed defaults and Settings without guessing',async t=>{
   const f=fixture(t),ports=createLocalWorkflowModelPorts({machineId:'local',cwd:f.cwd,executable:f.executable,env:f.env});
@@ -83,6 +88,7 @@ test('actual bin composes default local model and project adapters for workflow 
   const prepared=join(f.temp,'prepared.json');
   const result=spawnSync(process.execPath,[join(pkg,'bin/pdd.mjs'),'workflow','run','feature','7','--project','demo'],{cwd:f.cwd,env:{...f.env,PREPARED:prepared},encoding:'utf8',timeout:5000});
   assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Started workflow synthetic-run/);
+  assert.deepEqual(readFileSync(f.authLog,'utf8').trim().split('\n').map(JSON.parse),[{args:['login','status'],cwd:f.cwd,home:f.home}]);
   assert.equal(readFileSync(f.herdrLog,'utf8').trim().split('\n').length,1);assert.equal(existsSync(f.startLog),false);
   const input=JSON.parse(readFileSync(prepared,'utf8'));
   assert.equal(input.machineId,'local');assert.equal(input.cwd,f.cwd);assert.deepEqual(input.project,{id:`local:${f.cwd}`,name:'demo'});

@@ -13,11 +13,12 @@ import { temporary, put, repo } from './pkg-fixtures.mjs';
 const execute = promisify(execFile);
 
 // Actual shell, shipped entry/modules/native helpers, selected Node, activation,
-// launcher and public setup. Only HTTPS delivery, Herdr and service-manager
+// launcher and public setup. Only HTTPS delivery, native login status, Herdr and service-manager
 // commands are local stand-ins; the restricted PATH cannot reach a real service.
 async function stockRuntime(t) {
   const root = await temporary(t), home = join(root, 'home'), tools = join(root, 'tools');
   const cwd = join(root, 'caller project'), capture = join(root, 'service-calls');
+  const authCapture = join(root, 'native-status-calls');
   await fs.mkdir(home); await fs.mkdir(tools); await fs.mkdir(cwd);
   for (const name of ['uname', 'openssl', 'tar', 'gzip', 'awk', 'df', 'mktemp', 'mkdir', 'chmod', 'cat', 'cp']) {
     const file = (await execute('/bin/sh', ['-c', `command -v ${name}`])).stdout.trim();
@@ -26,6 +27,8 @@ async function stockRuntime(t) {
   await put(join(tools, 'systemctl'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$PDD_SERVICE_CALLS"\n[ "${PDD_SERVICE_FAILURE:-0}" = 0 ]\n', 0o755);
   await put(join(tools, 'systemd-run'), '#!/bin/sh\nexit 99\n', 0o755);
   await put(join(tools, 'herdr'), '#!/bin/sh\n[ "$1" = --version ] || exit 98\nprintf "herdr synthetic-offline\\n"\n', 0o755);
+  // SYNTHETIC OFFLINE status fixture: no login, credentials or model invocation.
+  await put(join(tools, 'codex'), '#!/bin/sh\nprintf \"<%s>\\n\" \"$@\" >> \"$PDD_AUTH_CALLS\"\n[ "$#" = 2 ] && [ "$1" = login ] && [ "$2" = status ] || exit 98\nprintf "Logged in using ChatGPT\\n"\n', 0o700);
   const nodeName = `node-v${process.versions.node}-${process.platform}-${process.arch}`;
   const nodeTree = join(root, nodeName), alpha = join(root, 'package');
   await fs.mkdir(join(nodeTree, 'bin'), { recursive: true });
@@ -47,9 +50,9 @@ async function stockRuntime(t) {
   const installer = join(root, 'install.sh');
   await buildBootstrap({ descriptor, destination: installer });
   await put(join(tools, 'curl'), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do case "$1" in https://release.invalid/node) source=$PDD_NODE_ARCHIVE ;; https://release.invalid/alpha) source=$PDD_ALPHA_ARCHIVE ;; -o) shift; destination=$1 ;; esac; shift; done\n[ -n "${source:-}" ] && [ -n "${destination:-}" ] || exit 97\n/bin/cp "$source" "$destination"\n', 0o755);
-  const env = { HOME: home, PATH: tools, LC_ALL: 'C', PDD_SERVICE_CALLS: capture, PDD_NODE_ARCHIVE: nodeArchive, PDD_ALPHA_ARCHIVE: alphaArchive };
+  const env = { HOME: home, PATH: tools, LC_ALL: 'C', PDD_SERVICE_CALLS: capture, PDD_AUTH_CALLS: authCapture, PDD_NODE_ARCHIVE: nodeArchive, PDD_ALPHA_ARCHIVE: alphaArchive };
   const run = extra => execute('/bin/sh', ['-c', 'umask 002; exec /bin/sh "$1" --no-phone', 'stock-case', installer], { cwd, env: { ...env, ...extra }, timeout: 90000 });
-  return { home, tools, capture, run };
+  return { home, tools, capture, authCapture, run };
 }
 
 test('stock installer reaches real public setup after publication; rerun discloses retained release and repairs only mutable roots', { timeout: 120000 }, async t => {
@@ -94,6 +97,7 @@ test('stock installer reaches real public setup after publication; rerun disclos
   }
   assert.equal((await readInstallRecord({ home: f.home })).value.transaction.id, record.transaction.id);
   assert.match(await fs.readFile(f.capture, 'utf8'), /enable --now pdd-runs-keeper\.service/);
+  assert.equal(await fs.readFile(f.authCapture, 'utf8'), '<login>\n<status>\n<login>\n<status>\n');
 });
 
 test('stock installer preserves a genuine service failure after ready runtime publication', { timeout: 120000 }, async t => {
@@ -119,6 +123,7 @@ node --input-type=module -e 'import{readFileSync,realpathSync}from"node:fs";cons
 /bin/rm -r "$S66_ROOT/pdd"
 `, 0o755);
   const result = await f.run({ S66_ROOT: legacy, S66_CALLS: calls });
+  assert.equal(await fs.readFile(f.authCapture, 'utf8'), '<login>\n<status>\n');
   assert.equal(result.stdout.split('Removed old global npm pdd (promptdriven/pdd_alpha).').length, 2);
   assert.match(result.stdout, /Public recovery service ready/);
   assert.deepEqual((await fs.readFile(calls, 'utf8')).trim().split('\n'), ['root --global', 'uninstall --global --ignore-scripts --no-audit --no-fund pdd']);

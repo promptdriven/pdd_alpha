@@ -148,6 +148,13 @@ lists public doctor plus optional phone/link; local discovery imports none of th
 
 ## Public setup and recovery
 
+Before public setup effects, check existing native login through module function
+`checkNativeAgentAuth({agent,cwd},ports)` from
+`src/native-agent-auth.mjs` for codex and claude. Absent tools are optional when
+at least one installed tool is ready; an installed signed-out or unreadable tool
+stops setup with its fixed actionable message and exit1. No installed tool also
+stops setup. Print no account/status payload. Setup never signs in for the user.
+
 `setup [--no-phone]` first resolves its verified runtime using the existing
 versions owner; a failed runtime resolution performs no Herdr installation.
 Then call public module function
@@ -298,9 +305,33 @@ A `herdr_not_found` refusal always prints `Herdr not found at <path>`, without
 launching, selecting another PATH binary, or hiding it behind generic failure.
 The missing-path message is local actionable output, never trace payload.
 
+## Native workflow login preflight
+
+For each new local `workflow run`, after placement/model/project selection and
+before `prepareWorkflow`, check the selected codex/claude tool with the native
+login owner above using the selected cwd and existing native environment. Only
+ready/code:null permits preparation, Herdr startup or controller admission;
+otherwise print that owner's fixed message once on stderr and return1. A previous
+setup success is never cached as run readiness. Remote source dispatch does not
+check the source login; its target owns local admission. Resume, drive, attach,
+status, recovery and foreground manual sessions retain their existing contracts.
+The independently owned stage watcher handles a later sign-in screen.
+
+Keep explicit offline owner injection compatible: an injected workflowRunner
+owns its own preparation prerequisites, and supplied setupModules own setup
+prerequisites. They do not construct a default native probe. An explicit
+`dependencies.nativeAgentAuth` module opts either seam into this CLI preflight
+through the same public check function. Production's absent injected owner always
+uses the real lazy module. Invalid/throwing auth replies give fixed sign-in-status
+guidance, never arbitrary messages or success. Accept only valid combinations
+of state/code and selected agent, and use fixed CLI diagnostics derived from them.
+
 ## Dependencies
 
 - [Public update command](update-command.prompt.md): required generation/runtime for package-local status and finite absent-selector results.
+
+- [Native login](native-agent-auth.prompt.md): required generation/runtime for
+  setup and new local workflow login preflight; read-only status, no login effect.
 
 - [Absolute executable](workflow-herdr-executable.prompt.md): required generation/runtime for saved Herdr selection and missing-path refusal.
 
