@@ -4,6 +4,7 @@ import {runPdd} from '../../src/pdd-cli.mjs';
 const capture=()=>({text:'',write(s){this.text+=s;}});
 const io=()=>({stdout:capture(),stderr:capture()});
 function setup(calls){return {
+ herdrRuntime:{recordHerdrRuntime:async({runtime,herdr})=>({...runtime,herdr})},
  versions:{resolveRuntime:async()=>{calls.push('runtime');return {releaseId:'synthetic'};}},
  lock:{withUpdateLock:async(input,op)=>{calls.push('lock');return op({});}},
  launcher:{installLauncherSupport:async()=>{calls.push('support');return {code:null};},provisionRecoveryService:async()=>{calls.push('recovery');return {code:null};}}

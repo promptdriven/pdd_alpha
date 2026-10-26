@@ -11,6 +11,20 @@ function fixture(){
   const ports={observations:new Map(),validateLocator:async()=>true,readWorkflowJournal:async()=>({state,seq:1}),observeHerdr:async()=>({upSince:0,stableSince:0,complete:true}),inspectWorkflowLock:async()=> 'free',readControllerLaunches:async()=>launches,checkWorkflowRuntime:async()=>({ok:true}),startWorkflowController:async spec=>{calls.push(spec);return {state:'started',code:null};}};
   return {entries,state,launches,calls,ports,pass:async(now=time)=>{time=now;return reconcileWorkflowControllers({entries,now},ports);}};
 }
+for(const priorIntent of [true,false])test(`keeper preserves known missing-path controller message and state, priorIntent=${priorIntent}`,async()=>{
+ const f=fixture(),message='Herdr not found at /saved/runtime/herdr',calls=[];
+ if(priorIntent)f.launches.push({admittedAt:1000,phase:'pane.run.intent',decision:null});
+ f.ports.startWorkflowController=async spec=>{calls.push(spec);return {state:'uncertain',code:'herdr_not_found',message};};
+ await f.pass(30000);const result=await f.pass(60000);
+ assert.deepEqual(result,[{runId,state:'uncertain',code:'herdr_not_found',message,...(priorIntent?{inspectOriginal:true}:{})}]);
+ assert.equal(calls.length,1);assert.equal(calls[0].runtime,f.state.runtime);
+ assert.equal(Object.hasOwn(calls[0],'decision'),priorIntent);
+});
+test('keeper does not forward arbitrary controller error text',async()=>{
+ const f=fixture();f.ports.startWorkflowController=async()=>({state:'uncertain',code:'launch_uncertain',message:'untrusted raw diagnostic'});
+ await f.pass(30000);const [result]=await f.pass(60000);
+ assert.equal(result.state,'uncertain');assert.equal(result.code,'launch_uncertain');assert.equal(Object.hasOwn(result,'message'),false);
+});
 for(const c of vectors.cases)test(`keeper vector: ${c.id}`,async t=>{
   const f=fixture();
   switch(c.id){

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: f94d72ef337a50d170808b8b54df0d5fcf4a70ef1a6f3da831b422d0246162e3).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 67544925bef3fb1806f1d6971e099fa2634a644eeccbc280e383d88673c99c55).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -84,11 +84,12 @@ export async function runPdd(argv, dependencies = {}) {
     line(stdout,result.message);return result.exitCode;
   };
   const unsupported = () => {line(stderr,'This command needs an available optional client adapter; this needs the fleet client.');return 1;};
-  async function readyHerdr(method) {
+  let readyHerdrExecutable;
+  async function readyHerdr(method,runtime) {
     try {
       const mod=workflowHerdrBoot??await import('./workflow-herdr-boot.mjs');
-      const result=await mod[method](ports);
-      if(result?.state==='ready'&&result.code===null)return true;
+      const result=await mod[method](Object.hasOwn(runtime??{},'herdr')?{...ports,runtime}:ports);
+      if(result?.state==='ready'&&result.code===null){readyHerdrExecutable=result.executable;return true;}
       if(result?.state==='unavailable'&&typeof result.message==='string'&&result.message.trim()) {
         line(stderr,safeLabel(result.message));return false;
       }
@@ -186,6 +187,10 @@ export async function runPdd(argv, dependencies = {}) {
     case 'workflow-run': case 'workflow-resume': case 'workflow-drive': case 'workflow-adopt': case 'workflow-attach': {
       try {
         const runner=workflowRunner??await import('./workflow-runner.mjs');
+        if(plan.local==='workflow-run'&&ports.runtime){
+          const {readHerdrRuntime}=await import('./workflow-herdr-executable.mjs');
+          ports.runtime=await readHerdrRuntime({home,runtime:ports.runtime},ports);
+        }
         const decision = {...(plan.options['--decision']?{decision:plan.options['--decision']}:{}),
           ...(plan.options['--id']?{decisionId:plan.options['--id']}:{}),
           ...(plan.options['--rev']?{expectedRev:Number(plan.options['--rev'])}:{}),
@@ -214,9 +219,10 @@ export async function runPdd(argv, dependencies = {}) {
           prepared=await traceHerdrRequest({operation:'workflow.prepare',request},()=>runner.prepareWorkflow(request,ports),ports);
         } else prepared=await traceHerdrRequest({operation:'workflow.resume',request:input},()=>runner.resumeWorkflow(input,ports),ports);
         if(prepared?.state!=='prepared') return printResult(prepared);
-        if((!workflowController||workflowHerdrBoot)&&!await readyHerdr('ensureDefaultHerdr'))return 1;
+        if((!workflowController||workflowHerdrBoot)&&!await readyHerdr('ensureDefaultHerdr',prepared.runtime))return 1;
         const controller=workflowController??await import('./workflow-controller.mjs');
-        const controllerPorts=await createPddCliPorts(ports,{capability:'controller',workflowController:controller});
+        const launchPorts=prepared.runtime?.herdr===undefined?ports:{...ports,runtime:prepared.runtime};
+        const controllerPorts=await createPddCliPorts(launchPorts,{capability:'controller',workflowController:controller});
         const controllerInput={...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null};
         const result=await traceHerdrRequest({operation:'controller.start',request:controllerInput},()=>controller.startWorkflowController(controllerInput,controllerPorts),controllerPorts);
         const started=result?.state==='started';
@@ -225,8 +231,9 @@ export async function runPdd(argv, dependencies = {}) {
           const state=safeLabel(result?.state)||'unknown';
           const code=result?.code===null?'null':safeLabel(result?.code)||'unknown';
           const missing=Array.isArray(result?.missingPorts)?result.missingPorts.filter(name=>typeof name==='string'&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)):[];
+          const missingHerdr=result?.code==='herdr_not_found'&&typeof result.message==='string'?` ${safeLabel(result.message)}.`:'';
           const identityMessage=result?.code==='herdr_identity_unavailable'?' Herdr process identity is unavailable for the new controller pane. No controller command was sent.':'';
-          line(stderr,`Workflow controller not started: ${state} (${code}).${identityMessage}${missing.length?` Missing ports: ${missing.join(', ')}.`:''} Inspect the saved run before retrying.`);
+          line(stderr,`Workflow controller not started: ${state} (${code}).${missingHerdr}${identityMessage}${missing.length?` Missing ports: ${missing.join(', ')}.`:''} Inspect the saved run before retrying.`);
         }
         return started?0:1;
       } catch {line(stderr,'The local workflow operation could not be confirmed. Inspect saved state before retrying.');return 1;}
@@ -293,9 +300,11 @@ export async function runPdd(argv, dependencies = {}) {
         const versions=modules.versions??await import('./versions.mjs');
         const lock=modules.lock??await import('./update-lock.mjs');
         const launcher=modules.launcher??await import('./pdd-launch.mjs');
-        const runtime=await versions.resolveRuntime({home,versionRoot:packageRoot},ports);
+        let runtime=await versions.resolveRuntime({home,versionRoot:packageRoot},ports);
         if(!await readyHerdr('ensureHerdrInstalled'))return 1;
         const result=await lock.withUpdateLock({home},async lease=>{
+          const binding=modules.herdrRuntime??await import('./workflow-herdr-executable.mjs');
+          runtime=await binding.recordHerdrRuntime({home,runtime,herdr:readyHerdrExecutable,lease},ports);
           const support=await launcher.installLauncherSupport({home,runtime,lease},ports);
           if(support?.code!==null)return support;
           return launcher.provisionRecoveryService({home,runtime,lease},ports);
@@ -306,7 +315,7 @@ export async function runPdd(argv, dependencies = {}) {
           if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();return exit;
         }
         line(stdout,'Public recovery service ready.');return 0;
-      }catch {line(stderr,'Public setup could not be completed. Use the verified PDD installer or ~/.pdd/launcher/pdd-launch recover, then rerun pdd setup.');return 1;}
+      }catch(error) {if(error?.code==='herdr_not_found'){line(stderr,safeLabel(error.message));return 1;}line(stderr,'Public setup could not be completed. Use the verified PDD installer or ~/.pdd/launcher/pdd-launch recover, then rerun pdd setup.');return 1;}
     }
     case 'doctor': {
       try {const mod=doctorModule??await import('./doctor.mjs');const exitCode=await mod.runDoctorCommand(argv.slice(1),{...(clientAdapter?.doctorChecks?{clientAdapter}:{}),home,...doctorDeps,cwd,packageRoot,stdout,stderr});if(![0,1,2].includes(exitCode))throw Error();return exitCode;}

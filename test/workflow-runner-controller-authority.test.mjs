@@ -18,9 +18,10 @@ async function fixture(t){
   await git('init','-b','main');await git('config','user.name','Synthetic');await git('config','user.email','synthetic@example.invalid');
   await fs.writeFile(join(cwd,'README.md'),'Retained input.\n');await git('add','.');await git('commit','-m','initial');
   await git('remote','add','origin','https://github.com/example/project.git');await git('update-ref','refs/remotes/origin/main',await git('rev-parse','HEAD'));
+  const herdrExecutable=join(home,'tools','herdr');await fs.mkdir(join(home,'tools'));await fs.writeFile(herdrExecutable,'#!/bin/sh\nexit 99\n',{mode:0o700});
   const calls=[];
   const ports={home,loadGuidance,withWorkflowLock,inspectWorkflowLock,stdout:{write(){}},stderr:{write(){}},
-    runtime:{v:1,releaseId:'synthetic',versionRoot:packageRoot,packageRoot,node:process.execPath,bin:join(packageRoot,'bin/pdd.mjs'),pddVersion:'test',alphaDigest:'a'.repeat(64),nodeVersion:process.versions.node,clientDigest:null,credentialHelper:null,future:{preserved:true}},
+    runtime:{herdr:herdrExecutable,v:1,releaseId:'synthetic',versionRoot:packageRoot,packageRoot,node:process.execPath,bin:join(packageRoot,'bin/pdd.mjs'),pddVersion:'test',alphaDigest:'a'.repeat(64),nodeVersion:process.versions.node,clientDigest:null,credentialHelper:null,future:{preserved:true}},
     resolveWorkflowModel:async({agent})=>({state:'selected',selection:{machineId:null,agent,model:null,effort:null,cliVersion:'test',catalogRevision:'test',source:'native-defaults'}}),
     execFile:async(file,args,opts)=>{
       calls.push([file,args]);
@@ -108,10 +109,10 @@ test('local composition retains complete supplied port references and validates 
 test('drive journals the exact shared OS identity and retains tracing in its bounded command environment',async t=>{
   const f=await fixture(t),identity='linux:synthetic-boot:12345',before=process.env.PDD_TRACE;
   process.env.PDD_TRACE='herdr,git';t.after(()=>{if(before===undefined)delete process.env.PDD_TRACE;else process.env.PDD_TRACE=before;});
-  const tools=join(f.home,'tools'),output=join(f.home,'child-env');await fs.mkdir(tools);
+  const tools=join(f.home,'tools'),output=join(f.home,'child-env');await fs.mkdir(tools,{recursive:true});
   const reply=JSON.stringify({result:{type:'pane_process_info',process_info:{pane_id:'w1:p1',shell_pid:1,foreground_process_group_id:process.pid,foreground_processes:[{pid:process.pid,argv:[f.spec.runtime.node,f.spec.runtime.bin,'workflow','drive',f.spec.runId]}]}}});
   await fs.writeFile(join(tools,'herdr'),'#!/bin/sh\nprintf "%s\\n%s\\n" "$PDD_TRACE" "$SAFE" > "$PROBE_OUTPUT"\nprintf "%s\\n" "$PROBE_REPLY"\n',{mode:0o700});
-  f.ports.env={PATH:tools,SAFE:'retained',PROBE_OUTPUT:output,PROBE_REPLY:reply};
+  f.ports.env={PATH:'',SAFE:'retained',PROBE_OUTPUT:output,PROBE_REPLY:reply};
   f.ports.controller={herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p1'};
   f.ports.processStartIdentity=async input=>{assert.deepEqual(input,{pid:process.pid,paneId:'w1:p1'});return identity;};
   f.ports.resolveWorkflowModel=async()=>({state:'refused'}); // stop after proof, before any stage
@@ -124,7 +125,7 @@ test('drive refuses unavailable shared OS identity instead of falling back to ra
   const f=await fixture(t),execute=f.ports.execFile,before=await fs.readFile(join(f.spec.runDir,'journal.jsonl'));
   f.ports.controller={herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p1'};
   f.ports.processStartIdentity=async()=>null;
-  f.ports.execFile=async(file,args,opts)=>file==='herdr'?{stdout:JSON.stringify({result:{process_info:{pane_id:'w1:p1',foreground_processes:[{pid:process.pid,argv:[f.spec.runtime.node,f.spec.runtime.bin,'workflow','drive',f.spec.runId]}]}}})}:execute(file,args,opts);
+  f.ports.execFile=async(file,args,opts)=>file===f.spec.runtime.herdr?{stdout:JSON.stringify({result:{process_info:{pane_id:'w1:p1',foreground_processes:[{pid:process.pid,argv:[f.spec.runtime.node,f.spec.runtime.bin,'workflow','drive',f.spec.runId]}]}}})}:execute(file,args,opts);
   const r=await driveWorkflow({runId:f.spec.runId,cwd:f.cwd,packageRoot},f.ports);
   assert.equal(r.exitCode,1);assert.match(r.message,/start identity is unavailable/);
   assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
@@ -136,7 +137,7 @@ for(const empty of [false,true]) test(`real public adapter joins Herdr-shaped re
   f.ports.controller={herdrSession:'default',workspaceId:'w1',tabId:'w1:t2',paneId:'w1:p2'};
   f.ports.resolveWorkflowModel=async()=>({state:'refused'}); // never reach native stages
   f.ports.execFile=async(file,args,opts)=>{
-    if(file!=='herdr')return execute(file,args,opts);
+    if(file!==f.spec.runtime.herdr)return execute(file,args,opts);
     assert.deepEqual(args.slice(0,2),['--session','default']);
     const op=args.slice(2,4).join('.');
     let result;
@@ -169,4 +170,30 @@ for(const empty of [false,true]) test(`real public adapter joins Herdr-shaped re
   assert.equal(journal.state.controller.generation,1);assert.deepEqual(saved.proof.process.argv,intent.argv);
   assert.match(r.controller.startIdentity,process.platform==='linux'?/^linux:[a-f0-9-]+:\d+$/:/^darwin:/);
   assert.equal((await startWorkflowController(f.spec,local)).state,'started');assert.equal(starts,1);
+});
+
+
+test('drive refuses a missing saved Herdr binding instead of using current runtime or PATH',async t=>{
+  const f=await fixture(t),before=await fs.readFile(join(f.spec.runDir,'journal.jsonl'));
+  await fs.unlink(f.spec.runtime.herdr);
+  f.ports.runtime={...f.ports.runtime,herdr:process.execPath};f.ports.herdrExecutable=process.execPath;
+  const r=await driveWorkflow({runId:f.spec.runId,cwd:f.cwd,packageRoot},f.ports);
+  assert.equal(r.code,'herdr_not_found');assert.equal(r.message,`failed: run ${f.spec.runId} / scope. Herdr not found at ${f.spec.runtime.herdr}`);
+  assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
+  assert.equal(f.calls.some(([file])=>file===f.spec.runtime.herdr||file===process.execPath),false);
+});
+
+test('drive forwards the saved runtime and executable to the existing native-stage seam',async t=>{
+  const f=await fixture(t),execute=f.ports.execFile;let observed;
+  f.ports.runtime={...f.ports.runtime,herdr:process.execPath};f.ports.herdrExecutable=process.execPath;
+  f.ports.controller={herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p1'};
+  f.ports.processStartIdentity=async()=> 'linux:synthetic-boot:12345';
+  f.ports.execFile=async(file,args,opts)=>file===f.spec.runtime.herdr?{stdout:JSON.stringify({result:{process_info:{pane_id:'w1:p1',foreground_processes:[{pid:process.pid,argv:[f.spec.runtime.node,f.spec.runtime.bin,'workflow','drive',f.spec.runId]}]}}})}:execute(file,args,opts);
+  f.ports.runHerdrStage=async(input,ports)=>{observed={input,ports};throw Error('Synthetic edge stops before native work');};
+  f.ports.inspectHerdrStage=async()=>assert.fail('No stage exists');f.ports.closeHerdrStage=async()=>assert.fail('No stage cleanup');
+  await driveWorkflow({runId:f.spec.runId,cwd:f.cwd,packageRoot},f.ports);
+  assert.ok(observed,'the real runner reaches its existing stage seam');
+  assert.deepEqual(observed.ports.runtime,f.spec.runtime);assert.equal(observed.ports.herdrExecutable,f.spec.runtime.herdr);
+  assert.equal(observed.input.cwd,f.spec.root);assert.equal(observed.ports.controller.paneId,'w1:p1');
+  assert.equal(f.ports.runtime.herdr,process.execPath,'caller runtime was not mutated');
 });

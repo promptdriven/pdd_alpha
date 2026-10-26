@@ -79,7 +79,16 @@ pane/terminal/native identity, cwd and ready lifecycle sequence. Require a
 fresh pane.process_info matching the stage process/start identity plus its
 durable journal checkpoint for the current backendGen, both before first prompt
 and after native-history resume. Process proof without the saved generation,
-or a generation without process proof, is insufficient. Agent idle alone
+or a generation without process proof, is insufficient. Eligible foreground
+processes retain a positive safe-integer PID, the exact stage cwd, and an exact
+agent match by name or argv/argv0 basename. If several qualify, prefer the unique
+process whose PID equals `foreground_process_group_id`; otherwise require a
+unique exact agent `name`. An npm node launcher and its native child may both
+qualify: the group leader wins even when only the child has the exact agent name.
+Multiple leaders, ambiguous names or no eligible process return
+`stage_process_unproved` before delivery. A single eligible process remains valid.
+Recheck the selected PID and OS start identity against the saved proof at every
+existing proof boundary; list order cannot change the binding. Agent idle alone
 is insufficient: startup dialogs or launch_pending are blocked. On startup
 refusal, read the exact saved agent and retain any supplied native id/sequence
 before returning `native_start_person_action_required` with normal attach
@@ -173,7 +182,24 @@ retry a request or infer capability, delivery or acceptance from a trace.
 Prompts, pane command text, paths, environment and arbitrary error text must not
 enter the log; the trace owner defines positive projection and secure bounds.
 
+
+### Bound executable
+
+Every command and real attachment uses the executable owner's absolute resolver
+with the frozen `ports.runtime.herdr`; no bare-name invocation or pane PATH
+dependency. Missing explicit targets preserve herdr_not_found and the actionable
+`Herdr not found at <path>` message in the recovery result, without a retry or
+replacement. A legacy unbound adapter retains its first successful absolute
+selection for subsequent commands and attachment through the same ports; loss
+of that executable never selects another PATH candidate. Recheck the retained
+path before use. If spawn reports ENOENT after resolution, report that same
+missing-path result only when the selected executable is now unavailable;
+unrelated spawn or delivery failures retain their existing uncertainty. Never
+retry the request. Explicit spawnAttach callbacks remain unchanged.
+
 ## Dependencies
+
+- [Absolute executable](workflow-herdr-executable.prompt.md): required generation/runtime for saved Herdr selection and missing-path refusal.
 
 - [Herdr trace](herdr-trace.prompt.md): required generation/runtime for the module function `traceHerdrRequest`, opt-in redaction and bounded diagnostics; it grants no transport or controller authority.
 

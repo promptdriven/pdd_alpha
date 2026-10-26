@@ -101,8 +101,9 @@ unchanged. Installation and boot are explicit calls, never import-time effects.
 Codes are `herdr_not_installed`, `herdr_not_on_path`, `herdr_install_failed`,
 `herdr_unusable`, `herdr_not_running` and `unsupported_platform`. Reasons are
 fixed public text plus a numeric exit code or known OS error classification;
-never expose raw stderr, commands, URLs with credentials, paths or error messages.
-An executable path is returned for caller use, not interpolated into diagnostics.
+never expose raw stderr, commands, URLs with credentials or arbitrary error messages.
+The specific missing recorded executable refusal below includes its absolute
+local path so the person can repair that installation.
 
 Trace every actual Herdr read and startup request through the shared trace
 function, operations `workspace.list`, `server.start` and `other` for the setup
@@ -110,7 +111,19 @@ version probe. Failed calls must reach that wrapper before classification.
 Tracing never changes result, error, startup count or readiness. The trace owner
 owns opt-in selection, safe projection, bounds and sink behavior.
 
+
+### Bound executable
+
+Prepared readiness uses the executable owner's resolver with `runtime.herdr`
+precedence, so a pane PATH without Herdr cannot change the selected binary. A
+missing explicit recorded target returns unavailable/herdr_not_found with
+`Herdr not found at <path>` and no startup or PATH fallback. Setup returns the
+physical absolute executable for durable binding. Existing setup invocation-PATH
+installation requirements remain unchanged.
+
 ## Dependencies
+
+- [Absolute executable](workflow-herdr-executable.prompt.md): required generation/runtime for saved Herdr selection and missing-path refusal.
 
 - [Herdr trace](herdr-trace.prompt.md): required generation/runtime for
   `traceHerdrRequest`; diagnostics grant no authority or capability.

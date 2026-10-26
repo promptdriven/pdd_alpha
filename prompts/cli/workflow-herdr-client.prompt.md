@@ -41,7 +41,7 @@ Herdr handles are opaque: accept bounded ASCII alphanumeric suffixes in
 `w<suffix>`, `w<suffix>:t<suffix>` and `w<suffix>:p<suffix>`, including `w1:pA`.
 Do not restrict them to decimal counters, decode their order or synthesize IDs;
 retain exact spelling and compare exact workspace/tab/pane bindings.
-Use `ports.herdrExecutable` or `herdr` on invocation PATH, supplied env/home/cwd,
+Use the bound absolute executable below, supplied env/home/cwd,
 UTF-8, 1 MiB output limit and a 5000ms timeout. Never interpolate a shell command
 around the transport. `pane run` receives the caller's already-owned controller
 command as one positional operand, unmodified. Rejected or nonzero calls and
@@ -115,7 +115,22 @@ owner controls enablement/redaction/bounds; never expose raw argv, stderr or OS
 records in user-facing errors. Tracing does not authorize a repeat or affect
 the original command's delivery.
 
+
+### Bound executable
+
+Every request resolves the absolute executable through the executable owner
+before transport. A present `ports.runtime.herdr` wins over an explicit
+`herdrExecutable`; absence alone permits legacy discovery. Propagate
+`herdr_not_found` and its `Herdr not found at <path>` message unchanged, instead of
+projecting it to command uncertainty. No bare-name Herdr execution is allowed. Keep a successful legacy discovery
+bound to that factory. Missing-path observations return complete:false with the
+known code/message, and processInfo preserves that error instead of generic proof
+failure. The capability probe also propagates a known missing executable error,
+so a disappeared binary cannot be misreported as missing identity evidence.
+
 ## Dependencies
+
+- [Absolute executable](workflow-herdr-executable.prompt.md): required generation/runtime for saved Herdr selection and missing-path refusal.
 
 - [Herdr trace](herdr-trace.prompt.md): required generation/runtime for the
   best-effort actual transport wrapper and its privacy rules.

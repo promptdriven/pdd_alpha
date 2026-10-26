@@ -21,13 +21,14 @@ async function fixture(t){
   await git('init','-b','main');await git('config','user.name','Synthetic');await git('config','user.email','synthetic@example.invalid');
   await fs.writeFile(join(cwd,'README.md'),'Keep all saved work.\n');await git('add','.');await git('commit','-m','initial');
   await git('remote','add','origin','https://github.com/example/project.git');await git('update-ref','refs/remotes/origin/main',await git('rev-parse','HEAD'));
+  const herdrExecutable=join(home,'herdr');await fs.writeFile(herdrExecutable,'#!/bin/sh\nexit 99\n',{mode:0o700});
   const abort=new AbortController(),commands=[],output=[];
   // Only the GitHub/Git network and Herdr service boundaries are synthetic.
   // Git, freeze, strict readers, assignment/lifecycle, native locks, OS identity,
   // controller composition and the public CLI/keeper entry remain real.
   const ports={home,loadGuidance,signal:abort.signal,env:{HOME:home,PDD_TRACE:''},
     stdout:{write(s){output.push(s);}},stderr:{write(s){output.push(s);if(s.includes('this needs the fleet client'))abort.abort();}},
-    runtime:{v:1,releaseId:'synthetic',versionRoot:packageRoot,packageRoot,node:process.execPath,bin:join(packageRoot,'bin/pdd.mjs'),pddVersion:'test',alphaDigest:'a'.repeat(64),nodeVersion:process.versions.node,clientDigest:null,credentialHelper:null},
+    runtime:{herdr:herdrExecutable,v:1,releaseId:'synthetic',versionRoot:packageRoot,packageRoot,node:process.execPath,bin:join(packageRoot,'bin/pdd.mjs'),pddVersion:'test',alphaDigest:'a'.repeat(64),nodeVersion:process.versions.node,clientDigest:null,credentialHelper:null},
     execFile:async(file,args,opts)=>{
       commands.push([file,args]);
       if(file==='git'&&args[0]==='fetch'){
@@ -38,13 +39,13 @@ async function fixture(t){
       if(file==='git'&&!['push','ls-remote'].includes(args[0]))return exec(file,args,opts);
       if(file==='gh'&&args[0]==='repo')return {stdout:JSON.stringify({nameWithOwner:'example/project',defaultBranchRef:{name:'main'},url:'https://github.com/example/project'})};
       if(file==='gh'&&args[0]==='api')return {stdout:JSON.stringify({number:17,html_url:'https://github.com/example/project/issues/17',title:'Synthetic',body:'Retain work.',state:'OPEN',isPullRequest:false})};
-      assert.equal(file,'herdr','No native agent, installer or service startup is permitted');
+      assert.equal(file,herdrExecutable,'No native agent, installer or service startup is permitted');
       assert.deepEqual(args.slice(0,2),['--session','default']);
       const operation=args.slice(2,4).join('.');let result;
       if(operation==='pane.list')result={panes:[{pane_id:'wA:pB'}]};
       else if(operation==='pane.process-info'){
         result={process_info:{pane_id:'wA:pB',shell_pid:process.pid,foreground_processes:[{pid:process.pid,argv:[process.execPath]}]}};
-        if(commands.filter(([f,a])=>f==='herdr'&&a[2]==='pane'&&a[3]==='process-info').length===2)abort.abort();
+        if(commands.filter(([f,a])=>f===herdrExecutable&&a[2]==='pane'&&a[3]==='process-info').length===2)abort.abort();
       }else assert.fail('Read-only first recovery pass cannot mutate Herdr: '+operation);
       return {stdout:JSON.stringify({result}),code:0};
     }};
@@ -63,7 +64,7 @@ test('pdd runs-keeper composes real factories, physical authority and OS identit
   assert.equal(await local.processStartIdentity({pid:process.pid}),await readProcessStartIdentity({pid:process.pid}));
   assert.equal(await runPdd(['runs-keeper'],{home:f.home,cwd:f.cwd,ports:f.ports,stdout:f.ports.stdout,stderr:f.ports.stderr}),0);
   assert.equal(f.abort.signal.aborted,true);
-  assert.deepEqual(f.commands.filter(([name])=>name==='herdr').map(([,args])=>args.slice(2,4).join('.')),['pane.list','pane.process-info','pane.process-info']);
+  assert.deepEqual(f.commands.filter(([name])=>name===f.spec.runtime.herdr).map(([,args])=>args.slice(2,4).join('.')),['pane.list','pane.process-info','pane.process-info']);
   assert.equal(await inspectWorkflowLock({path:join(f.home,'.pdd/runs/keeper.lock')}),'free');
   assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
   assert.equal(await fs.stat(join(f.spec.runDir,'controller-launch')).then(()=>true,()=>false),false);
@@ -82,7 +83,7 @@ test('public keeper reports due quota dependency without controller effects or j
   const timeout=setTimeout(()=>f.abort.abort(),3000);t.after(()=>clearTimeout(timeout));
   assert.equal(await runPdd(['runs-keeper'],{home:f.home,cwd:f.cwd,ports:f.ports,stdout:f.ports.stdout,stderr:f.ports.stderr}),0);
   assert.match(f.output.join(''),/this needs the fleet client/);
-  assert.equal(f.commands.some(([name])=>name==='herdr'),false);
+  assert.equal(f.commands.some(([name])=>name===f.spec.runtime.herdr),false);
   assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
   assert.equal(await fs.stat(join(f.spec.runDir,'controller-launch')).then(()=>true,()=>false),false);
 });

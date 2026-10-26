@@ -1,9 +1,10 @@
-// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: 831865a93919f43463c24596a15b7ba5f365a51033f37d78cca51e2abb4de2e7).
+// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: b43800dd2fbe6976e98f285f1d2291cfb5c7e2c9c897c0ed57d44b9b691a5679).
 import {execFile as callbackExec,spawn} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
 import {readFile,realpath} from 'node:fs/promises';
 import {basename} from 'node:path';
+import {resolveHerdrExecutable} from './workflow-herdr-executable.mjs';
 import {traceHerdrRequest} from './herdr-trace.mjs';
 import {nativeArgs} from './native-flags.mjs';
 const execute=promisify(callbackExec),UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -11,11 +12,36 @@ const STAGE=/^(?=.{1,64}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const hash=x=>createHash('sha256').update(x).digest('hex'),copy=x=>structuredClone(x);
 const fault=code=>Object.assign(Error(code),{code});
 const claims=new Map();
-function rt(p) {return {p,now:p.now??Date.now,sleep:p.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),exec:p.execFile??execute,guard:p.withStageGuard??(()=>{throw fault('stage_guard_required');}),pollMs:p.pollMs??100,startupMs:p.startupMs??30000,observeMs:p.observeMs??p.timeoutMs??1800000};}
+const executableBindings=new WeakMap();
+function rt(p) {
+  if(!executableBindings.has(p))executableBindings.set(p,{});
+  return {p,binding:executableBindings.get(p),now:p.now??Date.now,sleep:p.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),exec:p.execFile??execute,guard:p.withStageGuard??(()=>{throw fault('stage_guard_required');}),pollMs:p.pollMs??100,startupMs:p.startupMs??30000,observeMs:p.observeMs??p.timeoutMs??1800000};
+}
+async function selectedExecutable(r){
+  if((r.p.runtime!=null&&Object.hasOwn(r.p.runtime,'herdr'))||Object.hasOwn(r.p,'herdrExecutable'))return resolveHerdrExecutable(r.p);
+  if(!r.binding.selection){
+    const selection=resolveHerdrExecutable(r.p);r.binding.selection=selection;
+    try{await selection;}catch(e){if(r.binding.selection===selection)delete r.binding.selection;throw e;}
+  }
+  return resolveHerdrExecutable({herdrExecutable:await r.binding.selection});
+}
+function inspectionPorts(r,checkpoint){
+  const ports={...r.p,checkpoint};executableBindings.set(ports,r.binding);return ports;
+}
 const outcome=(b,reason,state='recovery_required')=>({state,backend:b?copy(b):null,evidence:copy(b?.evidence??{}),...(reason?{reason}:{})});
+const stageFailure=(b,e,fallback)=>({...outcome(b,e.code??fallback),...(e.code==='herdr_not_found'?{message:e.message}:{})});
 async function command(r,b,args) {
-  let response;try{response=await traceHerdrRequest({operation:`${args[0]}.${args[1].replaceAll('-','_')}`,request:{argv:['--session',b.session,...args]}},()=>r.exec('herdr',['--session',b.session,...args],{cwd:b.cwd,shell:false,encoding:'utf8',timeout:r.startupMs+5000,maxBuffer:1024*1024}),r.p);}
-  catch(e){let error;try{error=JSON.parse(e.stderr)?.error?.code;}catch{}throw fault(typeof error==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(error)?error:'herdr_command_uncertain');}
+  let response,executable;try{response=await traceHerdrRequest({operation:`${args[0]}.${args[1].replaceAll('-','_')}`,request:{argv:['--session',b.session,...args]}},async()=>{
+    executable=await selectedExecutable(r);
+    return r.exec(executable,['--session',b.session,...args],{cwd:b.cwd,...(r.p.env!==undefined?{env:r.p.env}:{}),shell:false,encoding:'utf8',timeout:r.startupMs+5000,maxBuffer:1024*1024});
+  },r.p);}
+  catch(e){
+    if(e.code==='herdr_not_found')throw e;
+    if(e.code==='ENOENT'&&executable){
+      try{await resolveHerdrExecutable({herdrExecutable:executable});}catch(missing){if(missing.code==='herdr_not_found')throw missing;}
+    }
+    let error;try{error=JSON.parse(e.stderr)?.error?.code;}catch{}throw fault(typeof error==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(error)?error:'herdr_command_uncertain');
+  }
   let x;try{x=JSON.parse(response.stdout);}catch{throw fault('herdr_invalid_reply');}
   if(response.code!==undefined&&response.code!==0||!x||x.error){const code=x?.error?.code;throw fault(typeof code==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(code)?code:'herdr_command_uncertain');}return x;
 }
@@ -37,7 +63,11 @@ function remember(b,a) {b.lastSeq=a.state_change_seq;if(!b.nativeSession&&a.agen
 async function processProof(r,b) {
   const x=(await command(r,b,['pane','process-info','--pane',b.paneId])).result?.process_info;
   if(x?.pane_id!==b.paneId||!Array.isArray(x.foreground_processes))throw fault('stage_process_unproved');
-  const candidates=x.foreground_processes.filter(p=>Number.isSafeInteger(p.pid)&&p.pid>0&&p.cwd===b.cwd&&(p.name===b.agent||basename(p.argv0??'')===b.agent||(p.argv??[]).some(v=>basename(v)===b.agent)));
+  let candidates=x.foreground_processes.filter(p=>Number.isSafeInteger(p.pid)&&p.pid>0&&p.cwd===b.cwd&&(p.name===b.agent||basename(p.argv0??'')===b.agent||(p.argv??[]).some(v=>basename(v)===b.agent)));
+  if(candidates.length>1){
+    const leaders=candidates.filter(p=>p.pid===x.foreground_process_group_id);
+    candidates=leaders.length?leaders:candidates.filter(p=>p.name===b.agent);
+  }
   if(candidates.length!==1)throw fault('stage_process_unproved');
   const p=candidates[0];let start;
   if(r.p.processStartIdentity)start=await r.p.processStartIdentity({pid:p.pid,paneId:b.paneId});
@@ -107,7 +137,7 @@ export async function runHerdrStage(input={},ports={}) {
     const same=b&&b.runId===input.runId&&b.stageId===input.stageId&&b.attemptId===input.attemptId;
     if(same) {
       validate(b);if(b.cwd!==cwd||b.agent!==input.agent||b.promptDigest!==promptDigest||!isDeepStrictEqual(b.launchSelection,input.launchSelection??null))throw fault('stage_binding_changed');
-      if(!['start_intent','ready'].includes(b.phase)||Object.keys(b.evidence??{}).some(k=>k!=='readySeq'))return inspectHerdrStage({backend:b,cwd},{...ports,checkpoint:input.checkpoint});
+      if(!['start_intent','ready'].includes(b.phase)||Object.keys(b.evidence??{}).some(k=>k!=='readySeq'))return inspectHerdrStage({backend:b,cwd},inspectionPorts(r,input.checkpoint));
     } else {
       if(b&&(b.phase!=='closed'||!b.acceptanceDigest))throw fault('previous_stage_not_released');
       const c=ports.controller;if(c?.herdrSession!=='default'||![c.workspaceId,c.tabId,c.paneId].every(v=>typeof v==='string'&&v))throw fault('unsupported');
@@ -147,20 +177,21 @@ export async function runHerdrStage(input={},ports={}) {
     }
     // Observation budget is an alarm, never a duration-based failure or termination.
     return outcome(b,'stage_observation_pending','active');
-  }catch(e){return outcome(b,e.code??'stage_transport_uncertain');}
+  }catch(e){return stageFailure(b,e,'stage_transport_uncertain');}
 }
 export async function inspectHerdrStage({backend,cwd}={},ports={}) {
   const b=copy(backend),r=rt(ports);
   try{validate(b);if(await realpath(cwd??b.cwd)!==b.cwd)throw fault('stage_cwd_changed');if(['closed','close_intent','resume_intent'].includes(b.phase))return outcome(b,b.phase==='closed'?'stage_archived':'stage_effect_unconfirmed');return await observed(r,b);}
-  catch(e){return outcome(b,e.code??'stage_inspection_unavailable');}
+  catch(e){return stageFailure(b,e,'stage_inspection_unavailable');}
 }
 export async function attachHerdrStage({backend}={},ports={}) {
   const b=copy(backend),r=rt(ports);
   try{validate(b);if(b.phase==='closed')return 2;return await r.guard(b,async()=>{
     await rememberAndClaim(r,b,await agent(r,b),ports.checkpoint);if(b.processProof)await processProof(r,b);
-    return traceHerdrRequest({operation:'agent.attach',request:{argv:['--session',b.session,'agent','attach',b.agentName]}},()=>{
+    return traceHerdrRequest({operation:'agent.attach',request:{argv:['--session',b.session,'agent','attach',b.agentName]}},async()=>{
       if(ports.spawnAttach)return ports.spawnAttach(b.session,b.agentName,b.cwd);
-      return new Promise(resolve=>{const child=(ports.spawn??spawn)('herdr',['--session',b.session,'agent','attach',b.agentName],{cwd:b.cwd,stdio:'inherit',shell:false});child.once('error',()=>resolve(1));child.once('close',code=>resolve(Number.isInteger(code)?code:1));});
+      const executable=await selectedExecutable(r);
+      return new Promise(resolve=>{const child=(ports.spawn??spawn)(executable,['--session',b.session,'agent','attach',b.agentName],{cwd:b.cwd,stdio:'inherit',shell:false});child.once('error',()=>resolve(1));child.once('close',code=>resolve(Number.isInteger(code)?code:1));});
     },ports);
   });}catch{return 1;}
 }
@@ -179,7 +210,7 @@ export async function closeHerdrStage({backend,acceptance}={},ports={}) {
       b.phase='closed';b.cleanupConfirmation={acknowledgement:'ok',absentPaneId:b.paneId};await checkpoint(b,ports.checkpoint);
       const handle=claims.get(claimKey(b));await handle?.release?.();claims.delete(claimKey(b));return outcome(b,null,'closed');
     });
-  }catch(e){return outcome(b,e.code??'stage_cleanup_uncertain');}
+  }catch(e){return stageFailure(b,e,'stage_cleanup_uncertain');}
 }
 export async function resumeHerdrStage({backend,cwd,resumeIntent,checkpoint:save}={},ports={}) {
   const b=copy(backend),r=rt(ports);
@@ -201,5 +232,5 @@ export async function resumeHerdrStage({backend,cwd,resumeIntent,checkpoint:save
       if(!ready(await agent(r,b)))return outcome(b,'native_resume_needs_you','blocked');
       b.processProof=await processProof(r,b);b.evidence={readySeq:a.state_change_seq};b.phase='history_resumed';await checkpoint(b,save);return outcome(b,null,'active');
     });
-  }catch(e){return outcome(b,b?.agent==='claude'?'native_resume_needs_you':e.code??'native_resume_uncertain');}
+  }catch(e){if(e.code==='herdr_not_found')return stageFailure(b,e,'native_resume_uncertain');return outcome(b,b?.agent==='claude'?'native_resume_needs_you':e.code??'native_resume_uncertain');}
 }

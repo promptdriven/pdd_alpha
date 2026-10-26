@@ -1,18 +1,21 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 31e12d17a12acf3dfe44ae7818051853d024c188329041ec55cc1ec5cc7d3702).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: c8ed16c0ba38e7079cb938a7992e53ad887221438513ea482995daf6e7bb8e4f).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 import { withWorkflowLock, inspectWorkflowLock, claimWorkflowSession } from './workflow-claims.mjs';
 import { startWorkflowController, readControllerLaunches, createLocalWorkflowControllerPorts } from './workflow-controller.mjs';
 import { checkWorkflowRuntime } from './workflow-runtime.mjs';
 import { readRunIndex } from './workflow-run-records.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const observations=new Map();
+const compositions=new WeakMap();
 const fsOf=p=>p.fs??nodeFs;
 const eligible=s=>['running','waiting_agent','quota_wait','WAIT'].includes(s?.controlState)&&s.adopted!==false&&!s.archived&&!s.removing&&!s.waitingPerson&&!s.blockedQuestion&&s.pending?.backend?.agentStatus!=='blocked';
 const fleetRequired=()=>Object.assign(Error('This recovery operation is unavailable: this needs the fleet client.'),{code:'fleet_client_required'});
 const unavailable=async()=>{throw fleetRequired();};
 const invalidRestoreProvider=()=>({state:'refused',code:'unsupported',message:'Managed restore requires callable recovery providers.'});
+const controllerMessage=seen=>seen.code==='herdr_not_found'&&typeof seen.message==='string'?{message:seen.message}:{};
 export async function createWorkflowKeeperPorts(ports={}){
   const local=await createLocalWorkflowControllerPorts(ports);
   const defaults={
@@ -23,6 +26,7 @@ export async function createWorkflowKeeperPorts(ports={}){
     warn:message=>{try{(ports.stderr??process.stderr).write(`${message}\n`);}catch{}}
   };
   for(const [key,value] of Object.entries(defaults))if(local[key]===undefined)local[key]=value;
+  compositions.set(local,{input:ports,runs:new Map()});
   return local;
 }
 export async function discoverWorkflowRuns({home},ports={}){
@@ -43,8 +47,9 @@ export async function discoverWorkflowRuns({home},ports={}){
   return {entries:[...registry.values()],warnings};
 }
 export async function reconcileWorkflowControllers({entries,now},ports={}){
-  const results=[],memo=ports.observations??observations;
+  const results=[],memo=ports.observations??observations,passPorts=ports;
   for(const entry of entries??[]){
+    let ports=passPorts;
     const finish=(state,code,extra={})=>results.push({runId:entry?.runId??null,state,code,...extra});
     try{
       if(entry?.recoveryRegistry==='missing_or_invalid'){finish('stopped','registry_missing_or_invalid');continue;}
@@ -61,7 +66,17 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
             retryObservation:true,...(conditional?{message:fleetRequired().message}:{})});continue;
         }
       }
+      const composition=compositions.get(passPorts);
+      if(composition){
+        let saved=composition.runs.get(entry.runId);
+        if(!saved||!isDeepStrictEqual(saved.runtime,s.runtime)){
+          saved={runtime:structuredClone(s.runtime),ports:await createLocalWorkflowControllerPorts({...composition.input,runtime:s.runtime})};
+          composition.runs.set(entry.runId,saved);
+        }
+        ports={...passPorts,...saved.ports};
+      }
       const herdr=await ports.observeHerdr?.();
+      if(herdr?.code==='herdr_not_found'){memo.delete(entry.runId);finish('needs_you',herdr.code,{message:herdr.message});continue;}
       if(!herdr?.complete||!Number.isFinite(herdr.upSince)||!Number.isFinite(herdr.stableSince)||now-herdr.upSince<30000||now-herdr.stableSince<5000){memo.delete(entry.runId);finish('stopped','herdr_unsettled');continue;}
       const inspect=ports.inspectWorkflowLock??((spec)=>inspectWorkflowLock(spec,ports));
       const lock=await inspect({path:join(entry.runDir,'controller.lock')});
@@ -72,16 +87,16 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
       const launches=await (ports.readControllerLaunches??(spec=>readControllerLaunches(spec,ports)))({runDir:entry.runDir});
       const prior=launches.at(-1);
       const runtime=await (ports.checkWorkflowRuntime??(spec=>checkWorkflowRuntime(spec,ports)))({runDir:entry.runDir});
-      if(!runtime.ok){finish('needs_you',runtime.code);continue;}
+      if(!runtime.ok){finish('needs_you',runtime.code,runtime.message?{message:runtime.message}:{});continue;}
       if(prior&&prior.phase!=='exited'){
         const seen=await (ports.startWorkflowController??(spec=>startWorkflowController(spec,ports)))({runId:s.runId,runDir:entry.runDir,root:s.root??entry.root,workflow:s.name,issueNumber:s.issue?.number,runtime:s.runtime,decision:prior.decision});
-        finish(seen.state,seen.code,{inspectOriginal:true});continue;
+        finish(seen.state,seen.code,{...controllerMessage(seen),inspectOriginal:true});continue;
       }
       if(launches.filter(l=>now-l.admittedAt<3600000).length>=3){finish('needs_you','launch_budget');continue;}
       // Launcher performs a fresh strict read and lock recheck under its admission gate.
       const seen=await (ports.startWorkflowController??(spec=>startWorkflowController(spec,ports)))({runId:s.runId,runDir:entry.runDir,root:s.root??entry.root,workflow:s.name,issueNumber:s.issue?.number,runtime:s.runtime});
-      memo.delete(entry.runId);finish(seen.state,seen.code);
-    }catch{memo.delete(entry?.runId);finish('stopped','recovery_inspection_failed');}
+      memo.delete(entry.runId);finish(seen.state,seen.code,controllerMessage(seen));
+    }catch(error){memo.delete(entry?.runId);if(error?.code==='herdr_not_found')finish('needs_you',error.code,{message:error.message});else finish('stopped','recovery_inspection_failed');}
   }
   return results;
 }
@@ -96,7 +111,7 @@ export async function runWorkflowKeeper({home=homedir()},ports={}){
       try{
         const found=await discoverWorkflowRuns({home},local);for(const warning of found.warnings)local.warn?.(warning);
         const results=await reconcileWorkflowControllers({entries:found.entries,now:local.now?.()??Date.now()},local);
-        for(const row of results)if(row.code==='fleet_client_required')local.warn?.(fleetRequired().message);
+        for(const row of results)if(row.code==='fleet_client_required')local.warn?.(fleetRequired().message);else if(row.code==='herdr_not_found')local.warn?.(row.message);
       }
       catch{ports.warn?.('recovery_pass_failed');}
       if(!signal.aborted)await (ports.wait??wait)(30000,signal);

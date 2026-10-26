@@ -8,9 +8,9 @@ const processInfo=(overrides={})=>({pane_id:'w1:p7',shell_pid:50,foreground_proc
 const encoded=result=>({stdout:JSON.stringify({result}),code:0});
 function fixture(extra={}){
  const calls=[];let info=processInfo(),panes=[{pane_id:'w1:p7'}];
- const ports={home:'/synthetic/home',cwd:'/synthetic/work',platform:'linux',env:{PATH:'/synthetic/bin'},fs:os(),execFile:async(file,args,options)=>{
+ const ports={herdrExecutable:process.execPath,home:'/synthetic/home',cwd:'/synthetic/work',platform:'linux',env:{PATH:'/synthetic/bin'},fs:os(),execFile:async(file,args,options)=>{
   calls.push({file,args,options});
-  assert.equal(file,'herdr');assert.deepEqual(args.slice(0,2),['--session','default']);assert.equal(options.shell,false);assert.equal(options.env,ports.env);
+  assert.equal(file,process.execPath);assert.deepEqual(args.slice(0,2),['--session','default']);assert.equal(options.shell,false);assert.equal(options.env,ports.env);
   const cmd=args.slice(2);
   if(cmd[0]==='pane'&&cmd[1]==='list')return encoded({type:'pane_list',panes});
   if(cmd[0]==='pane'&&cmd[1]==='process-info')return encoded({type:'pane_process_info',process_info:info});

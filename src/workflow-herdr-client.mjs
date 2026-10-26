@@ -1,9 +1,10 @@
-// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: c7393f367570403e97b78eedea19a04716e4203965c2def94b738d69b867fd52).
+// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: da6068f8028e84d1ee9feffc7cc65dd48a76697f6389ed91b94898e5bfe31649).
 import * as nodeFs from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
 import {homedir} from 'node:os';
 import {isAbsolute} from 'node:path';
+import {resolveHerdrExecutable} from './workflow-herdr-executable.mjs';
 import {traceHerdrRequest} from './herdr-trace.mjs';
 
 const execute=promisify(execFile),positive=n=>Number.isSafeInteger(n)&&n>0;
@@ -45,19 +46,24 @@ export async function readProcessStartIdentity({pid}={},ports={}){
 
 export async function createWorkflowHerdrPorts(ports={}){
   const p=config(ports),identity=ports.processStartIdentity!==undefined?ports.processStartIdentity:spec=>readProcessStartIdentity(spec,ports);
-  let continuity=null;
+  let continuity=null,discovered;
+  const executable=async()=>{
+    if(Object.hasOwn(p.runtime??{},'herdr')||Object.hasOwn(p,'herdrExecutable'))return resolveHerdrExecutable(p);
+    discovered??=await resolveHerdrExecutable(p);return resolveHerdrExecutable({herdrExecutable:discovered});
+  };
   const session=r=>{if(r?.session!=='default')throw fault('unsupported');};
   const operand=(v,re)=>{if(typeof v!=='string'||!re.test(v))throw fault('unsupported');return v;};
   const text=v=>{if(typeof v!=='string'||!v||v.includes('\0'))throw fault('unsupported');return v;};
   async function request(operation,args){
     let r;try{r=await traceHerdrRequest({operation,request:{session:'default',argv:args}},async()=>{
-      const response=await p.execFile(p.herdrExecutable??'herdr',['--session','default',...args],{cwd:p.cwd??p.home,env:p.env,shell:false,encoding:'utf8',timeout:5000,maxBuffer:1024*1024});
+      const binary=await executable();
+      let response;try{response=await p.execFile(binary,['--session','default',...args],{cwd:p.cwd??p.home,env:p.env,shell:false,encoding:'utf8',timeout:5000,maxBuffer:1024*1024});}catch(error){if(error?.code==='ENOENT')throw Object.assign(Error(`Herdr not found at ${binary}`),{code:'herdr_not_found'});throw error;}
       if(exit(response)!==0)throw Object.assign(fault('herdr_command_uncertain'),{exitCode:exit(response)});
       if(typeof response?.stdout!=='string'||Buffer.byteLength(response.stdout)>1024*1024)throw fault('herdr_invalid_reply');
       let reply;try{reply=JSON.parse(response.stdout);}catch{throw fault('herdr_invalid_reply');}
       if(!reply||reply.error||!reply.result||typeof reply.result!=='object')throw fault('herdr_invalid_reply');
       return reply;
-    },ports);}catch{throw fault('herdr_command_uncertain');}
+    },ports);}catch(error){if(error?.code==='herdr_not_found')throw error;throw fault('herdr_command_uncertain');}
     return r.result;
   }
   async function inventory(){
@@ -88,7 +94,7 @@ export async function createWorkflowHerdrPorts(ports={}){
       try{
         if(target!==undefined){session(target);operand(target?.paneId,P);return await capability(target.paneId)!==null;}
         for(const paneId of await inventory())if(await capability(paneId))return true;
-      }catch{}
+      }catch(error){if(error?.code==='herdr_not_found')throw error;}
       return false;
     },
     async listWorkspaces(r){
@@ -123,7 +129,7 @@ export async function createWorkflowHerdrPorts(ports={}){
       const after=await rawProcess(r.paneId);
       if(after.foreground_processes.length!==1||after.foreground_processes[0]?.pid!==candidate.pid||!isDeepStrictEqual(candidate.argv,after.foreground_processes[0]?.argv)||await identity({pid:candidate.pid,paneId:r.paneId})!==startIdentity)throw fault('process_unproved');
       return {pid:candidate.pid,startIdentity,paneId:r.paneId,executable,argv:[...candidate.argv]};
-      }catch{throw fault('process_unproved');}
+      }catch(error){if(error?.code==='herdr_not_found')throw error;throw fault('process_unproved');}
     }
   };
   async function observeHerdr(){
@@ -136,7 +142,7 @@ export async function createWorkflowHerdrPorts(ports={}){
       if(!continuity||now<continuity.last||now-continuity.last>60000)continuity={upSince:now,stableSince:now,key,last:now};
       else continuity={...continuity,stableSince:key===continuity.key?continuity.stableSince:now,key,last:now};
       return {complete:true,upSince:continuity.upSince,stableSince:continuity.stableSince};
-    }catch{continuity=null;return {complete:false,upSince:null,stableSince:null};}
+    }catch(error){continuity=null;return {complete:false,upSince:null,stableSince:null,...(error?.code==='herdr_not_found'?{code:error.code,message:error.message}:{})};}
   }
   return {herdr:ports.herdr!==undefined?ports.herdr:herdr,processStartIdentity:identity,observeHerdr:ports.observeHerdr!==undefined?ports.observeHerdr:observeHerdr};
 }

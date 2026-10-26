@@ -117,6 +117,20 @@ typing into panes. If the caller supplies its own controller-start function
 and inventory observer, do not construct unused transport for that path.
 Readiness is not identity or launch authority.
 
+## Recorded transport executable
+
+The runtime in the canonical launch spec selects the real Herdr executable,
+including when the caller's current runtime or setup binding differs. The local
+factory remembers which transport bindings it supplied; when starting a different
+saved Runtime, compose those missing bindings against that exact Runtime while
+retaining explicitly supplied references. Do not replace an injected Herdr port.
+The transport owner checks the selected absolute path for each real request;
+a recorded missing executable never falls back to PATH. A known pre-effect
+`herdr_not_found` returns `refused` with its safe path reason. After an admitted
+native effect it remains `uncertain` with that code/reason and retained intent;
+never retry or remove the pane. Existing PID/start/argv/launch/generation proof,
+durable admission, no-repeat and lock policy remain unchanged.
+
 ## Opt-in transport tracing
 
 When `PDD_TRACE=herdr` is selected, send actual Herdr requests and their replies

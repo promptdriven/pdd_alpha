@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 69dfa311209ce00de17e933d9a85dabb3d66ab39b600f36d82825f331e7aa73c).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: b0223d49b1ad0b139e014bccf1983a470d54ade122d1f300c49bd06d66a8105a).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -10,6 +10,7 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const NAME=/^(?=.{1,64}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const safePath=p=>typeof p==='string'&&isAbsolute(p)&&!/[\p{Cc}'\\]/u.test(p);
 const fsOf=p=>p.fs??nodeFs;
+const compositionInputs=new WeakMap();
 const herdrRequest=(p,operation,method,request)=>traceHerdrRequest({operation,request},()=>p.herdr[method](request),p);
 const result=(state,code=null,controller=null)=>({state,code,controller});
 const identityRefusal=intent=>({...result('refused','herdr_identity_unavailable',intent),message:'Herdr process identity is unavailable for the new controller pane. No controller command was sent.'});
@@ -36,6 +37,7 @@ export async function createLocalWorkflowControllerPorts(ports={}){
   };
   const composed={...ports};
   for(const [key,value] of Object.entries({...transport,...authority,validateLocator}))if(composed[key]===undefined)composed[key]=value;
+  compositionInputs.set(composed,{input:ports,bindings:[]});
   return composed;
 }
 async function syncDir(fs,path){const h=await fs.open(path,'r');try{await h.sync();}finally{await h.close();}}
@@ -86,7 +88,7 @@ function admission(state,spec){
 }
 async function prove(intent,p){
   if(!intent.paneId)return result('uncertain','launch_uncertain',intent);
-  let process,journal;try{process=await herdrRequest(p,'pane.process_info','processInfo',{session:'default',paneId:intent.paneId});journal=await strictRead(intent.runDir,p);}catch{return result('uncertain','proof_unavailable',intent);}
+  let process,journal;try{process=await herdrRequest(p,'pane.process_info','processInfo',{session:'default',paneId:intent.paneId});journal=await strictRead(intent.runDir,p);}catch(error){return error?.code==='herdr_not_found'?{...result('uncertain',error.code,intent),message:error.message}:result('uncertain','proof_unavailable',intent);}
   const proof=journal.state.controller;
   const bound=proof?.started===true&&proof.launchId===intent.launchId&&proof.paneId===intent.paneId&&Number.isSafeInteger(proof.generation)&&proof.generation>0&&proof.generation===(intent.previousGeneration??0)+1&&Number.isSafeInteger(proof.pid)&&proof.pid>0&&typeof proof.startIdentity==='string'&&proof.startIdentity.length>0;
   const live=bound&&process?.stopped!==true&&process?.pid===proof.pid&&process.startIdentity===proof.startIdentity&&process.paneId===intent.paneId&&process.executable===intent.runtime.node&&isDeepStrictEqual(process.argv,intent.argv);
@@ -109,6 +111,12 @@ export async function startWorkflowController(spec,ports={}){
   spec.decision=input.decision??null;
   const args=decisionArgs(spec.decision);
   if(!UUID.test(spec.runId??'')||!safePath(spec.runDir)||!safePath(spec.root)||!safePath(spec.runtime?.node)||!safePath(spec.runtime?.bin)||!NAME.test(spec.workflow??'')||!Number.isSafeInteger(spec.issueNumber)||spec.issueNumber<1||!args)return result('refused','unsupported');
+  const composition=compositionInputs.get(ports);
+  if(composition&&!isDeepStrictEqual(ports.runtime,spec.runtime)){
+    let bound=composition.bindings.find(item=>isDeepStrictEqual(item.runtime,spec.runtime));
+    if(!bound){bound={runtime:structuredClone(spec.runtime),ports:await createLocalWorkflowControllerPorts({...composition.input,runtime:spec.runtime})};composition.bindings.push(bound);}
+    ports=bound.ports;
+  }
   // Check interfaces before admission; actual OS evidence belongs to the new pane.
   if(!['supportsProcessIdentity','listWorkspaces','createWorkspace','createTab','paneRun','processInfo'].every(name=>typeof ports.herdr?.[name]==='function')||!ports.withLifecycleGuard||!ports.readWorkflowJournal||!ports.validateRun||!ports.inspectControllerLock)return result('refused','unsupported');
   try{return await withWorkflowLock({path:join(spec.runDir,'controller-start.lock'),busyCode:'controller_busy'},async()=>{
@@ -142,11 +150,11 @@ export async function startWorkflowController(spec,ports={}){
       if(!tab?.tabId||!tab.paneId||!tab.terminalId)return result(tab?.refused?'failed':'uncertain','tab_create_failed',intent);
       await checkpoint('tab.created',{tabId:tab.tabId,paneId:tab.paneId,terminalId:tab.terminalId});
       let supported=false;
-      try{supported=await ports.herdr.supportsProcessIdentity({session:'default',paneId:intent.paneId})===true;}catch{}
+      try{supported=await ports.herdr.supportsProcessIdentity({session:'default',paneId:intent.paneId})===true;}catch(error){if(error?.code==='herdr_not_found')throw error;}
       if(!supported){await checkpoint('herdr.identity_unavailable');return identityRefusal(intent);}
       await checkpoint('pane.run.intent');
       try{await herdrRequest(ports,'pane.run','paneRun',{session:'default',paneId:intent.paneId,command:intent.line});}catch{/* Unknown delivery must be reconciled, never repeated. */}
       return prove(intent,ports);
-    }catch{return result(effected?'uncertain':'failed','launch_io',intent);}
+    }catch(error){return error?.code==='herdr_not_found'?{...result(effected?'uncertain':'refused',error.code,intent),message:error.message}:result(effected?'uncertain':'failed','launch_io',intent);}
   },ports);}catch(e){return result(e.code==='controller_busy'?'refused':'failed',e.code??'launch_io');}
 }

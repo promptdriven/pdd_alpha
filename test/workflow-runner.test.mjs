@@ -25,6 +25,10 @@ async function fixture(t, options = {}) {
   const indexHome = mkdtempSync(join(tmpdir(), 'pdd-runner-home-'));
   t.after(() => rmSync(sourceCwd, { recursive: true, force: true }));
   t.after(() => rmSync(indexHome, { recursive: true, force: true }));
+  // The resolver checks a real absolute file; transport replies stay synthetic.
+  // Any missed transport interception exits126 instead of reaching live Herdr.
+  const herdrExecutable = join(indexHome, 'herdr');
+  writeFileSync(herdrExecutable, '#!/bin/sh\nexit 126\n', {mode:0o700});
   const git = async (...args) => (await exec('git', args, { cwd })).stdout.trim();
   await git('init', '-b', 'main'); await git('config', 'user.email', 'test@example.invalid');
   await git('config', 'user.name', 'Runner Test'); await git('remote', 'add', 'origin', 'https://github.com/example/project.git');
@@ -34,7 +38,7 @@ async function fixture(t, options = {}) {
   const initial = await git('rev-parse', 'HEAD');
   await git('update-ref', 'refs/remotes/origin/main', initial);
   const calls = [], native = [], contexts = [];
-  const f = { cwd, sourceCwd, gitDir: join(cwd, '.git'), git, calls, native, contexts, initial, pr: null, merged: false, options, closes: 0 };
+  const f = { cwd, sourceCwd, herdrExecutable, gitDir: join(cwd, '.git'), git, calls, native, contexts, initial, pr: null, merged: false, options, closes: 0 };
   const plan = [[process.execPath, 'check.mjs']];
   async function execFile(file, args, opts) {
     calls.push({ file, args: [...args] });
@@ -73,7 +77,7 @@ async function fixture(t, options = {}) {
     }
     throw Error(`Unexpected fake GitHub command: ${args.join(' ')}`);
   }
-  const ports = { execFile,withWorkflowLock,inspectWorkflowLock,resolveWorkflowModel:async({agent,machineId})=>({state:'selected',selection:{machineId:machineId??null,agent,model:'observed-test-model',effort:null,cliVersion:'test',catalogRevision:'test',source:'defaults'}}), stdout: output, stderr: output,
+  const ports = { herdrExecutable,execFile,withWorkflowLock,inspectWorkflowLock,resolveWorkflowModel:async({agent,machineId})=>({state:'selected',selection:{machineId:machineId??null,agent,model:'observed-test-model',effort:null,cliVersion:'test',catalogRevision:'test',source:'defaults'}}), stdout: output, stderr: output,
     async loadGuidance(value) { contexts.push(value); return actualGuidance(value); },
     async launchNativeSession(value) {
       const input = JSON.parse(value.request.split('PDD_STAGE_INPUT_JSON\n')[1].split('\nPDD_STAGE_INPUT_END')[0]);
@@ -807,7 +811,7 @@ test('main transports real handoffs through process-proved stage panes and prese
   const f=await fixture(t,{defaultWorktree:true}),foreground=f.ports.launchNativeSession,calls=[];let active=null,paneCount=0;
   f.ports.controller={herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'controller'};
   const transport=base=>({...base,validateLaunchSelection:async()=>true,nativeArgs:({selection,...input})=>[...(input.agent==='codex'?['--dangerously-bypass-approvals-and-sandbox']:['--dangerously-skip-permissions']),...(selection?['--model',selection.model]:[])],pollMs:1,observeMs:100,processStartIdentity:async()=> 'process-start',claimWorkflowSession:async()=>({state:'owned',release:async()=>{}}),promoteWorkflowClaim:async({claim})=>claim,
-    execFile:async(file,argv,opts)=>{assert.equal(file,'herdr');assert.equal(argv[1],'default');const a=argv.slice(2);calls.push(a);const encode=x=>({stdout:JSON.stringify(x)});
+    execFile:async(file,argv,opts)=>{assert.equal(file,f.herdrExecutable);assert.equal(argv[1],'default');const a=argv.slice(2);calls.push(a);const encode=x=>({stdout:JSON.stringify(x)});
       const agent=()=>({workspace_id:'w1',tab_id:'w1:t1',pane_id:active.pane,terminal_id:active.terminal,name:active.name,agent:'claude',cwd:f.cwd,agent_status:active.prompted?'done':'idle',interactive_ready:true,launch_pending:false,state_change_seq:active.prompted?3:1,agent_session:{kind:'id',agent:'claude',value:active.native}});
       if(a[0]==='pane'&&a[1]==='split'){active={pane:'stage-'+ ++paneCount,terminal:'terminal-'+paneCount,native:randomUUID()};return encode({result:{pane:{workspace_id:'w1',tab_id:'w1:t1',pane_id:active.pane,terminal_id:active.terminal}}});}
       if(a[0]==='pane'&&a[1]==='process-info')return encode({result:{process_info:{pane_id:active.pane,foreground_processes:[{pid:123,name:'claude',cwd:f.cwd,argv:['claude']}]}}});
@@ -1014,7 +1018,7 @@ const p1Vectors=JSON.parse(readFileSync(join(packageRoot,'vectors/cli/workflow-r
 const p1Case=id=>p1Vectors.cases.find(c=>c.id===id).expected;
 async function p1Fixture(t,options={}) {
   const f=await fixture(t,options),frozen=new Map();
-  const runtime={v:1,releaseId:'synthetic-release',versionRoot:packageRoot,packageRoot,node:process.execPath,bin:join(packageRoot,'bin','pdd.mjs'),pddVersion:'0.1.0',alphaDigest:'a'.repeat(64),clientDigest:null,nodeVersion:process.version,credentialHelper:null};
+  const runtime={v:1,releaseId:'synthetic-release',versionRoot:packageRoot,packageRoot,node:process.execPath,herdr:f.herdrExecutable,bin:join(packageRoot,'bin','pdd.mjs'),pddVersion:'0.1.0',alphaDigest:'a'.repeat(64),clientDigest:null,nodeVersion:process.version,credentialHelper:null};
   f.ports.runtime=runtime;
   f.ports.freezeWorkflowInputs=async input=>{
     const directory=join(input.runDir,'frozen');mkdirSync(directory);const bytes=JSON.stringify(input);writeFileSync(join(directory,'inputs.json'),bytes);frozen.set(input.runDir,sha(bytes));return {runtime};
@@ -1023,7 +1027,7 @@ async function p1Fixture(t,options={}) {
   f.ports.controller={herdrSession:'default',workspaceId:'workspace',tabId:'run-tab',paneId:'controller'};
   f.ports.processStartIdentity=async()=> 'controller-process-start';
   const command=f.ports.execFile;
-  f.ports.execFile=async(file,args,opts)=>file==='herdr'?{stdout:JSON.stringify({result:{process_info:{pane_id:'controller',foreground_processes:[{pid:process.pid,argv:[process.execPath,runtime.bin,'workflow','drive',f.activeId,...(f.activeDrive?.launchId?['--launch-id',f.activeDrive.launchId]:[]),...(f.activeDrive?.decision?['--decision',f.activeDrive.decision,'--id',f.activeDrive.decisionId,'--rev',String(f.activeDrive.expectedRev)]:[]),...(f.activeDrive?.expect?['--expect-stage',f.activeDrive.expect.stage,'--expect-seq',String(f.activeDrive.expect.seq)]:[])]}]}}})}:command(file,args,opts);
+  f.ports.execFile=async(file,args,opts)=>file===f.herdrExecutable?{stdout:JSON.stringify({result:{process_info:{pane_id:'controller',foreground_processes:[{pid:process.pid,argv:[process.execPath,runtime.bin,'workflow','drive',f.activeId,...(f.activeDrive?.launchId?['--launch-id',f.activeDrive.launchId]:[]),...(f.activeDrive?.decision?['--decision',f.activeDrive.decision,'--id',f.activeDrive.decisionId,'--rev',String(f.activeDrive.expectedRev)]:[]),...(f.activeDrive?.expect?['--expect-stage',f.activeDrive.expect.stage,'--expect-seq',String(f.activeDrive.expect.seq)]:[])]}]}}})}:command(file,args,opts);
   f.prepare=async (extra={})=>{
     const value=await prepareWorkflow({name:'small-change',issue:'17',agent:'claude',cwd:f.sourceCwd,packageRoot,...extra},f.ports);f.activeId=value.runId;return value;
   };
@@ -1166,7 +1170,7 @@ async function publicAttachment(t,{known=true}={}) {
   };
   const originalExec=f.ports.execFile;
   f.ports.execFile=async(file,args,options)=>{
-    if(file!=='herdr')return originalExec(file,args,options);
+    if(file!==f.herdrExecutable)return originalExec(file,args,options);
     assert.equal(args[1],'default');assert.equal(options.cwd,f.cwd);const b=f.saved(h.runId).pending.backend;
     if(args[2]==='agent'&&args[3]==='get'){
       h.agentReads++;if(h.mode==='checkpoint-fails')linkSync(h.journal,h.journal+'.linked');
@@ -1279,9 +1283,9 @@ test('P1 enabled trace observes actual controller process request without replac
   const prepared=await f.prepare();assert.equal(prepared.state,'prepared',prepared.message);
   assert.deepEqual(readHerdrTrace(f.ports),[]);
   const request=f.ports.execFile,observed=[];
-  f.ports.execFile=async(file,args,options)=>{if(file==='herdr')observed.push({args:[...args],options:{...options}});return request(file,args,options);};
+  f.ports.execFile=async(file,args,options)=>{if(file===f.herdrExecutable)observed.push({args:[...args],options:{...options}});return request(file,args,options);};
   const result=await f.drive();assert.equal(result.state,'waiting',result.message);
-  assert.deepEqual(observed,[{args:['--session','default','pane','process-info','--pane','controller'],options:{cwd:prepared.root}}]);
+  assert.deepEqual(observed,[{args:['--session','default','pane','process-info','--pane','controller'],options:{cwd:prepared.root,env:f.ports.env}}]);
   const saved=f.saved(prepared.runId);assert.equal(saved.controller.started,true);assert.equal(saved.controller.generation,1);assert.equal(saved.controller.startIdentity,'controller-process-start');
   const encoded=JSON.stringify(readHerdrTrace(f.ports));assert.ok(encoded.includes('pane.process_info'));assert.ok(!encoded.includes(prepared.root));assert.ok(!encoded.includes('controller-process-start'));
 });

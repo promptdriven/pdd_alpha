@@ -2,7 +2,7 @@
 
 Own `src/workflow-keeper.mjs`. Draft for review. The module function
 `reconcileWorkflowControllers({entries, now}, ports)` checks known local runs
-and returns per-run `{runId, state, code}`. It never accepts a stage, answers a
+and returns per-run `{runId, state, code}` with an optional safe `message`. It never accepts a stage, answers a
 question or selects an account. Preservation: new public recovery contract;
 retain saved attempts and never turn restart into renewed human authority.
 
@@ -66,6 +66,25 @@ resends the first stage request. Prove that request in history and reconcile
 known/uncertain effects before any gated recovery continuation.
 Unproved prompt/effect: inspect only. New turn authority never comes from a
 heartbeat age. Use frozen bytes and recorded runtime even after `current` flips.
+
+## Runtime-bound recovery transport
+
+For factory-composed recovery, bind each eligible run's real Herdr transport to
+its strict journal Runtime, not the keeper's current release/setup descriptor.
+Keep independent observation continuity per run and full Runtime; a changed
+Runtime discards that transport's continuity. Preserve explicit owner transport
+and callback references. The saved `runtime.herdr`, when present, wins over
+current invocation PATH or executable hints. The executable owner checks it on
+each request. Missing recorded Herdr yields `needs_you`, `herdr_not_found` and
+the safe path reason, before new launch effects; report that reason from the
+running service. Keep absent legacy bindings compatible without inventing a
+recorded path. Preserve a controller's known `herdr_not_found` message for both
+an original unresolved launch intent and a newly admitted launch. Keep the
+controller's state/code and `inspectOriginal` indication unchanged: a missing
+executable after an admitted effect remains uncertain and grants no retry.
+Other arbitrary controller error text is not a diagnostic contract.
+None of this changes eligibility, quota/fleet prerequisites,
+restore provider refusal, physical authority, lock observations or launch proof.
 
 ## Public recovery service and restore scope
 

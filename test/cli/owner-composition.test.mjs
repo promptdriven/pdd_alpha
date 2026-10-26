@@ -46,8 +46,10 @@ test('Alpha-only setup uses actual packaging runtime, update lease, launcher and
  for(const name of ['pdd-launch','detached-updater','update-lock','install-record','owned-node','versions'])cpSync(join(pkgRoot,'src',name+'.mjs'),join(versionRoot,'src',name+'.mjs'));
  cpSync(join(pkgRoot,'launcher'),join(versionRoot,'launcher'),{recursive:true});
  const stdout=capture(),stderr=capture();let activations=0;
- const deps={home,packageRoot:versionRoot,stdout,stderr,setupModules,workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null})},ports:{activateRecoveryService:async({files})=>{activations++;assert.equal(files.length,1);}}};
+ const deps={home,packageRoot:versionRoot,stdout,stderr,setupModules,workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null,executable:process.execPath})},ports:{activateRecoveryService:async({files})=>{activations++;assert.equal(files.length,1);}}};
  assert.equal(await runPdd(['setup'],deps),0,stderr.text);assert.match(stdout.text,/Public recovery service ready/);
+ assert.equal(JSON.parse(readFileSync(join(home,'.pdd/install/record.json'),'utf8')).herdr,process.execPath);
+ assert.deepEqual(JSON.parse(readFileSync(join(versionRoot,'runtime.json'),'utf8')),runtime);
  const files=setupModules.launcher.recoveryServiceFiles({home}),service=readFileSync(files[0].path,'utf8');
  assert.match(service,/runs-keeper/);assert.ok(existsSync(join(home,'.pdd/launcher/pdd-launch')));
  assert.equal(await runPdd(['setup'],deps),0,stderr.text);assert.equal(readFileSync(files[0].path,'utf8'),service);assert.equal(activations,2);

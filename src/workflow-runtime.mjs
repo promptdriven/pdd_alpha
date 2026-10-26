@@ -1,15 +1,17 @@
-// Generated from prompts/cli/workflow-runtime.prompt.md (sha256: 43763a5df7a0ee662509b7078ab979440512d91afafec16d1055ecb215722997).
+// Generated from prompts/cli/workflow-runtime.prompt.md (sha256: 6f0f757f4b9604e862778e7c2f1a1009ff1868d0dc62c43f3ce6d705709011d8).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, dirname, isAbsolute } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { resolveHerdrExecutable } from './workflow-herdr-executable.mjs';
 const fsOf = p => p.fs ?? nodeFs;
 const hash = b => createHash('sha256').update(b).digest('hex');
 const fail = code => {throw Object.assign(new Error(code),{code});};
 const runtimeValid = r => r?.v === 1 && typeof r.releaseId === 'string' && r.releaseId.length > 0 &&
   ['versionRoot','node','bin'].every(k=>typeof r[k] === 'string' && isAbsolute(r[k])) && r.bin === join(r.versionRoot,'bin','pdd.mjs') &&
   r.packageRoot === r.versionRoot && ['pddVersion','alphaDigest','nodeVersion'].every(k=>typeof r[k] === 'string' && r[k].length > 0) &&
+  (!Object.hasOwn(r,'herdr') || typeof r.herdr === 'string' && isAbsolute(r.herdr) && !/[\p{Cc}\p{Cs}]/u.test(r.herdr)) &&
   (r.clientDigest === null || typeof r.clientDigest === 'string') && (r.credentialHelper === null || isAbsolute(r.credentialHelper ?? ''));
 async function syncDir(fs,path) {const h=await fs.open(path,'r');try{await h.sync();}finally{await h.close();}}
 async function durable(fs,path,bytes) {
@@ -23,8 +25,10 @@ async function ordinary(fs,path) {
 }
 async function executableRuntime(runtime,p) {
   if(!runtimeValid(runtime))return {ok:false,code:'runtime_missing'};
-  try {const fs=fsOf(p);await fs.access(runtime.node,constants.X_OK);await fs.access(runtime.bin,constants.R_OK);if(runtime.credentialHelper)await fs.access(runtime.credentialHelper,constants.X_OK);return {ok:true,code:null};}
-  catch{return {ok:false,code:'runtime_missing'};}
+  try {const fs=fsOf(p);await fs.access(runtime.node,constants.X_OK);await fs.access(runtime.bin,constants.R_OK);if(runtime.credentialHelper)await fs.access(runtime.credentialHelper,constants.X_OK);
+    if(Object.hasOwn(runtime,'herdr'))await resolveHerdrExecutable({...p,runtime});
+    return {ok:true,code:null};}
+  catch(error){return error?.code==='herdr_not_found'?{ok:false,code:error.code,message:error.message}:{ok:false,code:'runtime_missing'};}
 }
 function definitionValid(d) {
   return d && Array.isArray(d.files) && Array.isArray(d.stages) && d.files.every(f=>typeof f.path === 'string' && typeof f.content === 'string' && hash(f.content)===f.sha256) &&
@@ -115,7 +119,7 @@ export async function upgradeWorkflowRuntime({runDir,expectedRev,target},ports={
     }
     if(state.rev!==expectedRev)return {state:'refused',code:'stale_decision'};
     if(!['waiting_person','WAIT','waiting_agent'].includes(state.controlState)||state.stopped!==true||state.controllerLive||state.stageLive||state.attached||state.pendingEffect||state.pending?.backend?.live||state.unresolvedEffects?.length||state.pendingSend||state.pendingLaunch||state.pendingCleanup)return {state:'refused',code:'run_not_stopped'};
-    const check=await executableRuntime(target,ports);if(!check.ok)return {state:'refused',code:check.code};
+    const check=await executableRuntime(target,ports);if(!check.ok)return {state:'refused',code:check.code,...(check.message?{message:check.message}:{})};
     if(ports.releasePolicy?.blocked?.includes(target.releaseId))return {state:'refused',code:'runtime_blocked'};
     await readWorkflowRuntime({runDir},ports);
     if(ports.requiresDifferentContext?.(target,state))return {state:'refused',code:'frozen_input_invalid'};

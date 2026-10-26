@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,rm,realpath,mkdir,writeFile,unlink} from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -13,10 +15,10 @@ async function harness(t,options={}) {
   const calls=[],checkpoints=[],runId=randomUUID(),attemptId=randomUUID();let started=false,prompted=false,closed=false,seq=1,name,clock=0;
   const agent=(status=prompted?'done':'idle',n=prompted?3:1)=>({workspace_id:'w1',tab_id:'w1:t1',pane_id:'w1:p2',terminal_id:'term2',name,agent:'codex',cwd,agent_status:status,state_change_seq:n,interactive_ready:['idle','done'].includes(status),launch_pending:false,agent_session:options.noNative?null:{kind:'id',value:nativeId,agent:'codex'}});
   const encode=value=>({stdout:JSON.stringify(value)});
-  const ports={controller:{herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p1'},withStageGuard:async(b,action)=>{calls.push(['guard']);return action();},now:()=>clock,sleep:async ms=>{clock+=ms;},pollMs:1,observeMs:5,startupMs:30,
+  const ports={herdrExecutable:process.execPath,controller:{herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p1'},withStageGuard:async(b,action)=>{calls.push(['guard']);return action();},now:()=>clock,sleep:async ms=>{clock+=ms;},pollMs:1,observeMs:5,startupMs:30,
     processStartIdentity:async()=>options.noProof?null:'start-1',claimWorkflowSession:async()=>({state:'owned',release:async()=>{}}),promoteWorkflowClaim:async({claim})=>claim,
     execFile:async(file,argv,opts)=>{
-      assert.equal(file,'herdr');assert.equal(argv[1],'default');assert.equal(opts.cwd,cwd);assert.equal(opts.shell,false);assert.equal(opts.env,undefined);
+      assert.equal(file,process.execPath);assert.equal(argv[1],'default');assert.equal(opts.cwd,cwd);assert.equal(opts.shell,false);assert.equal(opts.env,ports.env);
       const args=argv.slice(2);calls.push(args);
       if(args[0]==='pane'&&args[1]==='split')return encode({result:{pane:{workspace_id:'w1',tab_id:'w1:t1',pane_id:'w1:p2',terminal_id:'term2'}}});
       if(args[0]==='pane'&&args[1]==='process-info')return encode({result:{process_info:{pane_id:'w1:p2',foreground_processes:[{pid:123,name:'codex',cwd,argv:['codex']}]}}});
@@ -229,4 +231,113 @@ test('enabled trace retains lost prompt delivery as inspection-only, never anoth
   const second=await runHerdrStage({...h.input,backend:first.backend},h.ports);
   assert.equal(second.state,'active');assert.equal(second.backend.phase,'prompt_intent');assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);
   const encoded=JSON.stringify(readHerdrTrace(h.ports));assert.ok(encoded.includes('agent.prompt'));assert.ok(!encoded.includes('lost reply'));
+});
+
+test('stage with missing frozen Herdr never uses another executable or sends a native request',async t=>{
+ const h=await harness(t);h.ports.runtime={herdr:join(h.input.cwd,'missing-saved-herdr')};
+ const result=await runHerdrStage(h.input,h.ports);
+ assert.equal(result.state,'recovery_required');assert.equal(result.reason,'herdr_not_found');
+ assert.equal(result.message,`Herdr not found at ${h.ports.runtime.herdr}`);
+ assert.deepEqual(h.calls,[['guard']]);assert.equal(count(h,'agent','start'),0);assert.equal(count(h,'agent','prompt'),0);
+});
+
+function inspectionBackend(cwd){
+ return {version:2,runId:randomUUID(),attemptId:randomUUID(),stageId:'check',agent:'codex',backendGen:1,cwd,session:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p2',terminalId:'term2',agentName:'synthetic',nativeSession:null,phase:'ready',evidence:{readySeq:1}};
+}
+test('selected Herdr deleted at exec keeps its exact path and original backend without retry',async t=>{
+ const h=await harness(t),herdr=join(h.input.cwd,'selected-herdr'),backend=inspectionBackend(h.input.cwd),attempts=[];
+ await writeFile(herdr,'#!/bin/sh\nexit 99\n',{mode:0o700});
+ const result=await inspectHerdrStage({backend},{runtime:{herdr},env:{PATH:''},withStageGuard:async(_,action)=>action(),execFile:async(file,args,opts)=>{
+  attempts.push(file);await unlink(file);return promisify(execFile)(file,args,opts);
+ }});
+ assert.equal(result.state,'recovery_required');assert.equal(result.reason,'herdr_not_found');assert.equal(result.message,`Herdr not found at ${herdr}`);
+ assert.deepEqual(result.backend,backend);assert.deepEqual(attempts,[herdr]);
+});
+test('ENOENT with a still executable selected file retains command uncertainty',async t=>{
+ const h=await harness(t),herdr=join(h.input.cwd,'selected-herdr'),backend=inspectionBackend(h.input.cwd);let attempts=0;
+ await writeFile(herdr,'#!/missing-synthetic-interpreter\n',{mode:0o700});
+ const result=await inspectHerdrStage({backend},{runtime:{herdr},withStageGuard:async(_,action)=>action(),execFile:async(file,args,opts)=>{
+  attempts++;return promisify(execFile)(file,args,opts);
+ }});
+ assert.equal(result.reason,'herdr_command_uncertain');assert.equal(result.message,undefined);assert.deepEqual(result.backend,backend);assert.equal(attempts,1);
+});
+for(const removeDuringInspection of [true,false])test(`legacy stage retains first absolute selection across inspection and attachment, removeDuringInspection=${removeDuringInspection}`,async t=>{
+ const h=await harness(t),backend=inspectionBackend(h.input.cwd),one=join(h.input.cwd,'one'),two=join(h.input.cwd,'two'),chosen=[];
+ for(const dir of [one,two]){await mkdir(dir);await writeFile(join(dir,'herdr'),'#!/bin/sh\nexit 99\n',{mode:0o700});}
+ backend.processProof={pid:789,startIdentity:'stable-start',paneId:backend.paneId,terminalId:backend.terminalId,backendGen:1};
+ const ports={env:{PATH:`${one}:${two}`},withStageGuard:async(_,action)=>action(),processStartIdentity:async()=> 'stable-start',execFile:async(file,args)=>{
+  chosen.push(file);
+  if(args[2]==='agent'){
+   if(removeDuringInspection)await unlink(join(one,'herdr'));
+   return {stdout:JSON.stringify({result:{agent:{workspace_id:backend.workspaceId,tab_id:backend.tabId,pane_id:backend.paneId,terminal_id:backend.terminalId,name:backend.agentName,agent:backend.agent,cwd:backend.cwd,state_change_seq:1,agent_status:'idle',interactive_ready:true,launch_pending:false}}})};
+  }
+  return {stdout:JSON.stringify({result:{process_info:{pane_id:backend.paneId,foreground_processes:[{pid:789,name:'codex',cwd:backend.cwd,argv:['codex']}]}}})};
+ },spawn:()=>assert.fail('missing original cannot attach through a replacement')};
+ const first=await inspectHerdrStage({backend},ports);
+ if(!removeDuringInspection){assert.equal(first.reason,'no_observed_prompt_activity');assert.deepEqual(chosen,[join(one,'herdr'),join(one,'herdr')]);await unlink(join(one,'herdr'));}
+ else {assert.equal(first.reason,'herdr_not_found');assert.equal(first.message,`Herdr not found at ${join(one,'herdr')}`);assert.deepEqual(chosen,[join(one,'herdr')]);}
+ const before=chosen.length,again=await inspectHerdrStage({backend},ports);
+ assert.equal(again.reason,'herdr_not_found');assert.equal(again.message,`Herdr not found at ${join(one,'herdr')}`);assert.deepEqual(again.backend,backend);
+ assert.equal(await attachHerdrStage({backend},ports),1);assert.equal(chosen.length,before);
+});
+
+
+// Synthetic replies reproduce the npm launcher/native-child relationship from
+// Herdr process_info; these are contract cases, not captured lab fixtures.
+async function foregroundHarness(t,{agent='codex',group,processes,startIdentity}={}) {
+  const h=await harness(t),exec=h.ports.execFile,proofRequests=[];
+  h.input.agent=agent;
+  h.ports.processStartIdentity=async identity=>{proofRequests.push(identity);return startIdentity?startIdentity(identity,proofRequests.length):'stable-start';};
+  h.ports.execFile=async(file,args,opts)=>{
+    const response=await exec(file,args,opts),data=JSON.parse(response.stdout);
+    if(data.result?.agent){data.result.agent.agent=agent;if(data.result.agent.agent_session)data.result.agent.agent_session.agent=agent;}
+    if(args[2]==='pane'&&args[3]==='process-info')data.result.process_info={pane_id:'w1:p2',foreground_process_group_id:group,foreground_processes:processes(h.input.cwd)};
+    return {...response,stdout:JSON.stringify(data)};
+  };
+  return {...h,proofRequests};
+}
+const npmProcesses=cwd=>[
+  {pid:4101,name:'node',cwd,argv:['node','/opt/native/bin/codex','--no-daemon']},
+  {pid:4102,name:'codex',cwd,argv:['/opt/native/vendor/codex','--no-daemon']}
+];
+for(const reversed of [false,true])test(`npm Codex foreground group leader wins over exact child name, reversed=${reversed}`,async t=>{
+  const h=await foregroundHarness(t,{group:4101,processes:cwd=>reversed?npmProcesses(cwd).reverse():npmProcesses(cwd)});
+  const r=await runHerdrStage(h.input,h.ports);
+  assert.equal(r.state,'settled',r.reason);assert.equal(r.backend.processProof.pid,4101);
+  assert.equal(r.backend.processProof.startIdentity,'stable-start');assert.equal(r.backend.processProof.backendGen,1);
+  assert.ok(h.proofRequests.length>1);assert.ok(h.proofRequests.every(x=>x.pid===4101&&x.paneId==='w1:p2'));
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'pane','close'),0);
+  assert.ok(h.checkpoints.find(b=>b.phase==='ready'&&b.processProof?.pid===4101));
+});
+test('single native Claude process retains its proof without a reported group leader',async t=>{
+  const h=await foregroundHarness(t,{agent:'claude',processes:cwd=>[{pid:4201,name:'claude',cwd,argv:['/usr/local/bin/claude']}]});
+  const r=await runHerdrStage(h.input,h.ports);
+  assert.equal(r.state,'settled',r.reason);assert.equal(r.backend.processProof.pid,4201);
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'pane','close'),0);
+});
+for(const group of [undefined,9999])test(`unique exact agent name resolves multiple candidates when group=${group}`,async t=>{
+  const h=await foregroundHarness(t,{group,processes:npmProcesses});const r=await runHerdrStage(h.input,h.ports);
+  assert.equal(r.state,'settled',r.reason);assert.equal(r.backend.processProof.pid,4102);
+  assert.ok(h.proofRequests.every(x=>x.pid===4102));assert.equal(count(h,'agent','prompt'),1);
+});
+for(const scenario of [
+  {name:'duplicate matching leaders',group:4101,processes:cwd=>[npmProcesses(cwd)[0],{...npmProcesses(cwd)[0]},npmProcesses(cwd)[1]]},
+  {name:'ambiguous exact agent names',group:9999,processes:cwd=>[npmProcesses(cwd)[1],{...npmProcesses(cwd)[1],pid:4103}]},
+  {name:'argv-only candidates with no exact name or leader',processes:cwd=>[npmProcesses(cwd)[0],{...npmProcesses(cwd)[0],pid:4103}]},
+  {name:'group leader cannot bypass cwd or positive PID eligibility',group:4101,processes:cwd=>[{...npmProcesses(cwd)[0],cwd:cwd+'/other'},{...npmProcesses(cwd)[1],pid:0}]}
+])test(`stage process selection refuses ${scenario.name} before first prompt`,async t=>{
+  const h=await foregroundHarness(t,scenario),r=await runHerdrStage(h.input,h.ports);
+  assert.equal(r.state,'recovery_required');assert.equal(r.reason,'stage_process_unproved');
+  assert.equal(h.proofRequests.length,0);assert.equal(count(h,'agent','prompt'),0);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+});
+for(const changed of ['leader','start'])test(`npm stage refuses changed ${changed} after durable ready proof without delivery`,async t=>{
+  const h=await foregroundHarness(t,{group:4101,processes:npmProcesses,startIdentity:(_,n)=>changed==='start'&&n>1?'replacement-start':'stable-start'});
+  if(changed==='leader'){
+    const exec=h.ports.execFile;let n=0;
+    h.ports.execFile=async(...args)=>{const response=await exec(...args),data=JSON.parse(response.stdout);if(data.result?.process_info&&++n>1)data.result.process_info.foreground_process_group_id=4102;return {...response,stdout:JSON.stringify(data)};};
+  }
+  const r=await runHerdrStage(h.input,h.ports);
+  assert.equal(r.state,'recovery_required');assert.equal(r.reason,'stage_process_changed');
+  assert.equal(r.backend.processProof.pid,4101);assert.equal(r.backend.processProof.startIdentity,'stable-start');
+  assert.equal(count(h,'agent','prompt'),0);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
 });

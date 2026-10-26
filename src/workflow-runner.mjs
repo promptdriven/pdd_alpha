@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: bd3fc9efd062d62c9a0b71ba89f47c70db7fe12f5567555f767a0b37eb7a1da2).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 709de1d46a6ff6b4713eb138cb8035ea028f093e55a0cc074cf928f3d08b6e3c).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -14,6 +14,7 @@ import { readWorkflowHandoff, assertWorkflowArtifacts, runWorkflowTestCommands }
 import { appendRunIndex, writeRunStatus, runStatusFromState } from './workflow-run-records.mjs';
 export { WORKFLOW_STAGES } from './workflow-definitions.mjs';
 import { traceHerdrRequest } from './herdr-trace.mjs';
+import { resolveHerdrExecutable } from './workflow-herdr-executable.mjs';
 
 const ordinaryExec = promisify(execFileCallback);
 const defaultExec = (file, args, { cwd, env }) => ordinaryExec(file, args, { cwd, env, encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
@@ -24,16 +25,18 @@ const text = value => typeof value === 'string' && value.trim().length > 0;
 const fail = message => { throw Error(message); };
 
 function dependencies(ports = {}) {
-  const execFile=ports.execFile??((file,args,options)=>defaultExec(file,args,file==='herdr'
-    ?{...options,env:{...(ports.env??process.env),...((ports.env?.PDD_TRACE===undefined&&process.env.PDD_TRACE!==undefined)?{PDD_TRACE:process.env.PDD_TRACE}:{})}}
-    :options));
+  const execFile=ports.execFile??defaultExec;
   return { ...ports, execFile, commandPorts: ports.execFile ? { execFile: ports.execFile } : {},
     stdout: ports.stdout ?? process.stdout, stderr: ports.stderr ?? process.stderr };
 }
 async function command(p, cwd, executable, args, raw = false) {
   let result;try{result=await (executable==='herdr'
-    ? traceHerdrRequest({operation:'pane.process_info',request:{argv:args}},()=>p.execFile(executable,args,{cwd}),p)
-    : p.execFile(executable,args,{cwd}));}catch{fail(`${executable} command could not be confirmed.`);}
+    ? traceHerdrRequest({operation:'pane.process_info',request:{argv:args}},async()=>{
+      const path=await resolveHerdrExecutable(p);
+      const env={...(p.env??process.env),...((p.env?.PDD_TRACE===undefined&&process.env.PDD_TRACE!==undefined)?{PDD_TRACE:process.env.PDD_TRACE}:{})};
+      try{return await p.execFile(path,args,{cwd,env});}catch(error){if(error?.code==='ENOENT')throw Object.assign(Error(`Herdr not found at ${path}`),{code:'herdr_not_found'});throw error;}
+    },p)
+    : p.execFile(executable,args,{cwd}));}catch(error){if(error?.code==='herdr_not_found')throw error;fail(`${executable} command could not be confirmed.`);}
   if (Number.isInteger(result?.code) && result.code !== 0) fail(`${executable} command failed (${result.code}).`);
   const output = String(result?.stdout ?? '');
   return raw ? output : output.replace(/\r?\n$/, '');
@@ -267,7 +270,8 @@ async function handoff(s, stage, r, directory) {
 function nativePorts(s, directory, r, options, p) {
   const guard = stageGuard(s,p);
   return {
-    ...p, controller:s.controller ?? p.controller, backendGen:s.backendGen ?? 1,
+    ...p, runtime:s.runtime??p.runtime, ...(Object.hasOwn(s.runtime??{},'herdr')?{herdrExecutable:s.runtime.herdr}:{}),
+    controller:s.controller ?? p.controller, backendGen:s.backendGen ?? 1,
     withStageGuard: (backend, action) => guard(backend, async () => {
       await validateInput(s, options, p);
       if (['ready', 'prompt_intent'].includes(backend.phase)) await current(s, r, p);
@@ -642,7 +646,7 @@ function readInput(commonDir, runId) {
 async function validateInput(s, options, p) {
   const input = readInput(s.assignment.commonDir, s.runId);
   if (input.digest !== s.inputDigest || !isDeepStrictEqual(input.definition, s.definition)) fail('Saved workflow snapshot does not match its run.');
-  if(s.p1){const checked=await (p.checkWorkflowRuntime ?? (await import('./workflow-runtime.mjs')).checkWorkflowRuntime)({runDir:join(s.gitDir,'pdd','workflows',s.runId)},{...p,readWorkflowJournal});if(!checked?.ok)fail(checked?.code??'Frozen runtime input changed.');}
+  if(s.p1){const checked=await (p.checkWorkflowRuntime ?? (await import('./workflow-runtime.mjs')).checkWorkflowRuntime)({runDir:join(s.gitDir,'pdd','workflows',s.runId)},{...p,readWorkflowJournal});if(!checked?.ok)throw Object.assign(Error(checked?.message??checked?.code??'Frozen runtime input changed.'),checked?.code==='herdr_not_found'?{code:checked.code}:{});}
   const context = stageContext(input, s.root);
   if (s.context !== context || s.contextDigest !== digest(context)) fail('Saved full stage context changed.');
 }
@@ -864,6 +868,8 @@ async function execute(options, ports, resume) {
       if (!isDeepStrictEqual(s.assignment, assignment)) fail('Saved assignment identity changed.');
       r.repo=s.repo;r.base=s.base;
       await validateInput(s, options, p);
+      p.runtime=s.runtime??p.runtime;
+      if(Object.hasOwn(s.runtime??{},'herdr'))p.herdrExecutable=s.runtime.herdr;
       if(s.controlState!==undefined && !['running','waiting_agent','waiting_person','quota_wait','WAIT','question_lost','completed','failed','recovery_required'].includes(s.controlState))
         return result(s,'recovery_required','Unknown control state; no effect is authorized.');
       // Managed public resume is a short, effect-free reconciliation. Only drive
@@ -878,7 +884,7 @@ async function execute(options, ports, resume) {
         if(!s.p1&&!s.adopted)return result(s,'recovery_required','Adopt this legacy run before driving it.');
         if(!s.runtime)return result(s,'recovery_required','Recorded runtime is unavailable.');
         const checked=await (p.checkWorkflowRuntime ?? (await import('./workflow-runtime.mjs')).checkWorkflowRuntime)({runDir:directory},p);
-        if(!checked?.ok)return result(s,'recovery_required',checked?.code??'Recorded runtime is unavailable.');
+        if(!checked?.ok)return {...result(s,'recovery_required',checked?.message??checked?.code??'Recorded runtime is unavailable.'),...(checked?.code==='herdr_not_found'?{code:checked.code}:{})};
         s.controller=await controllerProof(s,options,p);
         await record(s,directory,'controller.started',{launchId:options.launchId??null,controller:s.controller});
         heartbeat=setInterval(()=>{if(heartbeatWrite)return;heartbeatWrite=Promise.resolve((p.writeRunStatus??writeRunStatus)(directory,runStatusFromState(s,{phase:'record',now:Date.now(),controller:s.controller,heartbeatAt:Date.now()}),p)).catch(()=>{}).finally(()=>{heartbeatWrite=null;});},15000);
@@ -989,7 +995,7 @@ async function execute(options, ports, resume) {
     try { await (p.writeRunStatus ?? writeRunStatus)(directory, runStatusFromState(s, { phase:'exit', now:Date.now(), outcome }), p); } catch { /* derived output never steers the run */ }
     return outcome;
   } catch (error) {
-    const outcome = result(s, error.code === 'WORKFLOW_STAGE_BUSY' ? 'waiting' : 'failed', error.message || 'Workflow failed; inspect saved state before another effect.');
+    const outcome = {...result(s, error.code === 'WORKFLOW_STAGE_BUSY' ? 'waiting' : 'failed', error.message || 'Workflow failed; inspect saved state before another effect.'),...(error.code==='herdr_not_found'?{code:error.code}:{})};
     if (s && directory) try { await (p.writeRunStatus ?? writeRunStatus)(directory, runStatusFromState(s, { phase:'exit', now:Date.now(), outcome }), p); } catch { /* derived output never steers the run */ }
     return outcome;
   }

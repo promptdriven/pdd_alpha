@@ -91,18 +91,20 @@ test('explicit auto uses placement owner local decision without requiring a clie
 });
 test('Alpha setup provisions public support and recovery under one lease before optional client setup',async()=>{
  for(const withClient of [false,true]){
-  const calls=[],lease={},runtime={releaseId:'synthetic'};let active=false;
+  const calls=[],lease={},runtime={releaseId:'synthetic',herdr:process.execPath};let active=false,bindings=0;
   const setupModules={versions:{resolveRuntime:async()=>{calls.push('resolve');return runtime;}},
    lock:{withUpdateLock:async(input,operation)=>{calls.push('lock');active=true;try{return await operation(lease);}finally{active=false;calls.push('unlock');}}},
+   herdrRuntime:{recordHerdrRuntime:async input=>{assert.equal(input.runtime,runtime);assert.equal(input.herdr,process.execPath);assert.equal(input.lease,lease);assert.ok(active);bindings++;return runtime;}},
    launcher:{installLauncherSupport:async input=>{assert.equal(input.runtime,runtime);assert.equal(input.lease,lease);assert.ok(active);calls.push('support');return {code:null};},
     provisionRecoveryService:async input=>{assert.equal(input.lease,lease);assert.ok(active);calls.push('service');return {code:null};}}};
-  assert.equal(await runPdd(['setup'],{...io(),workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null})},setupModules,...(withClient?{clientAdapter:{runSetupCommand:async()=>{assert.equal(active,false);calls.push('client');return 0;}}}:{})}),0);
+  assert.equal(await runPdd(['setup'],{...io(),workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null,executable:process.execPath})},setupModules,...(withClient?{clientAdapter:{runSetupCommand:async()=>{assert.equal(active,false);calls.push('client');return 0;}}}:{})}),0);
+  assert.equal(bindings,1);
   assert.deepEqual(calls,['resolve','lock','support','service','unlock',...(withClient?['client']:[])]);
  }
 });
 test('public setup failure stops client continuation and gives local recovery instructions',async()=>{
- const deps=io();assert.equal(await runPdd(['setup'],{...deps,workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null})},
-  setupModules:{versions:{resolveRuntime:async()=>({})},lock:{withUpdateLock:async(input,op)=>op({})},launcher:{installLauncherSupport:async()=>({code:'runtime_unavailable'}),provisionRecoveryService:()=>assert.fail('No service')}},
+ const deps=io(),lease={};assert.equal(await runPdd(['setup'],{...deps,workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null,executable:process.execPath})},
+  setupModules:{versions:{resolveRuntime:async()=>({})},lock:{withUpdateLock:async(input,op)=>op(lease)},herdrRuntime:{recordHerdrRuntime:async input=>{assert.equal(input.herdr,process.execPath);assert.equal(input.lease,lease);return input.runtime;}},launcher:{installLauncherSupport:async()=>({code:'runtime_unavailable'}),provisionRecoveryService:()=>assert.fail('No service')}},
   clientAdapter:{runSetupCommand:()=>assert.fail('No client continuation')}}),1);
  assert.match(deps.stderr.text,/verified PDD installer|pdd-launch recover/);assert.doesNotMatch(deps.stderr.text,/needs.*client/);
 });

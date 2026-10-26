@@ -69,6 +69,23 @@ Compatibility must cover every retained runtime, not just adjacent releases.
 
 </details>
 
+## Saved Herdr executable
+
+A Runtime may carry an additive `herdr` executable binding. Absence preserves
+legacy descriptors; a present value must be an absolute path without control or
+surrogate characters. Reject malformed explicit values before freezing any bytes.
+Retain the exact binding and unknown additions in freeze, reads, census and
+upgrades; a later setup record or PATH cannot change a saved run. This module
+never enriches an old run from machine setup metadata.
+
+When checking a recorded binding or an upgrade target, use the executable owner's
+async `resolveHerdrExecutable({runtime,...ports})` with the recorded Runtime taking
+precedence. A missing recorded Herdr returns `{ok:false,code:'herdr_not_found',message}`
+with the owner's safe `Herdr not found at <path>` reason. Other runtime/file
+refusals keep their existing codes. An unavailable upgrade binding refuses before
+intent/journal writes; absence of this optional field performs no Herdr discovery.
+Executable availability does not establish process identity or launch authority.
+
 ## Explicit run upgrade
 
 The module function
@@ -136,6 +153,9 @@ controller may journal runtimeNotice from this result; the updater never writes
 run state.
 
 ## Dependencies
+
+- [Herdr executable](workflow-herdr-executable.prompt.md): required generation/runtime
+  for the absolute executable resolver and explicit missing-path refusal.
 
 - [Story](../../story/cli/WORKFLOW-RUNTIME.md) and [cases](../../vectors/cli/workflow-runtime.json): verification; expected outcomes, not observed results.
 - [Versions](versions.prompt.md): navigation-only owner of installed Runtime

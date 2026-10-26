@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-herdr-boot.prompt.md (sha256: 05fdac590c08a5e530c47e274cc5f28cfe9648312c8ef27b90d6d8b9fc92b2c2).
+// Generated from prompts/cli/workflow-herdr-boot.prompt.md (sha256: d280ce92dfdbf89ea97f1a87996dd419bfcb84110250c4fbf9c95a3f16ee5553).
 import * as fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {execFile,spawn} from 'node:child_process';
@@ -7,6 +7,7 @@ import {homedir} from 'node:os';
 import {join,isAbsolute,relative,sep} from 'node:path';
 import {performance} from 'node:perf_hooks';
 import {setTimeout as wait} from 'node:timers/promises';
+import {resolveHerdrExecutable} from './workflow-herdr-executable.mjs';
 import {traceHerdrRequest} from './herdr-trace.mjs';
 
 const execute=promisify(execFile),INSTALLER='https://herdr.dev/install.sh';
@@ -57,7 +58,9 @@ export async function ensureDefaultHerdr(ports={}){
   const p=options(ports);let bin;
   try{
     if(!supported(p))return unavailable('unsupported_platform','Herdr default-session startup is supported on Linux and macOS.');
-    bin=p.herdrExecutable?await executable(p.herdrExecutable):await onPath(p);
+    if(Object.hasOwn(p.runtime??{},'herdr')||Object.hasOwn(p,'herdrExecutable')){
+      try{bin=await resolveHerdrExecutable(p);}catch(error){return unavailable(error.code,error.message);}
+    }else bin=await onPath(p);
     if(!bin){
       if(!p.herdrExecutable&&await executable(join(localBin(p),'herdr')))return unavailable('herdr_not_on_path','Herdr is installed but is not on PATH. Run export PATH="$HOME/.local/bin:$PATH" in your shell, then rerun pdd setup.');
       return unavailable('herdr_not_installed','Herdr is not installed or available. Run pdd setup to install Herdr.');

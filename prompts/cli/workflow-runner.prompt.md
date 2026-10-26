@@ -655,6 +655,22 @@ Linux start ticks without boot ID cannot replace it. There is no local
 raw-stat fallback when the shared reader cannot supply identity. Keep `PDD_TRACE` when
 forwarding a bounded runner environment so diagnostics reach the real process.
 
+## Saved Herdr transport binding
+
+After loading and validating the saved assignment/input, drive uses that
+journal's Runtime for its own Herdr process proof and every supplied native-stage
+port invocation. Pass the exact saved Runtime as `runtime` and, when present,
+its `herdr` as `herdrExecutable`; do not retain today's binding in preference to
+saved evidence. An absent optional field remains compatible with old fixtures.
+For drive's actual `pane process-info`, await the public executable resolver and
+execute its absolute result, including when the pane PATH has no Herdr. Resolve
+inside the existing traced operation so a missing explicit executable records a
+failure without a subprocess or fallback. Preserve the actionable
+`herdr_not_found` code and safe path message. Keep PDD_TRACE and the bounded
+invocation environment when executing an absolute path. No saved Runtime,
+process proof, launch/generation, lifecycle or lock guard is weakened, and no
+controller.started record is written without the existing exact OS proof.
+
 ## Opt-in transport tracing
 
 When `PDD_TRACE=herdr` is selected, send actual Herdr requests and their replies
@@ -667,6 +683,9 @@ Prompts, pane command text, paths, environment and arbitrary error text must not
 enter the log; the trace owner defines positive projection and secure bounds.
 
 ## Dependencies
+
+- [Herdr executable](workflow-herdr-executable.prompt.md): required generation/runtime
+  for the absolute executable resolver and explicit missing-path refusal.
 
 - [Public Herdr connection](workflow-herdr-client.prompt.md): required
   generation/runtime for the same OS identity reader used by the controller.

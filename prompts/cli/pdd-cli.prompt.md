@@ -284,7 +284,23 @@ with the reviewed expectedRev. upgraded is exit 0; refused/recovery_required
 is exit 1; malformed CLI syntax is exit 2. Current run input is rechecked under
 the runtime owner's supplied guard. No CLI path writes journal bytes itself.
 
+
+### Absolute Herdr binding
+
+Setup retains the installation helper's absolute executable and, under the same
+update lease before recovery provisioning, calls
+`recordHerdrRuntime({home,runtime,herdr,lease},ports)` from the public executable
+owner. Pass the enriched Runtime to support/service provisioning. New workflow
+preparation reads `readHerdrRuntime` into its runtime first; prepared run/resume
+boot and controller transport use the prepared Runtime's `herdr` rather than a
+current setup binding or pane PATH. Preserve explicitly injected offline owners.
+A `herdr_not_found` refusal always prints `Herdr not found at <path>`, without
+launching, selecting another PATH binary, or hiding it behind generic failure.
+The missing-path message is local actionable output, never trace payload.
+
 ## Dependencies
+
+- [Absolute executable](workflow-herdr-executable.prompt.md): required generation/runtime for saved Herdr selection and missing-path refusal.
 
 - [Real Herdr client](workflow-herdr-client.prompt.md): required generation/runtime
   for shared OS identity and actual transport composed by the controller factory.
