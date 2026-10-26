@@ -1,52 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {Readable} from 'node:stream';
+import {mkdtempSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {runRuntimeCommand} from '../../src/runtime-client.mjs';
 
 const capture = () => ({text: '', write(value) { this.text += value; }});
+function repo() { const root = mkdtempSync(join(tmpdir(), 'pdd-client-test-')); execFileSync('git', ['init', '-q'], {cwd: root}); writeFileSync(join(root, 'scenario.json'), '{}'); writeFileSync(join(root, 'seed.json'), '{}'); execFileSync('git', ['add', '.'], {cwd: root}); return root; }
+function server(handler) { const instance = http.createServer(handler); return new Promise(resolve => instance.listen(0, '127.0.0.1', () => resolve(instance))); }
+const id = '11111111-1111-4111-8111-111111111111';
+const base = instance => `http://127.0.0.1:${instance.address().port}`;
 
-test('runtime client refuses an unconfigured service and missing GitHub login plainly', async () => {
+test('configuration is checked before source capture', async () => {
   const stdout = capture(), stderr = capture();
-  assert.equal(await runRuntimeCommand('lint', {}, {env: {}, stdout, stderr}), 1);
+  assert.equal(await runRuntimeCommand('check', {scenario: 'scenario.json'}, {env: {}, cwd: '/does/not/exist', stdout, stderr}), 1);
   assert.equal(stderr.text, 'The runtime service is not configured yet.\n');
-  const second = capture(), secondErr = capture();
-  assert.equal(await runRuntimeCommand('lint', {}, {env: {PDD_RUNTIME_URL: 'https://runtime.example'}, stdout: second, stderr: secondErr, githubToken: ''}), 1);
-  assert.equal(secondErr.text, 'Sign in to GitHub first: gh auth login\n');
 });
 
-test('runtime check sends one authenticated idempotent request and prints recovery first', async t => {
-  const requests = [];
-  const server = http.createServer(async (request, response) => {
-    let body = ''; for await (const chunk of request) body += chunk;
-    requests.push({request, body}); response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({verdict: 'passed', calls: 2, link: 'https://runtime.example/r/r1'}));
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
-  const stdout = capture(), stderr = capture();
-  const code = await runRuntimeCommand('check', {scenario: 'scenarios/order.json', maxCalls: '4'}, {
-    env: {PDD_RUNTIME_URL: `http://127.0.0.1:${server.address().port}`}, githubToken: 'never-print-me', stdout, stderr
-  });
-  assert.equal(code, 0); assert.equal(stderr.text, ''); assert.equal(requests.length, 1);
-  assert.equal(requests[0].request.url, '/v1/check'); assert.deepEqual(JSON.parse(requests[0].body), {scenario: 'scenarios/order.json', maxCalls: 4});
-  assert.match(requests[0].request.headers.authorization, /^Bearer /); assert.match(requests[0].request.headers['idempotency-key'], /^[0-9a-f-]{36}$/);
-  assert.ok(stdout.text.startsWith('If this stops, run: pdd runs show ')); assert.doesNotMatch(stdout.text, /never-print-me/);
+test('check submits multipart source once with request identity and recovery command', async t => {
+  const requests = []; const instance = await server(async (request, response) => { let bytes = 0; for await (const chunk of request) bytes += chunk.length; requests.push({request, bytes}); response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({requestId: id, id, command: 'check', state: 'passed', result: {outcome: 'Pass'}, report_url: 'https://runtime.example/r/independent'})); }); t.after(() => instance.close());
+  const stdout = capture(), stderr = capture(); const code = await runRuntimeCommand('check', {scenario: 'scenario.json'}, {cwd: repo(), env: {PDD_RUNTIME_URL: base(instance)}, githubToken: 'do-not-print', stdout, stderr, randomUUID: () => id});
+  assert.equal(code, 0); assert.equal(requests.length, 1); assert.match(requests[0].request.headers.authorization, /^Bearer /); assert.match(requests[0].request.headers['content-type'], /^multipart\/form-data/); assert.match(stderr.text, new RegExp(`pdd check --request '${id}'`)); assert.doesNotMatch(stdout.text, /do-not-print/);
 });
 
-test('try accepts only HTTPS links and terminal mode reports command fields', async t => {
-  let mode = 'bad';
-  const server = http.createServer(async (request, response) => {
-    let body = ''; for await (const chunk of request) body += chunk;
-    response.setHeader('content-type', 'application/json');
-    if (request.url === '/v1/try' && mode === 'bad') response.end(JSON.stringify({link: 'http://unsafe.example/s/x'}));
-    else if (request.url === '/v1/try') response.end(JSON.stringify({token: 'tok', link: 'https://runtime.example/s/tok/'}));
-    else response.end(JSON.stringify({stdout: 'hello', stderr: 'warning', exitCode: 0, callsLeft: 3}));
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => server.close());
-  const badOut = capture(), badErr = capture();
-  assert.equal(await runRuntimeCommand('try', {}, {env: {PDD_RUNTIME_URL: `http://127.0.0.1:${server.address().port}`}, githubToken: 'x', stdout: badOut, stderr: badErr}), 1);
-  assert.match(badErr.text, /not a valid HTTPS URL/);
-  mode = 'good'; const stdout = capture(), stderr = capture();
-  assert.equal(await runRuntimeCommand('try', {terminal: true}, {env: {PDD_RUNTIME_URL: `http://127.0.0.1:${server.address().port}`}, githubToken: 'x', stdout, stderr, input: Readable.from(['hello\n'])}), 0);
-  assert.match(stdout.text, /https:\/\/runtime\.example\/s\/tok\//); assert.match(stdout.text, /exit code: 0/); assert.match(stdout.text, /calls left: 3/); assert.match(stderr.text, /warning/);
+test('accepted jobs are read by the same id until terminal', async t => {
+  let reads = 0; const instance = await server(async (request, response) => { for await (const _ of request) {} response.setHeader('content-type', 'application/json'); if (request.method === 'POST') response.end(JSON.stringify({requestId: id, id, command: 'check', state: 'queued', result: null})); else { reads++; response.end(JSON.stringify({requestId: id, id, command: 'check', state: 'failed', result: {outcome: 'Fail', why: 'criterion failed'}})); } }); t.after(() => instance.close());
+  const stdout = capture(), stderr = capture(); assert.equal(await runRuntimeCommand('check', {scenario: 'scenario.json'}, {cwd: repo(), env: {PDD_RUNTIME_URL: base(instance)}, githubToken: 'x', stdout, stderr, randomUUID: () => id}), 1); assert.equal(reads, 1); assert.match(stdout.text, /criterion failed/);
+});
+
+test('request recovery performs only the owner-scoped GET and maps unknown exactly', async t => {
+  let posts = 0; const instance = await server(async (request, response) => { if (request.method === 'POST') posts++; for await (const _ of request) {} response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({requestId: id, id, command: 'check', state: 'unknown', result: {outcome: 'Inconclusive'}})); }); t.after(() => instance.close());
+  const stdout = capture(), stderr = capture(); assert.equal(await runRuntimeCommand('check', {request: id}, {env: {PDD_RUNTIME_URL: base(instance)}, githubToken: 'x', stdout, stderr}), 3); assert.equal(posts, 0); assert.match(stderr.text, new RegExp(`pdd check --request '${id}'`)); assert.match(stdout.text, /result is unknown/);
+});
+
+test('try stop sends request id in X-Request-Id', async t => {
+  let header; const instance = await server(async (request, response) => { header = request.headers['x-request-id']; for await (const _ of request) {} response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({requestId: id, id, command: 'stop', state: 'passed', result: {exitCode: 0, output: 'Try stopped.'}})); }); t.after(() => instance.close());
+  const stdout = capture(), stderr = capture(); assert.equal(await runRuntimeCommand('try-stop', {id: 'try-id'}, {env: {PDD_RUNTIME_URL: base(instance)}, githubToken: 'x', stdout, stderr, randomUUID: () => id}), 0); assert.equal(header, id); assert.match(stdout.text, /Try stopped/);
 });

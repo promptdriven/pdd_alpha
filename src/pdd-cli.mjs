@@ -206,13 +206,13 @@ export async function runPdd(argv, dependencies = {}) {
         const client=runtimeClient??await import('./runtime-client.mjs');
         if(typeof client.runRuntimeCommand!=='function') throw Error();
         const input={stdout,stderr,env:dependencies.env??process.env,input:dependencies.input??process.stdin,
-          ...(plan.local==='runtime-lint'?{path:plan.operands[0]}:{}),
-          ...(plan.local==='runtime-check'?{scenario:plan.operands[0],maxCalls:plan.options['--max-calls'],json:!!plan.options['--json']}:{}),
-          ...(plan.local==='runtime-try'?{terminal:!!plan.options['--terminal'],from:plan.options['--from']}:{}),
-          ...(plan.local==='runtime-try-stop'?{id:plan.operands[0]}:{}),
-          ...(plan.local==='runtime-replay'?{id:plan.operands[0]}:{}),
-          ...(plan.local==='runtime-call'?{prompt:plan.operands[0],op:plan.operands[1],json:plan.operands[2],session:plan.options['--session']}:{}),
-          ...(plan.local==='runtime-runs-show'?{id:plan.operands[0]}:{})};
+          ...(plan.local==='runtime-lint'?{path:plan.operands[0],request:plan.options['--request']}:{}),
+          ...(plan.local==='runtime-check'?{scenario:plan.operands[0],maxCalls:plan.options['--max-calls'],json:!!plan.options['--json'],request:plan.options['--request']}:{}),
+          ...(plan.local==='runtime-try'?{terminal:!!plan.options['--terminal'],from:plan.options['--from'],request:plan.options['--request']}:{}),
+          ...(plan.local==='runtime-try-stop'?{id:plan.operands[0],request:plan.options['--request']}:{}),
+          ...(plan.local==='runtime-replay'?{id:plan.operands[0],request:plan.options['--request']}:{}),
+          ...(plan.local==='runtime-call'?{prompt:plan.operands[0],op:plan.operands[1],json:plan.operands[2],session:plan.options['--session'],request:plan.options['--request']}:{}),
+          ...(plan.local==='runtime-runs-show'?{id:plan.operands[0],request:plan.options['--request']}:{} )};
         const command={
           'runtime-lint':'lint','runtime-check':'check','runtime-try':'try','runtime-try-stop':'try-stop',
           'runtime-replay':'replay','runtime-call':'call','runtime-runs':'runs','runtime-runs-show':'runs-show','runtime-usage':'usage'}[plan.local];

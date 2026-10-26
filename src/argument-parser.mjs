@@ -49,6 +49,7 @@ function parseRoute(route, words) {
   const positive = v => typeof v === 'string' && /^[1-9][0-9]*$/.test(v) && Number.isSafeInteger(Number(v));
   const present = n => options[n] !== undefined;
   for (const name of ['--id','--launch-id']) if (present(name) && !uuid(options[name])) fail();
+  if (present('--request') && !uuid(options['--request'])) fail();
   for (const name of ['--rev','--expect-seq']) if (present(name) && !positive(options[name])) fail();
   if (present('--max-calls') && !positive(options['--max-calls'])) fail();
   if (present('--expect-stage') && (options['--expect-stage'].length > 64 || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(options['--expect-stage']))) fail();
@@ -80,6 +81,10 @@ function parseRoute(route, words) {
   if (route.id === 'accounts.add' && (present('--from-pool') && operands[0]!=='codex' || present('--replace') && operands[0]==='codex')) fail();
   if (route.id === 'accounts.allow' && !present('--machine')) fail();
   if (route.id === 'accounts.policy' && present('--pinned') !== present('--then')) fail();
+  if (route.id === 'runtime.replay' && !operands.length && !present('--request')) fail();
+  if (route.id === 'runtime.check' && !operands.length && !present('--request')) fail();
+  if (route.id === 'runtime.try-stop' && !operands.length && !present('--request')) fail();
+  if (route.id === 'runtime.call' && (!operands.length || operands.length < 3) && !present('--request')) fail();
   return Object.freeze({ commandId: route.id, local: route.local, ...(route.workflowName ? { workflowName: route.workflowName } : {}),
     operands: Object.freeze(operands), options: Object.freeze({ ...options }) });
 }
