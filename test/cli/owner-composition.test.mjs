@@ -23,6 +23,7 @@ for(const legacy of [false,true])test('CLI human resume composes with actual pub
   ports:{acquireLock:async()=>({state:'owned',release:async()=>{}}),now:()=>60000,withLifecycleGuard:async(spec,op)=>op(),
    validateRun:async()=>true,inspectControllerLock:async()=> 'free',readWorkflowJournal:async()=>({state,seq:2}),herdr:{
     supportsProcessIdentity:async()=>true,listWorkspaces:async()=>[{workspaceId:'workspace',cwd:'/assigned'}],
+    createWorkspace:async()=>assert.fail('The existing workspace must be reused; no creation is allowed'),
     createTab:async()=>({tabId:'tab',paneId:'pane',terminalId:'terminal'}),
     paneRun:async input=>{calls.push(input);const intent=(await controller.readControllerLaunches(prepared)).at(-1);
      state.controller={started:true,launchId:intent.launchId,generation:1,pid:123,startIdentity:'synthetic:start',paneId:'pane'};
