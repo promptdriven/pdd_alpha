@@ -21,11 +21,12 @@ const capture = () => ({ text: '', write(value) { this.text += value; } });
 test('ALPHA1: only local plans are admitted without Host disposition or forwarded arguments', () => {
   for (const id of ['workflow.run','workflow.drive','workflow.status','projects','models','doctor','runs-keeper']) assert.ok(PUBLIC_COMMAND_IDS.includes(id));
   for (const argv of [[], ['--help'], ['-h'], ['help'], ['--version'], ['--skill'], ['completion', 'bash'],
-    ['completion', 'zsh'], ['session'], ['session','--agent','claude','Draft a prompt'], ['workflow','feature'], ['workflow','bug','--agent','claude'], ['workflow', 'list'], ['workflow', 'list', '--json'], ['workflow', '--help']]) {
+    ['completion', 'zsh'], ['lint'], ['check','scenario'], ['try'], ['try','stop','id'], ['replay','id'], ['call','p','op','{}'], ['runs'], ['runs','show','id'], ['usage'],
+    ['session'], ['session','--agent','claude','Draft a prompt'], ['workflow','feature'], ['workflow','bug','--agent','claude'], ['workflow', 'list'], ['workflow', 'list', '--json'], ['workflow', '--help']]) {
     const input = [...argv], plan = parseArgv(input);
     assert.equal(plan.hostArgv, undefined); assert.equal(plan.host, undefined); assert.deepEqual(input, argv);
   }
-  for (const argv of [['session','--agent','unknown'], ['session','--agent'], ['session','--agent','codex','--agent','claude'], ['run', 'start', 'issue'], ['verify'], ['try'], ['lint'], ['runtime', 'discover'],
+  for (const argv of [['session','--agent','unknown'], ['session','--agent'], ['session','--agent','codex','--agent','claude'], ['run', 'start', 'issue'], ['verify'], ['runtime', 'discover'],
     ['replay'], ['call'], ['tests'], ['machine'], ['repo'], ['workbench'],
     ['unknown', '--help'], ['session', '--dangerously-skip-permissions'], ['workflow', 'new', 'feature'], ['workflow', 'list', '--brief'],
     ['workflow', 'list', '--json', '--json'], ['workflow', 'list', 'extra'], ['completion', 'fish'],
@@ -96,7 +97,7 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
     { cwd, env, encoding: 'utf8', timeout: 5000 });
   for (const argv of [[], ['--help'], ['-h'], ['help'], ['workflow', '--help'], ['workflow', 'list', '--help'], ['completion', '--help'], ['session','--help'], ['workflow','run','--help'], ['workflow','resume','--help'], ['workflow','attach','--help']]) {
     const answer = run(argv); assert.equal(answer.status, 0, answer.stderr); assert.equal(answer.stderr, '');
-    assert.ok(answer.stdout.includes('pdd')); assert.doesNotMatch(answer.stdout, /pdd (?:run|verify|try|lint|runtime)\b/);
+    assert.ok(answer.stdout.includes('pdd')); assert.doesNotMatch(answer.stdout, /pdd (?:run|verify)\b/);
   }
   const version = run(['--version']); assert.equal(version.status, 0); assert.equal(version.stdout, `${metadata.version}\n`);
   const skill = run(['--skill']); assert.equal(skill.status, 0, skill.stderr);
@@ -111,8 +112,9 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
   assert.deepEqual(JSON.parse(recipes.stdout).workflows.map(w => w.name), ['bug', 'feature', 'small-change']);
   const human = run(['workflow', 'list'], packed); assert.equal(human.status, 0); assert.ok(human.stdout.includes('feature'));assert.ok(human.stdout.includes('Listing starts no work.'));
   for (const shell of ['bash', 'zsh']) {
+    if (shell === 'zsh' && spawnSync('zsh', ['--version']).error?.code === 'ENOENT') continue;
     const result = run(['completion', shell]); assert.equal(result.status, 0, result.stderr);
-    assert.doesNotMatch(result.stdout, /\b(?:runtime|verify|lint)\b/);
+    assert.match(result.stdout, /\b(?:check|try|lint)\b/);
     const script = join(sandbox, `completion.${shell}`); writeFileSync(script, result.stdout);
     if (shell === 'bash') {
       const loaded = spawnSync('bash', ['--noprofile', '--norc', '-c', 'source "$1"; COMP_WORDS=(pdd workflow ""); COMP_CWORD=2; _pdd_complete; printf "%s\\n" "${COMPREPLY[@]}"', 'test', script], { env, encoding: 'utf8' });
@@ -130,7 +132,7 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
       assert.equal(decisions.status,0,decisions.stderr);assert.deepEqual(decisions.stdout.trim().split('\n').sort(),['approve','skip']);
     }
   }
-  for (const word of ['run', 'verify', 'try', 'lint', 'runtime', 'replay', 'call', 'tests', 'machine', 'repo', 'workbench', 'unknown']) {
+  for (const word of ['run', 'verify', 'runtime', 'tests', 'machine', 'repo', 'workbench', 'unknown']) {
     for (const args of [[word], [word, '--help'], [word, '-h']]) {
       const result = run(args); assert.equal(result.status, 2, JSON.stringify(args)); assert.equal(result.stdout, ''); assert.ok(result.stderr.trim());
     }

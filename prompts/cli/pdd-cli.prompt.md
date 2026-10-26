@@ -184,6 +184,13 @@ settings in the public step. Discovery/help never loads these effect modules.
 
 ## P1 command routes
 
+The hosted runtime client routes (`lint`, `check`, `try`, `try stop`, `replay`,
+`call`, `runs` and `usage`) are dispatched to the prompt-owned
+[runtime client](runtime-client.prompt.md). The dispatcher supplies stdout,
+stderr, environment and input; it does not construct URLs, credentials,
+request bodies or response fields. Runtime client exit 3 is preserved for an
+unclear network or service result.
+
 Add only these routes to the existing parser/catalog contract:
 
 | Command | Public module binding and outcome |

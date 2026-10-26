@@ -51,10 +51,11 @@ test('bash/zsh NAME completion reads local definition listing as data, including
  const cwd=temp(t),bin=join(cwd,'bin');mkdirSync(bin);const marker=join(cwd,'must-not-exist'),receipt=join(cwd,'calls.jsonl');
  writeFileSync(join(bin,'pdd'),`#!${process.execPath}\nimport fs from 'node:fs';const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(receipt)},JSON.stringify(args)+'\\n');if(JSON.stringify(args)!==JSON.stringify(['workflow','list','--json']))process.exit(9);console.log(JSON.stringify({workflows:[{name:'team-review',source:'project'},{name:'feature',source:'bundled'},{name:${JSON.stringify('$(touch '+marker+')')},source:'project'}],default:null}));`,{mode:0o755});
  for(const shell of ['bash','zsh']){
+  if(shell==='zsh'&&spawnSync('zsh',['--version']).error?.code==='ENOENT')continue;
   const file=join(cwd,'completion.'+shell);writeFileSync(file,renderCompletion(shell));
   const code=shell==='bash'?'source "$1"; COMP_WORDS=(pdd workflow run ""); COMP_CWORD=3; _pdd_complete; printf "%s\\n" "${COMPREPLY[@]}"':'autoload -Uz compinit; compinit -D; source "$1"; _describe() { print -rl -- "${choices[@]}"; }; words=(pdd workflow run ""); CURRENT=4; _pdd';
   const result=spawnSync(shell,shell==='bash'?['--noprofile','--norc','-c',code,'test',file]:['-f','-c',code,'test',file],{cwd,env:{PATH:bin+':'+dirname(process.execPath)+':'+process.env.PATH,HOME:cwd},encoding:'utf8',timeout:5000});
   assert.equal(result.status,0,result.stderr);assert.deepEqual(result.stdout.trim().split('\n').sort(),['feature','team-review']);
  }
- assert.equal(existsSync(marker),false);assert.deepEqual(readFileSync(receipt,'utf8').trim().split('\n').map(JSON.parse),[['workflow','list','--json'],['workflow','list','--json']]);
+ assert.equal(existsSync(marker),false);const calls=readFileSync(receipt,'utf8').trim().split('\n').map(JSON.parse);assert.equal(calls.length,spawnSync('zsh',['--version']).error?.code==='ENOENT'?1:2);assert.ok(calls.every(call=>JSON.stringify(call)===JSON.stringify(['workflow','list','--json'])));
 });

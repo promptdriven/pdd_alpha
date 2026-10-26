@@ -1,4 +1,4 @@
-// Generated from prompts/cli/argument-parser.prompt.md (sha256: fcd68af51761a17fdca14c758a97993678c2bddbd745424b05e2ad1c350913c8).
+// Generated from prompts/cli/argument-parser.prompt.md (sha256: 23d3f55c52fb8471b539f6e8f293b57bc176f1602c0eff15aaf3ed93bbff5cb4).
 import { PUBLIC_COMMAND_ROUTES } from './command-catalog.mjs';
 
 export class CommandInputError extends Error {
@@ -50,6 +50,7 @@ function parseRoute(route, words) {
   const present = n => options[n] !== undefined;
   for (const name of ['--id','--launch-id']) if (present(name) && !uuid(options[name])) fail();
   for (const name of ['--rev','--expect-seq']) if (present(name) && !positive(options[name])) fail();
+  if (present('--max-calls') && !positive(options['--max-calls'])) fail();
   if (present('--expect-stage') && (options['--expect-stage'].length > 64 || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(options['--expect-stage']))) fail();
   if (route.id.startsWith('workflow.') && ['resume','drive','decide'].includes(route.prefix[1])) {
     if (present('--expect-stage') !== present('--expect-seq')) fail();
