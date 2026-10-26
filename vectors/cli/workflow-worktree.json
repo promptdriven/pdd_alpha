@@ -226,6 +226,34 @@
         "newWorktreeCreated": false,
         "staleLocalBaseUsed": false
       }
+    },
+    {
+      "id": "fetch-auth-diagnostic",
+      "criteria": [
+        "AC2",
+        "AC14"
+      ],
+      "given": {
+        "fetchExit": 128,
+        "stderr": "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+        "localBase": "old but present",
+        "source": "dirty"
+      },
+      "when": {
+        "call": "allocateIssueWorktree",
+        "trace": "enabled or disabled"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "messageIncludes": [
+          "git fetch origin main",
+          "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+          "gh auth setup-git"
+        ],
+        "newWorktreeCreated": false,
+        "authOrRetry": false,
+        "sourceUnchanged": true
+      }
     }
   ]
 }

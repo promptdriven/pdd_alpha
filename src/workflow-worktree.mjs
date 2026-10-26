@@ -1,11 +1,11 @@
-// Generated from prompts/cli/workflow-worktree.prompt.md (sha256: ed59aaf425222d62e5046d5a5fa1ecd88bf63ecedc4e939b0707bf13513a209d).
+// Generated from prompts/cli/workflow-worktree.prompt.md (sha256: 0bc0e5b4463a8d24875a4632d703d59e42ab8459ee2c05fe05108ad96cbdebba).
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, realpath, mkdir, open, link } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { traceGitCommand } from './git-trace.mjs';
+import { traceGitCommand, formatGitFailure } from './git-trace.mjs';
 
 const execute = promisify(execFile);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -17,6 +17,13 @@ const sameRepo = (a, b) => a.toLowerCase() === b.toLowerCase();
 const result = (state, message, assignment = null) => ({ state, assignment, message });
 const fail = () => { throw new Error('workflow_worktree_identity_unavailable'); };
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const gitFailures = new WeakMap();
+function gitFailure(args, response) {
+  const message = formatGitFailure({ argv: args }, response), error = new Error(message);
+  gitFailures.set(error, message);
+  return error;
+}
+const withCause = (message, cause) => cause ? `${message} ${cause}` : message;
 
 function commands(ports, trace = false) {
   const run = ports.execFile ?? ((file, args, { cwd }) => execute(file, args,
@@ -25,15 +32,15 @@ function commands(ports, trace = false) {
     let response;
     try { response = await (trace ? traceGitCommand({argv:args,cwd},()=>run('git', args, { cwd }),ports) : run('git', args, { cwd })); }
     catch (error) {
-      if (!Number.isInteger(error?.code) || error.code === 0) fail();
-      response = { stdout: error.stdout ?? '', code: error.code };
+      if (!Number.isInteger(error?.code) || error.code === 0) throw gitFailure(args, error);
+      response = { stdout: error.stdout ?? '', stderr: error.stderr, code: error.code };
     }
-    if (!response || typeof response.stdout !== 'string' || response.code !== undefined && !Number.isInteger(response.code)) fail();
-    return { stdout: response.stdout, code: response.code ?? 0 };
+    if (!response || typeof response.stdout !== 'string' || response.code !== undefined && !Number.isInteger(response.code)) throw gitFailure(args, response);
+    return { stdout: response.stdout, stderr: response.stderr, code: response.code ?? 0 };
   }
   return { raw, async git(cwd, args) {
     const response = await raw(cwd, args);
-    if (response.code !== 0) fail();
+    if (response.code !== 0) throw gitFailure(args, response);
     return response.stdout;
   } };
 }
@@ -189,11 +196,11 @@ export async function lookupIssueWorktree(input, ports = {}) {
     if (!safe(runId)) fail();
     const c = commands(ports), ctx = await context(cwd, c);
     return await reconcile(ctx, await ownedRecord(ctx, runId, c), c);
-  } catch { return result('recovery_required', 'The original worktree assignment is absent, incomplete or changed. Inspect this same run; do not allocate again.'); }
+  } catch (error) { return result('recovery_required', withCause('The original worktree assignment is absent, incomplete or changed. Inspect this same run; do not allocate again.', gitFailures.get(error))); }
 }
 
 export async function allocateIssueWorktree(input, ports = {}) {
-  let saved = false;
+  let saved = false, addFailure;
   try {
     const { cwd, repository, issueNumber, runId, workflowName, baseRef } = structuredClone(input ?? {});
     if (!repoName(repository) || !safe(runId) || !safe(workflowName, 80) || !Number.isSafeInteger(issueNumber)
@@ -224,7 +231,8 @@ export async function allocateIssueWorktree(input, ports = {}) {
     const id = randomUUID(), branch = branchName(workflowName, issueNumber, id);
     await c.git(ctx.sourceRoot, ['check-ref-format', '--branch', branch]);
     const branchExists = await c.raw(ctx.sourceRoot, ['show-ref', '--verify', '--quiet', 'refs/heads/' + branch]);
-    if (branchExists.code !== 1) return result('conflict', 'Cannot establish an unused branch for this allocation.');
+    if (branchExists.code !== 1) return result('conflict', withCause('Cannot establish an unused branch for this allocation.',
+      branchExists.code === 0 ? null : formatGitFailure({ argv: ['show-ref', '--verify', '--quiet', 'refs/heads/' + branch] }, branchExists)));
     const a = { version: 1, runId, repository, issueNumber, workflowName, commonDir: ctx.commonDir, sourceRoot: ctx.sourceRoot,
       worktreePath: join(worktrees, id), gitDir: join(ctx.commonDir, 'worktrees', id), branch, baseRef, baseSha };
     if (await exists(a.worktreePath) || await exists(a.gitDir)) return result('conflict', 'The intended worktree path or Git directory is already occupied.');
@@ -240,11 +248,14 @@ export async function allocateIssueWorktree(input, ports = {}) {
     // Intent and exclusive claim are durable. No existing intent can ever enter this add path again.
     if (!equal(await ownedRecord(ctx, runId, c), a)) fail();
     try { await c.git(ctx.sourceRoot, ['worktree', 'add', '-b', a.branch, a.worktreePath, a.baseSha]); }
-    catch { /* A lost or rejected reply cannot justify a second add. Verify this same physical identity. */ }
+    catch (error) {
+      // A lost or rejected reply cannot justify a second add. Verify this same physical identity.
+      addFailure = gitFailures.get(error);
+    }
     return await reconcile(ctx, a, c);
-  } catch {
-    return result('recovery_required', saved
+  } catch (error) {
+    return result('recovery_required', withCause(saved
       ? 'Allocation is unconfirmed. Preserve the saved run and inspect its exact intended path; never repeat add or delete work.'
-      : 'Cannot establish repository or allocation metadata identity. No new worktree is confirmed.');
+      : 'Cannot establish repository or allocation metadata identity. No new worktree is confirmed.', addFailure ?? gitFailures.get(error)));
   }
 }

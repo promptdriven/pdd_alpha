@@ -22,6 +22,17 @@ free text rather than recording it. Bound individual fields and record size;
 oversized text is omitted, never sliced through an unknown secret. Unknown keys
 or text are not safe merely because they came from an existing trace file.
 
+The pure module function `formatGitFailure({argv}, response={})` returns a
+bounded public failure description naming the redacted Git step, observed numeric
+exit or safe operational error code when available, and the same positively
+projected stderr used by tracing. It performs no I/O, does not consult the trace
+switch, never includes stdout or an exception's unproved message, and never
+mutates its inputs. Collapse diagnostic line breaks to keep the public message
+finite. Oversized arguments or stderr are omitted rather than cut through a
+secret. An observed GitHub authentication/terminal-prompts-disabled diagnostic
+may suggest `Run: gh auth setup-git`; this is guidance only, never an automatic
+credential operation or permission to retry. Unknown stderr remains redacted.
+
 Create only the owned `.pdd/logs` directories and private mode0600 trace file.
 Refuse symlink/non-directory ancestors and symlink, hardlinked, non-owned or
 group/world-accessible existing log files. Diagnostic I/O is best-effort and

@@ -30,7 +30,8 @@ for(const rejected of [true,false])test(`allocator trace captures recorded trans
  assert.deepEqual(await snapshot(),before);assert.equal(await readFile(join(cwd,'file'),'utf8'),'dirty work retained\n');assert.equal(await readFile(join(cwd,'untracked'),'utf8'),'untracked work retained\n');
  const rows=await readGitTrace({home});assert.equal(rows.length,calls.length);assert.deepEqual(rows.map(r=>r.argv),calls.map(a=>['git',...a]));assert.ok(rows.every(r=>r.cwd===cwd));
  const failed=rows.at(-1);assert.deepEqual(failed.argv,['git','fetch','origin','main']);assert.equal(failed.exit,128);assert.equal(failed.stderr,errorText);assert.equal(failed.outcome,rejected?'rejected':'returned');
- assert.doesNotMatch(r.message,/Username|https:/,'raw diagnostic stays out of the finite public result');
+ assert.match(r.message,/git fetch origin main failed/);assert.ok(r.message.includes(errorText.trim()));assert.match(r.message,/gh auth setup-git/);
+ assert.doesNotMatch(r.message,/recorded transport diagnostic/,'unproved exception text stays out of the public result');
  const traceBytes=await readFile(join(home,'.pdd/logs/git-trace.jsonl'));
  assert.equal((await lookupIssueWorktree({cwd,runId},ports)).state,'recovery_required');
  assert.deepEqual(await readFile(join(home,'.pdd/logs/git-trace.jsonl')),traceBytes,'lookup remains read-only even with trace enabled');

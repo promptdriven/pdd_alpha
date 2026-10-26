@@ -22,3 +22,5 @@ The [owning prompt](../../prompts/cli/workflow-worktree.prompt.md) defines the c
 expectations. They are not observed program output or a claim that code ran.
 
 - **AC13:** A successful fetch whose fetched commit differs from the selected remote-tracking base cannot allocate from that stale local base. Preserve uncertainty and create no worktree.
+
+- **AC14:** A failed Git step reports its redacted command and recognized stderr, including terminal-prompts-disabled fetch authentication and guidance, with tracing on or off. Failure still preserves dirty work, creates no replacement worktree or claim, and never retries/authenticates automatically.

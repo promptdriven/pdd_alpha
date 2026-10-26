@@ -1,4 +1,4 @@
-// Generated from prompts/cli/git-trace.prompt.md (sha256: f1136a1a01696f1142ef3d7a15c684464c66122b4cf9e0251583b86f1de05d77).
+// Generated from prompts/cli/git-trace.prompt.md (sha256: cab3ccce320e900055bcd84087b61aaad103dd35adaf247718195319a15f10d6).
 import {constants} from 'node:fs';
 import {mkdir,lstat,realpath,open} from 'node:fs/promises';
 import {join,isAbsolute,resolve} from 'node:path';
@@ -52,6 +52,20 @@ function stderrOf(value) {
     if(line===REDACTED||line==='[omitted: oversized diagnostic]')return line;
     return GIT_DIAGNOSTICS.some(pattern=>pattern.test(line))?redact(line):REDACTED;
   }).join('\n');
+}
+export function formatGitFailure({argv}, response={}) {
+  try {
+    const projected=argvOf(argv),command=projected?.join(' ').replace(/[\r\n\t]/g,' ');
+    const step=command&&command.length<=MAX_FIELD?command:'[omitted: oversized or invalid command]';
+    const exit=Number.isSafeInteger(response?.code)?` (exit ${response.code})`
+      :ERRORS.has(response?.code)?` (${response.code})`:'';
+    const safeStderr=stderrOf(response?.stderr);
+    const projectedStderr=safeStderr.length<=MAX_FIELD?safeStderr.trim():'[omitted: oversized diagnostic]';
+    const stderr=projectedStderr.replace(/\r?\n/g,' | ');
+    const guidance=/^fatal: (?:could not read (?:Username|Password) for 'https:\/\/github\.com(?:\/[^'\r\n]*)?': (?:terminal prompts disabled|No such device or address)|Authentication failed for 'https:\/\/github\.com(?:\/[^'\r\n]*)?')$/m.test(projectedStderr)
+      ?' Run: gh auth setup-git.':'';
+    return `git ${step} failed${exit}${stderr?`: ${stderr}`:': stderr unavailable.'}${guidance}`;
+  } catch { return 'git command failed: diagnostic unavailable.'; }
 }
 function project(row) {
   if(!row||row.v!==1||row.event!=='git'||!['returned','rejected'].includes(row.outcome)||!date(row.startedAt)||!date(row.finishedAt)
