@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 6ca8ed1ca4c38fa7b59d12498efc7daee1b50c92aa73706056801270d42333f0).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 31e12d17a12acf3dfe44ae7818051853d024c188329041ec55cc1ec5cc7d3702).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
@@ -10,6 +10,21 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const observations=new Map();
 const fsOf=p=>p.fs??nodeFs;
 const eligible=s=>['running','waiting_agent','quota_wait','WAIT'].includes(s?.controlState)&&s.adopted!==false&&!s.archived&&!s.removing&&!s.waitingPerson&&!s.blockedQuestion&&s.pending?.backend?.agentStatus!=='blocked';
+const fleetRequired=()=>Object.assign(Error('This recovery operation is unavailable: this needs the fleet client.'),{code:'fleet_client_required'});
+const unavailable=async()=>{throw fleetRequired();};
+const invalidRestoreProvider=()=>({state:'refused',code:'unsupported',message:'Managed restore requires callable recovery providers.'});
+export async function createWorkflowKeeperPorts(ports={}){
+  const local=await createLocalWorkflowControllerPorts(ports);
+  const defaults={
+    observeQuota:async()=>({fresh:false,room:false,code:'fleet_client_required',message:fleetRequired().message}),
+    readManagedLaunch:unavailable,validateManagedRuntime:unavailable,validateManagedFlags:unavailable,
+    validateOwner:unavailable,restoreNative:unavailable,
+    accountAdapter:{reconcileRestore:unavailable},
+    warn:message=>{try{(ports.stderr??process.stderr).write(`${message}\n`);}catch{}}
+  };
+  for(const [key,value] of Object.entries(defaults))if(local[key]===undefined)local[key]=value;
+  return local;
+}
 export async function discoverWorkflowRuns({home},ports={}){
   const fs=fsOf(ports),warnings=[],registry=new Map();let names=[];
   try{names=await fs.readdir(join(home,'.pdd','runs','registry'));}catch(e){warnings.push(e.code==='ENOENT'?'registry_missing':'registry_unreadable');}
@@ -40,7 +55,11 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
       if(s.controlState==='WAIT'){
         if(!Number.isFinite(s.quota?.until)||now<s.quota.until){finish('WAIT','renewal_not_due');continue;}
         let q;try{q=await ports.observeQuota?.({entry,state:s});}catch{}
-        if(q?.fresh!==true||q?.room!==true){finish('WAIT','observation_pending',{retryObservation:true});continue;}
+        if(q?.fresh!==true||q?.room!==true){
+          const conditional=q?.code==='fleet_client_required';
+          finish('WAIT',conditional?'fleet_client_required':'observation_pending',{
+            retryObservation:true,...(conditional?{message:fleetRequired().message}:{})});continue;
+        }
       }
       const herdr=await ports.observeHerdr?.();
       if(!herdr?.complete||!Number.isFinite(herdr.upSince)||!Number.isFinite(herdr.stableSince)||now-herdr.upSince<30000||now-herdr.stableSince<5000){memo.delete(entry.runId);finish('stopped','herdr_unsettled');continue;}
@@ -71,10 +90,14 @@ export async function runWorkflowKeeper({home=homedir()},ports={}){
   const abort=new AbortController(),signal=ports.signal??abort.signal,stop=()=>abort.abort();
   if(!ports.signal){process.on('SIGTERM',stop);process.on('SIGINT',stop);}
   try{return await withWorkflowLock({path:join(home,'.pdd','runs','keeper.lock'),busyCode:'keeper_busy'},async()=>{
-    const local=await createLocalWorkflowControllerPorts({...ports,home});
+    const local=await createWorkflowKeeperPorts({...ports,home});
     // Await each pass before scheduling: slow discovery can never overlap itself.
     while(!signal.aborted){
-      try{const found=await discoverWorkflowRuns({home},local);for(const warning of found.warnings)local.warn?.(warning);await reconcileWorkflowControllers({entries:found.entries,now:local.now?.()??Date.now()},local);}
+      try{
+        const found=await discoverWorkflowRuns({home},local);for(const warning of found.warnings)local.warn?.(warning);
+        const results=await reconcileWorkflowControllers({entries:found.entries,now:local.now?.()??Date.now()},local);
+        for(const row of results)if(row.code==='fleet_client_required')local.warn?.(fleetRequired().message);
+      }
       catch{ports.warn?.('recovery_pass_failed');}
       if(!signal.aborted)await (ports.wait??wait)(30000,signal);
     }
@@ -88,13 +111,17 @@ export async function restoreManagedWorkflowSession({launchId,generation},ports=
   if(!launchId)return {state:'unmanaged'};
   if(!UUID.test(launchId)||!Number.isSafeInteger(generation)||generation<1)return {state:'refused',code:'unsupported'};
   try{
+    ports=await createWorkflowKeeperPorts(ports);
+    if(typeof ports.readManagedLaunch!=='function')return invalidRestoreProvider();
     const record=await ports.readManagedLaunch?.({launchId});
     if(!record||record.launchId!==launchId||record.generation!==generation||record.retired||record.successor)return {state:'retired'};
     if(record.owner?.runId)return {state:'refused',code:'controller_owns_restore'};
+    if(['validateManagedRuntime','validateManagedFlags','validateOwner','restoreNative'].some(key=>typeof ports[key]!=='function'))return invalidRestoreProvider();
     if(!record.runtime||!record.flags||await ports.validateManagedRuntime?.(record)!==true||await ports.validateManagedFlags?.(record.flags,record)!==true)return {state:'refused',code:'runtime_missing'};
-    if(record.managedAccount){if(!ports.accountAdapter)return {state:'refused',code:'unsupported'};const a=await ports.accountAdapter.reconcileRestore(record);if(a?.ready!==true)return {state:'stopped',code:a?.code??'policy_pending'};}
+    if(record.managedAccount){if(typeof ports.accountAdapter?.reconcileRestore!=='function')return invalidRestoreProvider();const a=await ports.accountAdapter.reconcileRestore(record);if(a?.ready!==true)return {state:'stopped',code:a?.code??'policy_pending'};}
+    if(ports.validateOwner===unavailable||ports.restoreNative===unavailable)throw fleetRequired();
     const claim=await claimWorkflowSession({kind:record.kind,nativeSessionId:record.nativeSessionId,owner:{launchId,generation}},ports);
     if(claim.state!=='owned')return claim;
     try{return await ports.restoreNative(record,claim);}catch{await claim.release();return {state:'uncertain'};}
-  }catch{return {state:'uncertain'};}
+  }catch(e){return e?.code==='fleet_client_required'?{state:'refused',code:'fleet_client_required',message:fleetRequired().message}:{state:'uncertain'};}
 }

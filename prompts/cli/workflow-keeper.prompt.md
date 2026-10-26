@@ -40,9 +40,11 @@ process/journal first; it consumes admission and cannot cause another blind star
 When observations are available, recover a killed controller within 90 s.
 Unknown Herdr state never proves an agent or controller stopped.
 
-Inside its lifetime lock, the public keeper fills missing runner authority and
-locator bindings through `createLocalWorkflowControllerPorts(ports)` before
-scheduling reconciliation. The same factory obtains missing real Herdr,
+Module function `createWorkflowKeeperPorts(ports={})` asynchronously returns a
+composed copy, retaining all supplied values and references. Inside its lifetime
+lock, the public keeper uses that factory before scheduling reconciliation. It
+fills missing runner authority and locator bindings through
+`createLocalWorkflowControllerPorts(ports)`. The controller factory obtains missing real Herdr,
 shared `processStartIdentity` and complete/stable inventory bindings from their
 public owner. It creates no pane and grants no launch authority by itself.
 Explicit test/owner ports win.
@@ -87,6 +89,47 @@ stopped. Recovery never answers it or independently selects another account. The
 account adapter follows the [managed invocation boundary](../accounts/wrapper.prompt.md).
 The generic restore/claim path remains available without that adapter.
 
+### Production bindings and conditional recovery
+
+The keeper factory supplies every recovery provider it consumes; absence is
+never evidence of retirement, available quota or safe restore. The public Herdr
+observer and strict locator/journal/lifecycle/lock bindings come from the shared
+Rule 11 controller factory. They are usable without fleet sign-in and retain
+the same PID plus OS start identity in controller and drive.
+
+There is no public quota-provider or durable managed-launch-store contract.
+Until its owner supplies those bindings, `observeQuota` returns
+`{fresh:false, room:false, code:'fleet_client_required', message}`; the default
+`readManagedLaunch`, `validateManagedRuntime`, `validateManagedFlags`,
+`validateOwner`, `restoreNative` and account-restore adapter refuse with that
+same code. Their fixed, safe message contains **`this needs the fleet client`**.
+Do not invent a record location/schema, use today's runtime or flags, infer
+quota from a renewal time, read credentials or import private client files.
+Only missing bindings are filled; explicit owner providers remain responsible
+for their durable proof and policy.
+
+For a due WAIT, an unavailable quota provider retains WAIT and emits that
+actionable reason with `retryObservation:true`; it cannot inspect/start a new
+controller or send a prompt. The running service writes this conditional reason
+to its warning output when encountered, never merely discards reconciliation
+results. No conditional warning is required for unused paths. Managed restore
+reports `{state:'refused', code:'fleet_client_required', message}` before claims
+or native effects when a required binding is unavailable. Other inspection
+errors remain uncertain. Unmanaged commands and malformed identities still
+return before factory construction. A real record belonging to a workflow
+controller is still refused by `controller_owns_restore`; a stale or retired
+record remains retired. Never relabel these outcomes as missing fleet support.
+
+Explicit provider values are retained, not coerced or replaced. A configured
+managed-launch reader, runtime/flags validators, owner validator and native
+restore provider must be callable; a managed account's configured adapter must
+have a callable `reconcileRestore`. Refuse malformed explicit values (including
+null, objects and false) with `state:'refused', code:'unsupported'` and a safe
+callable-provider diagnostic before acquiring a native claim. Missing default
+bindings still report `fleet_client_required`. For a valid returned record,
+retirement and controller ownership checks keep precedence; actual callable
+provider failures remain uncertain, without replaying a restore.
+
 Herdr startup follows the [launcher process-ownership contract](pdd-launch.prompt.md);
 recovery must preserve its separate service/context, including when initially absent. Test Alpha alone through controller death, reboot and
 update, with one current stage process and no repeated first prompt.
@@ -106,7 +149,9 @@ update, with one current stage process and no repeated first prompt.
   for locating runs and bounded read-only journal inspection.
 - [Frozen runtime](workflow-runtime.prompt.md): required generation/runtime
   validation; missing versions stop recovery.
-- Supplied fs, monotonic/time observations and Herdr inventory: runtime inputs.
+- Supplied fs, monotonic/time observations, stop signal and diagnostic output:
+  runtime inputs. The default diagnostic writer uses stderr; failure to write
+  diagnostics never grants recovery authority or changes a saved run.
   Strict runner journal validation precedes effects; lenient display
   readers alone cannot authorize recovery.
 

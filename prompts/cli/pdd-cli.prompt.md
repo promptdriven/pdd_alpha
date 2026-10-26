@@ -1,6 +1,7 @@
 # Local authoring-kit CLI
 
-Own `src/pdd-cli.mjs`; export `renderHelp(prefix)` and `runPdd(argv, dependencies)`. Help, version, guidance, completion and recipe discovery operate using public local files only. Parse before reading guidance or workflows; unsupported input gets a finite stderr diagnostic/exit2 and no private fallback.
+Own `src/pdd-cli.mjs`; export `renderHelp(prefix)`, `runPdd(argv, dependencies)` and async
+`createPddCliPorts(ports={}, {capability,...options}={})`. Help, version, guidance, completion and recipe discovery operate using public local files only. Parse before reading guidance or workflows; unsupported input gets a finite stderr diagnostic/exit2 and no private fallback.
 
 **Preservation:** behavioral refinement of the existing command invocation,
 stdout/stderr and exit contracts, with the explicit P1 routes below added;
@@ -9,6 +10,48 @@ internal dispatch and module loading are free within the no-effect discovery rul
 `--skill` must make the entire canonical `docs/prompting-guide.md` available FIRST, then `skills/pdd/SKILL.md` and every Markdown reference under `skills/pdd/references/`, with installed absolute file locations so other bundled docs and recipe links can be read in the same package. Do not duplicate or rewrite the guide on disk. Tell the agent to read all of it and summarize the relevant method BEFORE ANY Story drafting. A link or claimed schema check is not loaded guidance. Read the required files before printing success; missing/unreadable guidance returns1 without claiming a complete bundle. References are sorted deterministically and ordinary regular files only; do not follow symlinked reference directories/files.
 
 Use the package-root metadata version. For `--version`, print only that version followed by one newline, without the package name or any prefix. `workflow list` inspects the caller's project only; it does not execute or install recipes. Preserve stdout for successful values and stderr for errors. Explicit session invokes the public native-session launcher with full bundled guidance and the parsed user request; native inherits the existing environment and terminal. Keep imports and injection defaults self-contained, with no private transport/backend dependency.
+
+## Production composition at the CLI entry
+
+`createPddCliPorts` is the public module factory used by `runPdd` for the
+requested capability, never a second runtime or lifecycle policy. Supported
+capabilities are `models`, `projects`, `controller` and `keeper`. Construct only
+the requested factory after parsing and only when that command needs it;
+help/version/guidance/completion must not probe executables, services or clients.
+Unknown capability requests fail without constructing anything.
+
+For `models`, return explicitly supplied `modelPorts` unchanged, otherwise call
+`workflow-models.createLocalWorkflowModelPorts` with actual selected cwd,
+machineId, Settings and invocation environment. For `projects`, preserve
+explicit `projectPorts`, otherwise call
+`workflow-projects.createLocalWorkflowProjectPorts` with actual cwd/home,
+machineId, Settings and the optional explicit run-index reader. These real
+factories own discovery, protocol parsing and local identity; caller ports are
+not a substitute for a default production implementation. Resume and drive also assemble model ports before runner reconciliation so
+frozen selection validation has a real catalog/defaults provider. Explicit
+caller nativeCatalog/toolDefaults references remain authoritative. Explicit local
+factory options remain supported and take precedence over environment defaults.
+
+For `controller`, lazily compose the actual controller factory with the complete
+same caller ports object; preserve explicitly supplied Herdr, OS identity,
+observer and authority references. An explicitly injected legacy controller
+without that factory retains its original ports path. For `keeper`, use the
+keeper module's actual `createWorkflowKeeperPorts`, including its explicit
+fleet-client conditional providers.
+An explicitly injected keeper keeps the existing no-unused-transport seam.
+No CLI factory invents quota, managed-launch records, process proofs or journal
+facts. Preserve Rule 11's PDD_TRACE propagation, safe failed-call diagnostics,
+frozen runtime, PID/start identity and launch/generation matching, start/lifetime
+locks, no-repeat and unknown inspect-only behavior.
+
+A fleet-only route with no production client binding must terminate with a
+finite stderr diagnostic containing the literal phrase `this needs the fleet
+client`. Never silently skip an effect, report a conditional operation complete,
+or load private modules in the public Alpha package. Public setup remains
+valid without a fleet client: it provisions only the verified public recovery
+support; absence does not turn that public success into fleet setup success.
+Explicit optional client bindings remain supported, with actual exit codes and
+supplied references preserved; they cannot supply missing authority by name alone.
 
 ## Workflow routing
 

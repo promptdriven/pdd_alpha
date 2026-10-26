@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 1c422953a8dcf282368e42b5e109dc31454a940d47160e7627355c9ea378b453).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 57e1770ae2f922c5bf2f4a1fed4af73375f607e442b9e9effdc8651af468ea3e).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +32,36 @@ function guidanceError(stderr) {
   line(stderr, 'The complete PDD guidance could not be read. Use a package containing the canonical guide, skill, references and manual recipes.');
   return 1;
 }
+// One public production composition root. Factories stay lazy so discovery
+// cannot accidentally construct service transports or workflow authority.
+export async function createPddCliPorts(ports = {}, {capability, ...options} = {}) {
+  if (capability === 'models') {
+    if (options.modelPorts !== undefined) return options.modelPorts;
+    const {createLocalWorkflowModelPorts} = await import('./workflow-models.mjs');
+    const defaults=createLocalWorkflowModelPorts({env:ports.env ?? process.env,
+      ...options.localModelOptions,machineId:options.machineId,cwd:options.cwd,settings:options.settings});
+    return {...defaults,...(ports.nativeCatalog!==undefined?{nativeCatalog:ports.nativeCatalog}:{}),
+      ...(ports.toolDefaults!==undefined?{toolDefaults:ports.toolDefaults}:{})};
+  }
+  if (capability === 'projects') {
+    if (options.projectPorts !== undefined) return options.projectPorts;
+    const {createLocalWorkflowProjectPorts} = await import('./workflow-projects.mjs');
+    return createLocalWorkflowProjectPorts({...options.localProjectOptions,machineId:options.machineId,
+      cwd:options.cwd,home:ports.home,settings:options.settings,
+      ...(options.workflowRecords?.readRunIndex ? {readRunIndex:options.workflowRecords.readRunIndex} : {})});
+  }
+  if (capability === 'controller') {
+    const controller = options.workflowController ?? await import('./workflow-controller.mjs');
+    return typeof controller.createLocalWorkflowControllerPorts === 'function'
+      ? controller.createLocalWorkflowControllerPorts(ports) : ports;
+  }
+  if (capability === 'keeper') {
+    if (options.workflowKeeper !== undefined) return ports;
+    const keeper = await import('./workflow-keeper.mjs');
+    return keeper.createWorkflowKeeperPorts(ports);
+  }
+  throw new Error('Unsupported CLI port capability');
+}
 export async function runPdd(argv, dependencies = {}) {
   const {stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
     nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages, workflowDecider,
@@ -42,22 +72,18 @@ export async function runPdd(argv, dependencies = {}) {
   const ports = {...suppliedPorts,stdout,stderr,home,machinePlacement,
     ...(modelPorts??{}),...(dependencies.machineToolPolicy?{machineToolPolicy:dependencies.machineToolPolicy}:{})};
   async function localModels(selectedCwd=cwd) {
-    if(modelPorts)return modelPorts;
-    const mod=await import('./workflow-models.mjs');
-    return mod.createLocalWorkflowModelPorts({...dependencies.localModelOptions,machineId,cwd:selectedCwd,settings});
+    return createPddCliPorts(ports,{...dependencies,capability:'models',machineId,cwd:selectedCwd,settings});
   }
   let localProjects;
   async function projects() {
-    if(projectPorts)return projectPorts;
-    return localProjects??=(await import('./workflow-projects.mjs')).createLocalWorkflowProjectPorts({...dependencies.localProjectOptions,machineId,cwd,home,settings,
-      ...(workflowRecords?.readRunIndex?{readRunIndex:workflowRecords.readRunIndex}:{})});
+    return localProjects??=await createPddCliPorts(ports,{...dependencies,capability:'projects',machineId,cwd,settings});
   }
   const printResult = result => {
     if (!result || !['completed','waiting','failed','recovery_required','adopted','started','refused','uncertain'].includes(result.state) || !Number.isInteger(result.exitCode) || result.exitCode<0 || result.exitCode>255
       || typeof result.message!=='string' || !result.message.trim()) throw Error('Invalid result');
     line(stdout,result.message);return result.exitCode;
   };
-  const unsupported = () => {line(stderr,'This command needs an available optional client adapter.');return 1;};
+  const unsupported = () => {line(stderr,'This command needs an available optional client adapter; this needs the fleet client.');return 1;};
   async function readyHerdr(method) {
     try {
       const mod=workflowHerdrBoot??await import('./workflow-herdr-boot.mjs');
@@ -111,7 +137,7 @@ export async function runPdd(argv, dependencies = {}) {
         return {exitCode:1};
       }
       placement=await mod.selectStartTarget({kind:plan.local==='session'?'session':'workflow',on,sourceMachineId:machineId,agent,repository,project},ports);
-      if(placement.state==='refused') {line(stderr,safeLabel(`${placement.code}: ${placement.message??placement.code}`));return {exitCode:1};}
+      if(placement.state==='refused') {line(stderr,safeLabel(`${placement.code}: ${placement.message??placement.code}${placement.code==='remote_unsupported'?'; this needs the fleet client.':''}`));return {exitCode:1};}
     }
 
     const selectionOverrides={...(plan.options['--model']!==undefined?{model:plan.options['--model']}:{}),...(plan.options['--effort']!==undefined?{effort:plan.options['--effort']}:{})};
@@ -166,6 +192,7 @@ export async function runPdd(argv, dependencies = {}) {
           ...(plan.options['--expect-stage']?{expect:{stage:plan.options['--expect-stage'],seq:Number(plan.options['--expect-seq'])}}:{}),
           ...(plan.options['--launch-id']?{launchId:plan.options['--launch-id']}: {})};
         const input={runId:plan.operands[0],cwd,packageRoot,...decision};
+        if(['workflow-resume','workflow-drive'].includes(plan.local))Object.assign(ports,await localModels());
         if(plan.local==='workflow-adopt') return printResult(await runner.adoptWorkflow(input,ports));
         if(['workflow-drive','workflow-attach'].includes(plan.local)) {
           const stages=workflowStages??await import('./workflow-stage-herdr.mjs');
@@ -189,7 +216,7 @@ export async function runPdd(argv, dependencies = {}) {
         if(prepared?.state!=='prepared') return printResult(prepared);
         if((!workflowController||workflowHerdrBoot)&&!await readyHerdr('ensureDefaultHerdr'))return 1;
         const controller=workflowController??await import('./workflow-controller.mjs');
-        const controllerPorts=typeof controller.createLocalWorkflowControllerPorts==='function'?await controller.createLocalWorkflowControllerPorts(ports):ports;
+        const controllerPorts=await createPddCliPorts(ports,{capability:'controller',workflowController:controller});
         const controllerInput={...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null};
         const result=await traceHerdrRequest({operation:'controller.start',request:controllerInput},()=>controller.startWorkflowController(controllerInput,controllerPorts),controllerPorts);
         const started=result?.state==='started';
@@ -233,8 +260,7 @@ export async function runPdd(argv, dependencies = {}) {
     }
     case 'runs-keeper': {
       try {const mod=workflowKeeper??await import('./workflow-keeper.mjs');
-        let keeperPorts=ports;
-        if(!workflowKeeper){const controller=workflowController??await import('./workflow-controller.mjs');if(typeof controller.createLocalWorkflowControllerPorts==='function')keeperPorts=await controller.createLocalWorkflowControllerPorts(ports);}
+        const keeperPorts=await createPddCliPorts(ports,{capability:'keeper',workflowKeeper,workflowController});
         const result=await mod.runWorkflowKeeper({home},keeperPorts);
         if(Number.isInteger(result))return result;
         if(Number.isInteger(result?.exitCode) && !result.message)return result.exitCode;
@@ -282,6 +308,7 @@ export async function runPdd(argv, dependencies = {}) {
     case 'projects': case 'models': {
       try {
         const target=plan.options['--on']??machineId;
+        if(target!==machineId && !(plan.local==='projects'?projectPorts:modelPorts))return unsupported();
         if(plan.local==='projects') {const mod=workflowProjects??await import('./workflow-projects.mjs');const result=await mod.listWorkflowProjects({machineId:target},await projects());
           if(!result.projects.length) line(stdout,'No projects found');
           for(const p of result.projects) line(stdout,safeLabel(`${p.name} (${p.id}) — ${p.availability}; ${p.sources.join(', ')}`));
