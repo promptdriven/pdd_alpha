@@ -18,6 +18,10 @@ The [contract](../../prompts/cli/bin-entry.prompt.md) owns executable handoff.
 - **AC6:** Project-name session arguments and the projects command cross handoff
   unchanged. The entry keeps the caller's cwd and delegates name/model validation
   to the dispatcher, adding no account selection or launch default.
+- **AC7:** The selected managed dispatcher receives its complete verified Runtime
+  through existing CLI ports, including extensions, so workflow preparation can
+  freeze that version. A saved older entry keeps its runtime after current moves.
+  Missing or invalid runtime cannot gain authority from the handoff.
 
 [Cases](../../vectors/cli/bin-entry.json) are independent expected behavior, not
 observed CLI execution.

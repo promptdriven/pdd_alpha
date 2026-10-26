@@ -285,7 +285,11 @@ from the best-effort append-only display index. Missing/corrupt registry is a
 visible discovery warning; complete registries are never replaced from guesses.
 
 `prepared` means the assignment, initial journal, recovery locator and freeze are
-durable, with zero native prompts. Failure/conflict uses the existing finite outcome
+durable, with zero native prompts. Journal and return the actual saved runtime
+returned by `freezeWorkflowInputs`, including its canonical aliases and observed
+fields; preserve the caller's descriptor without mutation. Do not invent those
+fields or relax runtime validation when the freeze fails.
+Failure/conflict uses the existing finite outcome
 rules. An existing active issue returns its original identity, never a second run. An
 optional supplied runId is accepted only from the same durable start request on the
 chosen machine. Validate its lowercase UUIDv4 and original payload/target binding; a
@@ -629,6 +633,7 @@ Do not cap active or unresolved native stages across a repository. Each running 
 - [Run records](workflow-run-records.prompt.md): required writers of the runs index and the derived run status file (generation, runtime); they never own run state.
 - [Background stage](workflow-stage-herdr.prompt.md): the supplied four native stage functions own transport, exact native identity and verified owned cleanup; ordinary native-session remains separate.
 - [Frozen runtime](workflow-runtime.prompt.md): required generation/runtime frozen inputs and executable retention.
+- [Runtime handoff cases](../../vectors/cli/bin-entry-runtime.json): verification of installed preparation and its canonical saved runtime.
 - [Claims](workflow-claims.prompt.md): required generation/runtime kernel controller and stage guards, native claims and retirement checks.
 - [Definition loader](workflow-definition-loader.prompt.md) and [worktree assignment](workflow-worktree.prompt.md): required generation/runtime selection and physical issue ownership.
 - [Optional account quota](../accounts/quota.prompt.md), [swap](../accounts/swap.prompt.md) and [handoff](../accounts/handoff.prompt.md): required contract context when Client account ports are supplied; journal ownership stays here, account choice and native account effects stay with those ports.

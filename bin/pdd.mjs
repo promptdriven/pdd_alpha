@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generated from prompts/cli/bin-entry.prompt.md (sha256: 9a996934207e023617670db3a5fcaac7711e931c21daadcc3edc5294f8b3575f).
+// Generated from prompts/cli/bin-entry.prompt.md (sha256: fdda37103ee71dc8b1c4354b86106dab288bc61078732a2ba6c0a93762a96035).
 import { lstat, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -61,6 +61,6 @@ if (!selectionFailed) {
     }
   } else {
     const { runPdd } = await import('../src/pdd-cli.mjs');
-    process.exitCode = await runPdd(process.argv.slice(2));
+    process.exitCode = await runPdd(process.argv.slice(2), runtime ? { ports: { runtime } } : undefined);
   }
 }

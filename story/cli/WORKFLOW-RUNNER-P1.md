@@ -7,6 +7,8 @@ These synthetic observations are independent expected cases, not execution resul
 ## Observable acceptance criteria
 
 - **AC1:** Prepare no agent: assignmentAndFreezeDurable = true; stagePrompts = 0; state = "prepared".
+  The journal and prepared receipt retain the freeze owner's returned canonical
+  runtime, including descriptor extensions; the caller's descriptor is unchanged.
 - **AC2:** Frozen resume: usesRecordedRuntime = true; usesFrozenGuide = true; decisionMayProceed = true.
 - **AC3:** Stale rev: code = "stale_decision"; effects = 0.
 - **AC4:** Changed accepted file: accepted = false; effects = 0.

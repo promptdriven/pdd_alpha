@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 424720d8cde606bf50b16cb8d5597e0d0752584333a32aec2c00823312626edf).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 013556d18ef46bb3430c00a9578a8ec4887d407bc5171e43e7d4c51f65e10611).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -968,7 +968,8 @@ async function execute(options, ports, resume) {
     if(options.prepareOnly) {
       if(!s.runtime)fail('A verified immutable run runtime is required before preparation.');
       const freeze=p.freezeWorkflowInputs ?? (await import('./workflow-runtime.mjs')).freezeWorkflowInputs;
-      await freeze({runDir:directory,guidance:context,definition,runtime:s.runtime,seed:{repository:s.repo,issue:s.issue,baseRef:assignment.baseRef,baseSha:assignment.baseSha,sourceRoot:assignment.sourceRoot,root:s.root,project:s.project,launchSelection:s.launchSelection}},p);
+      const frozen=await freeze({runDir:directory,guidance:context,definition,runtime:s.runtime,seed:{repository:s.repo,issue:s.issue,baseRef:assignment.baseRef,baseSha:assignment.baseSha,sourceRoot:assignment.sourceRoot,root:s.root,project:s.project,launchSelection:s.launchSelection}},p);
+      s.runtime=frozen.runtime;
       const registry=join(p.home ?? homedir(),'.pdd','runs','registry');
       ensureDirectory(registry);
       const locator=join(registry,runId+'.json');if(existsSync(locator))fail('A recovery locator already exists; inspect the original.');

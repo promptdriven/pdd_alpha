@@ -18,7 +18,13 @@ entry selection never invents a command or launches a private adapter.
 
 The module function `runPdd(argv, ports?)` belongs to `src/pdd-cli.mjs` and returns
 an integer asynchronously. Pass `process.argv.slice(2)` unchanged and assign its
-result to process.exitCode. On handoff, execute an argv array without a shell,
+result to process.exitCode. At the selected managed dispatcher, supply the exact
+resolved Runtime as `runPdd(argv, {ports: {runtime}})`. Preserve descriptor
+extensions and the selected version even when current changes; this handoff lets
+workflow preparation freeze its verified runtime. An uninstalled entry supplies
+no runtime, leaving the runner's immutable-runtime refusal intact. Do not derive
+a descriptor from environment flags or replace a missing one with current.
+On handoff, execute an argv array without a shell,
 preserving cwd, inherited stdio, environment and child exit/signal semantics.
 A path or argument containing spaces/metacharacters stays one argument.
 In particular, preserve `pdd session --project <part of name>` and `pdd projects`
@@ -49,4 +55,4 @@ entry selection. The bootstrap and dispatcher own explicit setup/update effects.
 - [CLI dispatcher](pdd-cli.prompt.md): required for generation/verification;
   owns runPdd and supported command behavior. This entry adds no command policy.
 - [Story](../../story/cli/BIN-ENTRY.md) and [cases](../../vectors/cli/bin-entry.json):
-  required for verification.
+  required for verification, including the [runtime handoff cases](../../vectors/cli/bin-entry-runtime.json).
