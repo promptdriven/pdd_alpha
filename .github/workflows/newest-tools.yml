@@ -1,0 +1,138 @@
+name: Nightly newest tools
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: newest-tools-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  newest-tools:
+    name: Newest tools compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install latest Codex
+        shell: bash
+        run: npm install --global @openai/codex@latest
+
+      - name: Install latest GitHub CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/gh-release.json"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://api.github.com/repos/cli/cli/releases/latest > "$release_json"
+          asset_url="$(jq --raw-output --exit-status \
+            '[.assets[] | select(.name | endswith("_linux_amd64.tar.gz"))][0].browser_download_url' \
+            "$release_json")"
+          mkdir -p "$RUNNER_TEMP/gh-bin"
+          curl --fail --silent --show-error --location --retry 3 "$asset_url" \
+            --output "$RUNNER_TEMP/gh.tar.gz"
+          mkdir -p "$RUNNER_TEMP/gh-extract"
+          tar -xzf "$RUNNER_TEMP/gh.tar.gz" -C "$RUNNER_TEMP/gh-extract"
+          gh_binary="$(find "$RUNNER_TEMP/gh-extract" -type f -path '*/bin/gh' -print -quit)"
+          test -n "$gh_binary"
+          install -m 0755 "$gh_binary" "$RUNNER_TEMP/gh-bin/gh"
+          echo "$RUNNER_TEMP/gh-bin" >> "$GITHUB_PATH"
+
+      - name: Install latest Herdr
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://herdr.dev/install.sh --output "$RUNNER_TEMP/install-herdr.sh"
+          HERDR_INSTALL_DIR="$RUNNER_TEMP/herdr-bin" sh "$RUNNER_TEMP/install-herdr.sh"
+          echo "$RUNNER_TEMP/herdr-bin" >> "$GITHUB_PATH"
+
+      - name: Print installed tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          codex_version="$(codex --version 2>&1 | head -n 1)" || {
+            echo "::error title=Codex installation::codex --version failed"; exit 1;
+          }
+          gh_version="$(gh --version 2>&1 | head -n 1)" || {
+            echo "::error title=GitHub CLI installation::gh --version failed"; exit 1;
+          }
+          herdr_version="$(herdr --version 2>&1 | head -n 1)" || {
+            echo "::error title=Herdr installation::herdr --version failed"; exit 1;
+          }
+          echo "$codex_version"
+          echo "$gh_version"
+          echo "$herdr_version"
+          printf 'CODEX_VERSION=%s\n' "$codex_version" >> "$GITHUB_ENV"
+          printf 'GH_VERSION=%s\n' "$gh_version" >> "$GITHUB_ENV"
+          printf 'HERDR_VERSION=%s\n' "$herdr_version" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci --ignore-scripts
+
+      - name: Run repository tests with newest tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npm test; then
+            {
+              echo "### Nightly newest-tools failure"
+              echo "- Tool versions: Codex ${CODEX_VERSION}, ${GH_VERSION}, ${HERDR_VERSION}"
+              echo "- Check: repository test suite (npm test)"
+              echo "- Detail: the repository tests failed with the installed newest toolchain"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Smoke check newest tool interfaces
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          fail() {
+            local tool="$1" version="$2" check="$3" detail="$4"
+            {
+              echo "### Nightly newest-tools failure"
+              echo "- Tool: \`$tool\`"
+              echo "- Version: \`$version\`"
+              echo "- Check: \`$check\`"
+              echo "- Detail: $detail"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=$tool $version::$check failed: $detail"
+            exit 1
+          }
+          assert_output_contains() {
+            local tool="$1" version="$2" check="$3" needle="$4"
+            shift 4
+            local output_file
+            output_file="$(mktemp)"
+            if ! "$@" >"$output_file" 2>&1; then
+              fail "$tool" "$version" "$check" "command exited non-zero"
+            fi
+            if ! grep --fixed-strings --quiet -- "$needle" "$output_file"; then
+              fail "$tool" "$version" "$check" "help output did not contain $needle"
+            fi
+          }
+          assert_command_succeeds() {
+            local tool="$1" version="$2" check="$3"
+            shift 3
+            if ! "$@" >/dev/null 2>&1; then
+              fail "$tool" "$version" "$check" "command exited non-zero"
+            fi
+          }
+          assert_output_contains codex "$CODEX_VERSION" 'codex --help' '--no-daemon' codex --help
+          assert_output_contains codex "$CODEX_VERSION" 'codex --help' '--remote' codex --help
+          assert_output_contains codex "$CODEX_VERSION" 'codex exec --help' '-c, --config' codex exec --help
+          assert_command_succeeds codex "$CODEX_VERSION" 'Codex flags and config keys used by pdd_alpha' codex --no-daemon --dangerously-bypass-approvals-and-sandbox -c 'projects={"/tmp"={trust_level="trusted"}}' --help
+          assert_command_succeeds gh "$GH_VERSION" 'gh --version' gh --version
+          assert_command_succeeds herdr "$HERDR_VERSION" 'herdr --version' herdr --version
