@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-launch.prompt.md (sha256: 56a04dc8c0bf164972c47d2e432a88854953e312307149008c426d93f22f8aba).
+// Generated from prompts/cli/pdd-launch.prompt.md (sha256: b7b5e8195058e18c953f1ce23165ca7ec7213293c05c9981764aa046cf27db3c).
 import * as fs from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,7 @@ import { readInstallRecord, writeInstallRecord, initialInstallRecord } from './i
 import { durableJson } from './install-record.mjs';
 import { fileURLToPath } from 'node:url';
 import { resolveRuntime } from './versions.mjs';
+import { ensurePrivateDirectory, repairPrivateTree } from './pdd-directory.mjs';
 
 const execFileAsync = promisify(execFile);
 const fail = code => ({ code, next: 'Run ~/.pdd/launcher/pdd-launch recover; retain the install record for inspection.' });
@@ -199,9 +200,10 @@ export async function commitStartupReady({ home, attemptId }, ports = {}) {
   }, ports);
 }
 const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`;
-async function writeEqual(path, text, mode = 0o600) {
+async function writeEqual(path, text, mode = 0o600, privatePdd = false) {
   try { if (await fs.readFile(path, 'utf8') === text) return false; } catch (e) { if (e.code !== 'ENOENT') throw e; }
-  await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  if (privatePdd) await ensurePrivateDirectory(dirname(path));
+  else await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temp = `${path}.${randomUUID()}.tmp`;
   try { await fs.writeFile(temp, text, { mode, flag: 'wx' }); await fs.rename(temp, path); }
   finally { await fs.rm(temp, { force: true }); }
@@ -212,18 +214,19 @@ export async function installLauncherSupport({ home, runtime, lease }, ports = {
   try {
     await resolveRuntime({ home, versionRoot: runtime.versionRoot }, ports);
     const base = join(home, '.pdd/launcher'), support = join(base, `support-${runtime.releaseId}`);
-    await fs.mkdir(base, { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(base);
     try { await fs.lstat(support); }
     catch (e) {
       if (e.code !== 'ENOENT') throw e;
       const temporary = join(base, `.support-${randomUUID()}`);
-      await fs.mkdir(join(temporary, 'src'), { recursive: true, mode: 0o700 });
-      await fs.mkdir(join(temporary, 'launcher'), { recursive: true, mode: 0o700 });
-      for (const name of ['pdd-launch', 'detached-updater', 'update-lock', 'install-record', 'owned-node', 'versions']) await fs.copyFile(join(runtime.versionRoot, 'src', `${name}.mjs`), join(temporary, 'src', `${name}.mjs`));
+      await ensurePrivateDirectory(join(temporary, 'src'));
+      await ensurePrivateDirectory(join(temporary, 'launcher'));
+      for (const name of ['pdd-launch', 'detached-updater', 'update-lock', 'install-record', 'owned-node', 'versions', 'pdd-directory']) await fs.copyFile(join(runtime.versionRoot, 'src', `${name}.mjs`), join(temporary, 'src', `${name}.mjs`));
       for (const name of ['support-entry.mjs', 'link-entry.mjs', 'update-entry.mjs']) await fs.copyFile(join(runtime.versionRoot, 'launcher', name), join(temporary, 'launcher', name));
       await fs.cp(join(runtime.versionRoot, 'launcher/native'), join(temporary, 'launcher/native'), { recursive: true, errorOnExist: true });
       await fs.symlink(runtime.node, join(temporary, 'node'));
       await durableJson(join(temporary, 'runtime.json'), runtime);
+      await repairPrivateTree(temporary);
       await fs.rename(temporary, support);
     }
     // Keep a complete known-working support version; do not replace support on
@@ -231,9 +234,9 @@ export async function installLauncherSupport({ home, runtime, lease }, ports = {
     try { await fs.lstat(join(base, 'support')); }
     catch (e) { if (e.code !== 'ENOENT') throw e; await fs.symlink(support, join(base, 'support')); }
     const source = await fs.readFile(join(runtime.versionRoot, 'launcher/pdd-launch'), 'utf8');
-    await writeEqual(join(base, 'pdd-launch'), source, 0o755);
+    await writeEqual(join(base, 'pdd-launch'), source, 0o755, true);
     const shim = `#!/bin/sh\nexec ${shellQuote(join(base, 'pdd-launch'))} cli "$@"\n`;
-    await writeEqual(join(home, '.pdd/bin/pdd'), shim, 0o755);
+    await writeEqual(join(home, '.pdd/bin/pdd'), shim, 0o755, true);
     return { code: null, support };
   } catch { return fail('runtime_unavailable'); }
 }

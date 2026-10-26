@@ -1,7 +1,8 @@
-// Generated from prompts/cli/workflow-run-records.prompt.md (sha256: 604d87662d5278072c93be93ae5c09faa4830208f6bb6d733a5a80f2ce78f15e).
+// Generated from prompts/cli/workflow-run-records.prompt.md (sha256: f618f87d91da5c3ca531fb6d0349c33729ef44302c84c501051fbfe156e36f6e).
 import * as nodeFs from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
+import {replayWorkflowJournalRecord} from './workflow-journal.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RUN_DIR = id => new RegExp(`/(?:pdd/workflows|runs/archive)/${id}$`);
@@ -155,9 +156,8 @@ async function* reverseLines(path, ports = {}, cap = Infinity) {
     else yield {complete:false};
   } finally {await h.close();}
 }
-function validJournal(row, runDir) { return isObj(row) && Number.isInteger(row.seq) && row.seq >= 1 && isObj(row.state) && row.state.runId === basename(runDir); }
 export async function readJournalLast(runDir, ports = {}) {
-  const warnings=[];
+  const warnings=[],tail=[];
   try {
     for await(const part of reverseLines(join(runDir,'journal.jsonl'),ports)){
       if(part.partial)warnings.push('partial_line');
@@ -165,13 +165,21 @@ export async function readJournalLast(runDir, ports = {}) {
       if(part.line){
         if(part.line.length>64*1024*1024)return {value:null,warnings:[...warnings,'too_large']};
         let row;try{row=JSON.parse(part.line);}catch{return {value:null,warnings:[...warnings,'bad_json']};}
-        if(!isObj(row)||!isObj(row.state))return {value:null,warnings:[...warnings,'bad_record']};
-        if(row.state.runId!==basename(runDir))return {value:null,warnings:[...warnings,'run_mismatch']};
-        if(!validJournal(row,runDir))return {value:null,warnings:[...warnings,'bad_record']};
-        return {value:{seq:row.seq,event:row.event,state:row.state},warnings};
+        if(!isObj(row)||!Number.isSafeInteger(row.seq)||row.seq<1)return {value:null,warnings:[...warnings,'bad_record']};
+        const runId=Object.hasOwn(row,'state')?row.state?.runId:row.runId;
+        if(runId!==basename(runDir))return {value:null,warnings:[...warnings,'run_mismatch']};
+        tail.push(row);
+        if(Object.hasOwn(row,'state')){
+          let state;
+          try {for(const record of tail.reverse())state=replayWorkflowJournalRecord(state,record);}
+          catch{return {value:null,warnings:[...warnings,'bad_record']};}
+          const last=tail.at(-1);
+          return {value:{seq:last.seq,event:last.event,state},warnings};
+        }
+        if(row.v!==1||!Array.isArray(row.delta)||tail.length>=128)return {value:null,warnings:[...warnings,'bad_record']};
       }
     }
-    return {value:null,warnings};
+    return {value:null,warnings:tail.length?[...warnings,'bad_record']:warnings};
   }catch(e){return {value:null,warnings:[e?.code==='ENOENT'?'missing':'read_failed']};}
 }
 export async function readJournalSince(runDir, afterSeq, ports = {}) {

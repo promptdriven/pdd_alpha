@@ -1,4 +1,4 @@
-// Generated from prompts/cli/owned-node.prompt.md (sha256: c52d8770e74b20c1b162707253e0c33a47a753b17d0909e314c0a977202b5ecd).
+// Generated from prompts/cli/owned-node.prompt.md (sha256: 7ae9c7357bb007616c019f4ed3ab517285316bb1d6e4b8eb9a4549892f343328).
 import * as fs from 'node:fs/promises';
 import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
 import { createHash, verify, randomUUID } from 'node:crypto';
@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { validUpdateLease } from './update-lock.mjs';
 import { durableJson } from './install-record.mjs';
+import { ensurePrivateDirectory } from './pdd-directory.mjs';
 
 const execute = promisify(execFile);
 const safeId = s => typeof s === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s) && s !== '..';
@@ -76,14 +77,14 @@ export async function extractVerifiedTar(bytes, destination, { strip = 1 } = {})
     }
     if (!resolved.length) throw new Error('link escape');
   }
-  await fs.mkdir(destination, { recursive: true, mode: 0o700 });
+  await ensurePrivateDirectory(destination);
   for (const e of entries.filter(e => !['1', '2'].includes(e.type))) {
-    await fs.mkdir(dirname(e.target), { recursive: true });
-    if (e.type === '5') await fs.mkdir(e.target, { recursive: true, mode: e.mode });
+    await ensurePrivateDirectory(dirname(e.target));
+    if (e.type === '5') await ensurePrivateDirectory(e.target);
     else await fs.writeFile(e.target, e.data, { flag: 'wx', mode: e.mode });
   }
   for (const e of links) {
-    await fs.mkdir(dirname(e.target), { recursive: true });
+    await ensurePrivateDirectory(dirname(e.target));
     if (e.type === '2') await fs.symlink(e.link, e.target);
     else { if (!(await fs.lstat(e.linkTarget)).isFile()) throw new Error('invalid hardlink'); await fs.link(e.linkTarget, e.target); }
   }
@@ -113,7 +114,7 @@ export async function stageOwnedNode({ home, artifact, platform = process.platfo
   if (!safeId(transactionId) || !/^\d+\.\d+\.\d+$/.test(artifact?.version ?? '') || !versionAtLeast(artifact.version, '22.16.0') || (artifact.minimum && (!/^\d+\.\d+\.\d+$/.test(artifact.minimum) || !versionAtLeast(artifact.version, artifact.minimum))) || !artifact.url?.startsWith('https://') || !artifact.integrity || !artifact.authority) return error('runtime_verification_failed');
   const path = join(resolve(home), '.pdd/update/staging', transactionId, `node-${randomUUID()}`);
   try {
-    await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(dirname(path));
     if (await fs.realpath(dirname(path)) !== dirname(path)) return error('runtime_verification_failed');
   } catch { return error('runtime_io'); }
   let bytes;
@@ -138,7 +139,7 @@ export async function ensureOwnedNode({ home, staged, lease }, ports = {}) {
     const receipt = JSON.parse(await fs.readFile(join(root, '.pdd-node.json'), 'utf8'));
     if (receipt.artifactIdentity !== staged.artifactIdentity || receipt.nodeVersion !== staged.nodeVersion || !/^\d+\.\d+\.\d+$/.test(staged.nodeVersion) || receipt.treeDigest !== await directoryDigest(root)) return error('runtime_verification_failed');
     const final = join(base, 'tools/node', staged.nodeVersion);
-    await fs.mkdir(dirname(final), { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(dirname(final));
     if (await fs.realpath(dirname(final)) !== dirname(final)) return error('runtime_verification_failed');
     try {
       const previous = JSON.parse(await fs.readFile(join(final, '.pdd-node.json'), 'utf8'));

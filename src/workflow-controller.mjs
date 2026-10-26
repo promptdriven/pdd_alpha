@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: b0223d49b1ad0b139e014bccf1983a470d54ade122d1f300c49bd06d66a8105a).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 84ae4beceb1b85cad66b7d5ef9b28433bf075851113c75e40f2521cb5deaffd5).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -86,24 +86,57 @@ function admission(state,spec){
   if(state.runtime&&!isDeepStrictEqual(state.runtime,spec.runtime))return 'runtime_mismatch';
   return null;
 }
+const pendingProof=(intent,code='process_unproved')=>({...result('uncertain',code,intent),message:`Workflow controller may be running; check pdd workflow status ${intent.runId}.`});
 async function prove(intent,p){
-  if(!intent.paneId)return result('uncertain','launch_uncertain',intent);
-  let process,journal;try{process=await herdrRequest(p,'pane.process_info','processInfo',{session:'default',paneId:intent.paneId});journal=await strictRead(intent.runDir,p);}catch(error){return error?.code==='herdr_not_found'?{...result('uncertain',error.code,intent),message:error.message}:result('uncertain','proof_unavailable',intent);}
-  const proof=journal.state.controller;
-  const bound=proof?.started===true&&proof.launchId===intent.launchId&&proof.paneId===intent.paneId&&Number.isSafeInteger(proof.generation)&&proof.generation>0&&proof.generation===(intent.previousGeneration??0)+1&&Number.isSafeInteger(proof.pid)&&proof.pid>0&&typeof proof.startIdentity==='string'&&proof.startIdentity.length>0;
-  const live=bound&&process?.stopped!==true&&process?.pid===proof.pid&&process.startIdentity===proof.startIdentity&&process.paneId===intent.paneId&&process.executable===intent.runtime.node&&isDeepStrictEqual(process.argv,intent.argv);
-  if(!live){
-    if(bound&&process?.stopped===true&&process.pid===proof.pid&&process.startIdentity===proof.startIdentity&&process.paneId===intent.paneId){
-      intent={...intent,phase:'exited',step:intent.step+1,exitedProof:{process,controller:proof,journalSeq:journal.seq}};
-      try{await save(intent,p);}catch{return result('uncertain','proof_not_durable',intent);}
+  if(!intent.paneId)return pendingProof(intent,'launch_uncertain');
+  const now=p.controllerProofNow??(()=>performance.now()),sleep=p.controllerProofSleep??(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
+  const deadline=now()+15000;let pending=pendingProof(intent);
+  for(let sample=0;sample<=150;sample++){
+    if(now()>deadline)return pending;
+    const remaining=Math.max(0,deadline-now());let timer;
+    // Bound read-only observations too: a stalled transport must not turn a 15s
+    // proof wait into an unbounded command. A late read cannot save a proof.
+    const reads=await Promise.race([
+      Promise.allSettled([herdrRequest(p,'pane.process_info','processInfo',{session:'default',paneId:intent.paneId}),strictRead(intent.runDir,p)]),
+      new Promise(resolve=>{timer=setTimeout(()=>resolve(null),remaining);})
+    ]).finally(()=>clearTimeout(timer));
+    if(!reads||now()>deadline)return pending;
+    const [processRead,journalRead]=reads;
+    if(processRead.status==='rejected'&&processRead.reason?.code==='herdr_not_found')return {...result('uncertain','herdr_not_found',intent),message:processRead.reason.message};
+    const process=processRead.status==='fulfilled'?processRead.value:null,journal=journalRead.status==='fulfilled'?journalRead.value:null;
+    const proof=journal?.state.controller;
+    const bound=journal?.state.runId===intent.runId&&proof?.started===true&&proof.launchId===intent.launchId&&proof.paneId===intent.paneId&&Number.isSafeInteger(proof.generation)&&proof.generation>0&&proof.generation===(intent.previousGeneration??0)+1&&Number.isSafeInteger(proof.pid)&&proof.pid>0&&typeof proof.startIdentity==='string'&&proof.startIdentity.length>0;
+    const live=bound&&process?.stopped!==true&&process?.pid===proof.pid&&process.startIdentity===proof.startIdentity&&process.paneId===intent.paneId&&process.executable===intent.runtime.node&&isDeepStrictEqual(process.argv,intent.argv);
+    if(bound&&intent.proof&&!isDeepStrictEqual(intent.proof.controller,proof))return pendingProof(intent,'proof_conflict');
+    if(live){
+      if(intent.proof&&!isDeepStrictEqual(intent.proof.process,process))return pendingProof(intent,'proof_conflict');
+      if(now()>deadline)return pending;
+      intent={...intent,phase:'proved',step:intent.step+1,proof:{process,controller:proof,journalSeq:journal.seq}};
+      try{await save(intent,p);}catch{return pendingProof(intent,'proof_not_durable');}
+      return result('started',null,{herdrSession:'default',...proof,workspaceId:intent.workspaceId,tabId:intent.tabId,terminalId:intent.terminalId});
+    }
+    const stopped=process?.stopped===true&&process.pid===proof?.pid&&process.startIdentity===proof?.startIdentity&&process.paneId===intent.paneId;
+    const humanWait=journal?.state.controlState==='waiting_person';
+    let lifetimeLock;
+    if(bound&&(stopped||humanWait)){
+      let lockTimer;
+      lifetimeLock=await Promise.race([
+        Promise.resolve().then(()=>p.inspectControllerLock(intent)).catch(()=> 'unknown'),
+        new Promise(resolve=>{lockTimer=setTimeout(()=>resolve('unknown'),Math.max(0,deadline-now()));})
+      ]).finally(()=>clearTimeout(lockTimer));
+      if(now()>deadline)return pending;
+    }
+    if(bound&&(stopped||humanWait)&&lifetimeLock==='free'){
+      if(now()>deadline)return pending;
+      intent={...intent,phase:'exited',step:intent.step+1,exitedProof:{process,controller:proof,journalSeq:journal.seq,humanWait}};
+      try{await save(intent,p);}catch{return pendingProof(intent,'proof_not_durable');}
       return result('uncertain','controller_exited',intent);
     }
-    return result('uncertain','process_unproved',intent);
+    pending=pendingProof(intent,journalRead.status==='rejected'||processRead.status==='rejected'?'proof_unavailable':'process_unproved');
+    const left=deadline-now();if(left<=0||sample===150)return pending;
+    await sleep(Math.min(100,left));
   }
-  if(intent.proof&&(!isDeepStrictEqual(intent.proof.process,process)||!isDeepStrictEqual(intent.proof.controller,proof)))return result('uncertain','proof_conflict',intent);
-  intent={...intent,phase:'proved',step:intent.step+1,proof:{process,controller:proof,journalSeq:journal.seq}};
-  try{await save(intent,p);}catch{return result('uncertain','proof_not_durable',intent);}
-  return result('started',null,{herdrSession:'default',...proof,workspaceId:intent.workspaceId,tabId:intent.tabId,terminalId:intent.terminalId});
+  return pending;
 }
 export async function startWorkflowController(spec,ports={}){
   const input=spec??{};
@@ -123,9 +156,12 @@ export async function startWorkflowController(spec,ports={}){
     let launches;try{launches=await readControllerLaunches(spec,ports);}catch{return result('uncertain','launch_history_invalid');}
     const prior=launches.at(-1);
     if(prior && prior.phase!=='exited'){
-      if(prior.runId!==spec.runId||!isDeepStrictEqual(prior.runtime,spec.runtime)||!isDeepStrictEqual(prior.decision,spec.decision))return result('refused','launch_binding_conflict',prior);
+      if(prior.runId!==spec.runId||prior.root!==spec.root||!isDeepStrictEqual(prior.runtime,spec.runtime))return result('refused','launch_binding_conflict',prior);
       if(prior.phase==='herdr.identity_unavailable')return identityRefusal(prior);
-      return prove(prior,ports);
+      const reconciled=await prove(prior,ports),sameDecision=isDeepStrictEqual(prior.decision,spec.decision);
+      if(reconciled.code!=='controller_exited'||sameDecision)return !sameDecision&&reconciled.state==='started'?result('refused','controller_busy',reconciled.controller):reconciled;
+      // The prior proof is now durably exited. A new decision still passes all
+      // existing current-state, assignment, revision and lifetime-lock checks.
     }
     let intent;
     const admitted=await ports.withLifecycleGuard(spec,async()=>{

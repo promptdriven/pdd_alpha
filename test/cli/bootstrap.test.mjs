@@ -15,7 +15,7 @@ const execute = promisify(execFile);
 async function fixture(t, c) {
   const home = await temporary(t), tools = join(home, 'stock-tools'), capture = join(home, 'captured-argv'), cwd = join(home, 'my project');
   await fs.mkdir(tools); await fs.mkdir(cwd);
-  for (const tool of ['openssl', 'tar', 'gzip', 'awk', 'mktemp', 'mkdir', 'chmod', 'cat']) {
+  for (const tool of ['openssl', 'tar', 'gzip', 'awk', 'mktemp', 'mkdir', 'chmod', 'cat', 'find', 'cp']) {
     if (c.id === 'missing-verifier' && tool === 'openssl') continue;
     const path = (await execute('/bin/sh', ['-c', `command -v ${tool}`])).stdout.trim(); await fs.symlink(path, join(tools, tool));
   }
@@ -25,6 +25,7 @@ async function fixture(t, c) {
   const nodeDir = join(home, `node-v22.16.0-${platform}-${arch}`);
   await put(join(nodeDir, 'bin/node'), `#!/bin/sh\nif [ "$1" = '-p' ]; then printf '%s\\n' '22.16.0|${platform}|${arch}'; else printf '%s\\n' "$PWD" "$@" > "$PDD_BOOTSTRAP_CAPTURE"; fi\n`, 0o755);
   await put(join(home, 'package/launcher/bootstrap-entry.mjs'), '// synthetic stand-in entry\n');
+  if (c.given.extraDirectories) await put(join(home, 'package/.hidden/-nested/program'), 'retained executable bytes', 0o755);
   const nodeArchive = join(home, 'node.tar.gz'), alphaArchive = join(home, 'alpha.tar.gz');
   await execute('tar', ['-czf', nodeArchive, '-C', home, `node-v22.16.0-${platform}-${arch}`]);
   await execute('tar', ['-czf', alphaArchive, '-C', home, 'package']);
@@ -60,7 +61,7 @@ for (const c of await cases('bootstrap')) test(c.id, async t => {
     assert.equal(execution.code, undefined, execution.stderr);
     const captured = (await fs.readFile(f.capture, 'utf8')).trimEnd().split('\n'); assert.equal(captured[0], f.cwd);
     if (stock) {
-      assert.ok(captured[1].endsWith('/alpha/launcher/bootstrap-entry.mjs')); assert.equal(captured[2], f.home); assert.deepEqual(captured.slice(4), args);
+      assert.ok(captured[1].endsWith('/bootstrap/launcher/bootstrap-entry.mjs')); assert.equal(captured[2], f.home); assert.deepEqual(captured.slice(4), args);
     } else assert.deepEqual(captured.slice(1), ['cli', 'setup', ...args]);
     assert.ok(execution.stdout.includes('pdd setup')); assert.equal(execution.stdout.includes('--resume'), false);
   }
@@ -79,6 +80,121 @@ test('release bootstrap rejects escaped identities and runtimes below the public
     await assert.rejects(buildBootstrap({ descriptor: { ...descriptor, nodes: { 'linux-x64': { ...asset, version } } }, destination }), TypeError);
   }
   await assert.rejects(fs.access(destination), { code: 'ENOENT' });
+});
+
+test('stock installer creates every PDD directory 0700 under umask 002 before verified execution', async t => {
+  const f = await fixture(t, { id: 'stock-linux-no-node', given: { platform: 'linux', arch: 'x64', extraDirectories: true } });
+  const result = await execute('/bin/sh', ['-c', 'umask 002; exec /bin/sh "$1"', 'installer-case', f.installer], { env: f.env, cwd: f.cwd });
+  assert.equal(result.stderr, '');
+  const inspect = async path => {
+    assert.equal((await fs.lstat(path)).mode & 0o7777, 0o700, path);
+    for (const entry of await fs.readdir(path, { withFileTypes: true })) if (entry.isDirectory()) await inspect(join(path, entry.name));
+  };
+  await inspect(join(f.home, '.pdd'));
+  const [staged] = await fs.readdir(join(f.home, '.pdd/update/staging'));
+  const program = join(f.home, '.pdd/update/staging', staged, 'alpha/.hidden/-nested/program');
+  assert.equal(await fs.readFile(program, 'utf8'), 'retained executable bytes');
+  assert.equal((await fs.stat(program)).mode & 0o100, 0o100);
+  assert.ok(await fs.readFile(f.capture, 'utf8'));
+});
+
+test('installer repairs mutable PDD roots before delegation while immutable runtime trees and receipts stay untouched', async t => {
+  const f = await fixture(t, { id: 'existing-managed', given: {} });
+  const record = join(f.home, '.pdd/install/record.json'), saved = '{"transaction":{"id":"keep-this-target"}}';
+  await put(record, saved);
+  await put(join(f.home, '.pdd/launcher/pdd-launch'), '#!/bin/sh\nexit 0\n', 0o755);
+  const mutable = ['logs', 'runs', 'fleet', 'accounts', 'claims', 'install', 'link'];
+  for (const name of mutable) { await fs.mkdir(join(f.home, '.pdd', name), { recursive: true }); await fs.chmod(join(f.home, '.pdd', name), 0o775); }
+  const runtime = join(f.home, '.pdd/versions/R1');
+  await put(join(runtime, 'bin/program'), 'immutable program', 0o755);
+  await put(join(runtime, '.pdd-release.json'), '{"treeDigest":"unchanged","artifactIdentity":"retained"}', 0o640);
+  await fs.chmod(runtime, 0o775); await fs.chmod(join(runtime, 'bin'), 0o755);
+  await fs.chmod(join(f.home, '.pdd'), 0o775);
+  await execute('/bin/sh', [f.installer], { env: f.env, cwd: f.cwd });
+  assert.equal((await fs.stat(join(f.home, '.pdd'))).mode & 0o7777, 0o700);
+  assert.equal(await fs.readFile(record, 'utf8'), saved);
+  for (const name of mutable) assert.equal((await fs.stat(join(f.home, '.pdd', name))).mode & 0o7777, 0o700);
+  assert.equal((await fs.stat(runtime)).mode & 0o7777, 0o775);
+  assert.equal((await fs.stat(join(runtime, 'bin'))).mode & 0o7777, 0o755);
+  assert.equal(await fs.readFile(join(runtime, '.pdd-release.json'), 'utf8'), '{"treeDigest":"unchanged","artifactIdentity":"retained"}');
+  assert.equal((await fs.stat(join(runtime, '.pdd-release.json'))).mode & 0o7777, 0o640);
+  assert.equal(await fs.readFile(join(runtime, 'bin/program'), 'utf8'), 'immutable program');
+});
+
+test('existing-install setup success plainly discloses that the requested new release was not installed', async t => {
+  const f = await fixture(t, { id: 'existing-managed', given: {} });
+  const saved = '{"transaction":{"id":"old-release-retained"},"settings":{"keep":true}}';
+  await put(join(f.home, '.pdd/install/record.json'), saved);
+  await put(join(f.home, '.pdd/launcher/pdd-launch'), '#!/bin/sh\nprintf "%s\\n" "$PWD" "$@" > "$PDD_BOOTSTRAP_CAPTURE"\nprintf "Existing setup completed.\\n"\n', 0o755);
+  const result = await execute('/bin/sh', [f.installer, '--no-phone', 'literal argument'], { env: f.env, cwd: f.cwd });
+  assert.match(result.stdout, /did not install a new release/i);
+  assert.match(result.stdout, /existing PDD runtime is retained/i);
+  assert.match(result.stdout, /Existing setup completed\./);
+  assert.deepEqual((await fs.readFile(f.capture, 'utf8')).trimEnd().split('\n'), [f.cwd, 'cli', 'setup', '--no-phone', 'literal argument']);
+  assert.equal(await fs.readFile(join(f.home, '.pdd/install/record.json'), 'utf8'), saved);
+  await assert.rejects(fs.lstat(join(f.home, '.pdd/update/staging')), { code: 'ENOENT' });
+});
+
+for (const replacement of ['symlink', 'directory']) test(`stock installer refuses a replaced PDD ancestor without chmod outside: ${replacement}`, async t => {
+  const f = await fixture(t, { id: 'existing-managed', given: {} });
+  const root = join(f.home, '.pdd'), outside = join(f.home, 'outside'), saved = join(f.home, 'saved-pdd');
+  await fs.mkdir(join(root, 'install'), { recursive: true });
+  await fs.mkdir(join(outside, 'install'), { recursive: true });
+  await fs.chmod(join(outside, 'install'), 0o775);
+  await put(join(outside, 'install/kept'), 'outside retained bytes', 0o640);
+  // Swap the named ancestor after root repair, while the installer retains its
+  // entered directory. Real chmod and all ordinary stock-shell logic still run.
+  await fs.unlink(join(f.env.PATH, 'chmod'));
+  await put(join(f.env.PATH, 'chmod'), `#!/bin/sh
+/bin/chmod "$@"
+if [ ! -e "$PDD_SWAP_MARKER" ]; then
+  : > "$PDD_SWAP_MARKER"
+  /bin/mv "$HOME/.pdd" "$HOME/saved-pdd"
+  ${replacement === 'symlink' ? '/bin/ln -s "$HOME/outside" "$HOME/.pdd"' : '/bin/mv "$HOME/outside" "$HOME/.pdd"'}
+fi
+`, 0o755);
+  const marker = join(f.home, 'substitution-observed');
+  await assert.rejects(execute('/bin/sh', [f.installer], { env: { ...f.env, PDD_SWAP_MARKER: marker }, cwd: f.cwd }), e => e.code === 1);
+  await fs.access(marker); await fs.access(saved);
+  const retained = replacement === 'directory' ? root : outside;
+  assert.equal((await fs.stat(join(retained, 'install'))).mode & 0o7777, 0o775);
+  assert.equal(await fs.readFile(join(retained, 'install/kept'), 'utf8'), 'outside retained bytes');
+  assert.equal((await fs.stat(join(retained, 'install/kept'))).mode & 0o7777, 0o640);
+  await assert.rejects(fs.lstat(f.capture), { code: 'ENOENT' });
+});
+
+for (const replacement of ['final-directory', 'ancestor']) test(`fresh extraction normalization retains directory authority before chmod: ${replacement}`, async t => {
+  const f = await fixture(t, { id: 'stock-linux-no-node', given: {} });
+  const outside = join(f.home, 'outside'), marker = join(f.home, 'normalization-substitution');
+  await fs.mkdir(join(outside, 'launcher'), { recursive: true });
+  await fs.chmod(outside, 0o775); await fs.chmod(join(outside, 'launcher'), 0o775);
+  await put(join(outside, 'kept'), 'outside retained bytes', 0o640);
+  await fs.unlink(join(f.env.PATH, 'chmod'));
+  await put(join(f.env.PATH, 'chmod'), `#!/bin/sh
+if [ ! -e "$PDD_SWAP_MARKER" ]; then
+  for stage in "$HOME"/.pdd/update/staging/bootstrap-*; do
+    if [ -d "$stage/alpha/launcher" ]; then
+      target="$stage/alpha${replacement === 'final-directory' ? '/launcher' : ''}"
+      matched=false
+      [ "$PWD" = "$target" ] && matched=true
+      for operand do [ "$operand" = "$target" ] && matched=true; done
+      if [ "$matched" = true ]; then
+        : > "$PDD_SWAP_MARKER"
+        /bin/mv "$target" "$HOME/saved-extraction"
+        /bin/ln -s "$HOME/outside" "$target"
+      fi
+    fi
+  done
+fi
+/bin/chmod "$@"
+`, 0o755);
+  const outcome = await execute('/bin/sh', [f.installer], { env: { ...f.env, PDD_SWAP_MARKER: marker }, cwd: f.cwd }).catch(error => error);
+  await fs.access(marker);
+  assert.equal((await fs.stat(outside)).mode & 0o7777, 0o775);
+  assert.equal((await fs.stat(join(outside, 'launcher'))).mode & 0o7777, 0o775);
+  assert.equal(await fs.readFile(join(outside, 'kept'), 'utf8'), 'outside retained bytes');
+  assert.equal((await fs.stat(join(outside, 'kept'))).mode & 0o7777, 0o640);
+  assert.equal(outcome.code, 1); await assert.rejects(fs.lstat(f.capture), { code: 'ENOENT' });
 });
 
 async function recoveryStage(home, suffix) {
@@ -124,7 +240,7 @@ test('verified shell rerun with a record but missing launcher reaches verified b
   const f = await fixture(t, { id: 'stock-linux-no-node', given: {} });
   const record = '{"savedFirstInstall":"preserve"}'; await put(join(f.home, '.pdd/install/record.json'), record);
   await execute('/bin/sh', [f.installer, 'literal argument'], { env: f.env, cwd: f.cwd });
-  assert.ok((await fs.readFile(f.capture, 'utf8')).includes('/alpha/launcher/bootstrap-entry.mjs'));
+  assert.ok((await fs.readFile(f.capture, 'utf8')).includes('/bootstrap/launcher/bootstrap-entry.mjs'));
   assert.equal(await fs.readFile(join(f.home, '.pdd/install/record.json'), 'utf8'), record);
 });
 

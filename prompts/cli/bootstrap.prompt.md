@@ -16,6 +16,24 @@ machine/tool; bootstrap asks no agent/run account questions. Named-project
 discovery and native model/effort capabilities belong to their client/CLI owners,
 not the install preflight.
 
+Create every bootstrap-owned PDD directory with mode 0700 even under umask 002.
+Before delegating an existing managed install, repair the owned `~/.pdd` root
+and existing direct mutable children `logs`, `runs`, `fleet`, `accounts`,
+`claims`, `install` and `link` to 0700; refuse a symlink or ownership mismatch.
+Do not recurse or modify existing immutable runtime trees or receipts. Before
+creating staging children, validate owned parents without following links; new
+parents are 0700 and existing other parents retain their modes. Extracted directory
+modes are also 0700 before executing the verified runtime; preserve artifact file
+bytes and file executable modes. Failed privacy repair stops installation and
+does not authorize replacing an existing runtime or bypassing recovery. During
+stock-shell directory repair, retain the entered parent directory as authority
+for child creation and mode repair, including recursive normalization of fresh
+extraction trees. Enter each verified owned real directory before its mode write;
+never send previously enumerated pathnames to a later chmod. Refuse a changed
+canonical parent or child and any substituted link; never chmod an outside target.
+Cover hidden and option-like directory names while leaving regular files untouched.
+Retain the user invocation cwd for the eventual setup command.
+
 <details>
 <summary><strong>Trusted first execution and interrupted setup</strong></summary>
 
@@ -37,10 +55,18 @@ its separately gated Linux path after systemd/linger and restart checks pass.
 
 Stage downloads in unique temporary folders outside update.lock; use the lock
 for short setup/activation mutations and durable checkpoints. Existing managed
-install: recover interrupted install state, hand off to the installed runtime,
-and let setup check/repair; a newer fetched bootstrap is not permission to replace
-current. Fresh install: verify and stage a complete runtime, then use the same
-activation primitive as updates. Before current exists, cancellation or failure
+install: before handing off to its launcher, state plainly that this installer
+did not install a new release, the existing runtime is retained, and setup checks
+that installation. Setup success must not imply the requested release was installed.
+Recover interrupted install state through that launcher; a newer fetched bootstrap
+is not permission to replace current. Fresh install: verify and stage a complete
+runtime, then use the same activation primitive as updates. Keep the executing
+bootstrap's complete code/native-helper closure in separate transaction-owned
+storage through publication and support provisioning: moving a candidate into
+its immutable location must not invalidate later kernel-lock or privacy-helper
+calls. Delegate setup only after the selected runtime, durable ready record,
+launcher support and recovery-service provisioning succeed; genuine failures
+remain failures. Before current exists, cancellation or failure
 may remove only this bootstrap's incomplete temporary files. After a flip,
 recovery uses the recorded transaction; never erase it and start again blindly.
 Every checkpoint prints `pdd setup` as the resume command. Rerunning plain

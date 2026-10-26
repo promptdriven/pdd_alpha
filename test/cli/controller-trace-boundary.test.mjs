@@ -51,7 +51,7 @@ test('controller diagnostic preserves unfamiliar codes and labels absent values 
       workflowController:{startWorkflowController:async()=>{starts++;return result;}}
     }),1);
     assert.equal(starts,1);assert.equal(stdout.text,'');
-    assert.equal(stderr.text,`Workflow controller not started: ${expected}. Inspect the saved run before retrying.\n`);
+    assert.equal(stderr.text,!['refused','failed'].includes(result?.state)?`Workflow controller may be running: ${expected}. Check pdd workflow status ${id}.\n`:`Workflow controller not started: ${expected}. Inspect the saved run before retrying.\n`);
   }
 });
 

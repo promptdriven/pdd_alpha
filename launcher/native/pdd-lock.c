@@ -1,4 +1,4 @@
-// Generated from prompts/cli/update-lock.prompt.md (sha256: b5ceabddd881784082c6ba881a599fd3509aa9757802b5ff0fde10f6c42595cb).
+// Generated from prompts/cli/update-lock.prompt.md (sha256: 2855f8b3608fe3f08f14957e1d2491a743e523cf7c3bb7685c98de71b15a7f94).
 // A persistent inode and a kernel-held lock; --exec deliberately keeps its fd.
 #include <sys/file.h>
 #include <sys/stat.h>

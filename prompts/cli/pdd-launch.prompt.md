@@ -14,6 +14,14 @@ Node, preserving cwd, argv, environment, stdio and exit/signal behavior.
 code/Node; never use PATH Node or import mutable current for recovery.
 A duplicate service invocation cannot exec a second Link for a live attempt.
 
+Explicit setup creates launcher/support/shim directories at 0700 through the
+private-directory owner, including copied support directories. The stable
+support closure includes that public helper. Do not follow symlink targets or
+change user data, file executable modes, service semantics or install identity
+when repairing directory permissions.
+Existing shared systemd/LaunchAgents directories are outside PDD's private tree;
+preserve their modes as well as HOME and unrelated user files.
+
 ```mermaid
 flowchart TD
     S[Reconcile previous attempt] --> O{Outcome?}
@@ -113,6 +121,8 @@ and generic claims, rather than relying on private Link for controller recovery.
 ## Dependencies
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
+- [Private directories](pdd-directory.prompt.md): generation/runtime; private
+  setup directories and the self-contained support closure.
 - [Install record](install-record.prompt.md), [install lock](update-lock.prompt.md),
   [versions](versions.prompt.md), [owned Node](owned-node.prompt.md) and
   [detached updater](detached-updater.prompt.md): generation/runtime; durable

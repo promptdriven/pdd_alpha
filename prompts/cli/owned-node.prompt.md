@@ -7,6 +7,12 @@ Inputs are a trusted release's Node artifact descriptor and local platform.
 Outcomes are an executable absolute runtime path or an actionable local error.
 Do not update system Node, shell profiles, Codex, Claude or Herdr.
 
+Create staging, publication parents and extracted directories at exactly 0700,
+using the private-directory owner and its bounded existing-directory repair.
+Never chmod an existing published runtime tree or alter its receipt. Archive
+directory modes cannot widen them. Preserve archive file modes and bytes, and
+compute tree identity only after establishing the private directory modes.
+
 Module function `stageOwnedNode({home, artifact, platform, arch, transactionId}, ports)`
 returns `{stagedNode, nodeVersion, artifactIdentity}` or `{code, next}` using only
 transaction-owned temporary paths outside update.lock. Module function
@@ -51,6 +57,8 @@ Only the versions owner may garbage-collect a proven-unreferenced Node.
 ## Dependencies
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
+- [Private directories](pdd-directory.prompt.md): generation/runtime for staging,
+  extraction and owned publication parents.
 - [Install lock](update-lock.prompt.md): required for generation/runtime; every
   runtime publication holds its lease; staging downloads do not.
 - [Versions](versions.prompt.md): required for generation/runtime; Runtime path

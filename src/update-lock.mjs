@@ -1,5 +1,6 @@
-// Generated from prompts/cli/update-lock.prompt.md (sha256: b5ceabddd881784082c6ba881a599fd3509aa9757802b5ff0fde10f6c42595cb).
-import { mkdir, realpath } from 'node:fs/promises';
+// Generated from prompts/cli/update-lock.prompt.md (sha256: 2855f8b3608fe3f08f14957e1d2491a743e523cf7c3bb7685c98de71b15a7f94).
+import { realpath } from 'node:fs/promises';
+import { repairPrivatePddHome } from './pdd-directory.mjs';
 import { spawn } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +17,7 @@ export async function withUpdateLock({ home, onWait, signal }, operation, ports 
   const root = resolve(home);
   let child;
   try {
-    await mkdir(join(root, '.pdd'), { recursive: true, mode: 0o700 });
+    await repairPrivatePddHome(join(root, '.pdd'));
     // Refuse an aliased installation directory, rather than locking another tree.
     if (await realpath(join(root, '.pdd')) !== join(root, '.pdd')) return { code: 'lock_unavailable' };
     child = (ports.spawn ?? spawn)(ports.lockHelper ?? kernelLockHelper, ['--hold', join(root, '.pdd/update.lock')], { stdio: ['pipe', 'pipe', 'ignore'] });

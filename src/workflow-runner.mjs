@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 709de1d46a6ff6b4713eb138cb8035ea028f093e55a0cc074cf928f3d08b6e3c).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 652fe2f4e4e2e8653a5140028599767fd6de934c004f21a19a5aa3671bc98ac1).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,11 +9,13 @@ import { homedir } from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { WORKFLOW_STAGES } from './workflow-definitions.mjs';
 import { loadWorkflowDefinition } from './workflow-definition-loader.mjs';
-import { resolveWorkflowIssue, prepareWorkflowPr, publishWorkflowPr, reconcileWorkflowPr } from './workflow-github.mjs';
+import { resolveWorkflowIssue, prepareWorkflowPr, publishWorkflowPr, reconcileWorkflowPr, commitWorkflowArtifacts } from './workflow-github.mjs';
 import { readWorkflowHandoff, assertWorkflowArtifacts, runWorkflowTestCommands } from './workflow-artifacts.mjs';
 import { appendRunIndex, writeRunStatus, runStatusFromState } from './workflow-run-records.mjs';
 export { WORKFLOW_STAGES } from './workflow-definitions.mjs';
 import { traceHerdrRequest } from './herdr-trace.mjs';
+import {encodeWorkflowJournalRecord,replayWorkflowJournalRecord} from './workflow-journal.mjs';
+const journalStates=new WeakMap();
 import { resolveHerdrExecutable } from './workflow-herdr-executable.mjs';
 
 const ordinaryExec = promisify(execFileCallback);
@@ -113,16 +115,17 @@ function readSaved(directory, onRecord) {
     if (!line.trim()) { padding = true; return; }
     if (padding) fail('Saved workflow journal is invalid.');
     const row = json(line);
-    if (row.seq !== ++sequence || row.state?.seq !== row.seq || !row.state
-      || !UUID.test(row.state.runId ?? '') || row.state.runId !== basename(directory)
-      || row.state.version !== 2 || !Array.isArray(row.state.definitions) || !Array.isArray(row.state.completed)
-      || !isDeepStrictEqual(row.state.definition?.stages,row.state.definitions) || row.state.name!==row.state.definition?.name
-      || saved && (row.state.runId !== saved.runId || row.state.root !== saved.root || row.state.gitDir !== saved.gitDir
-        || !isDeepStrictEqual(row.state.assignment, saved.assignment)
-        || ['name','agent','repo','base','inputDigest','contextDigest'].some(k=>row.state[k]!==saved[k])
-        || !isDeepStrictEqual(row.state.definition,saved.definition) || !isDeepStrictEqual(row.state.launchSelection,saved.launchSelection))) fail('Saved workflow journal is invalid.');
-    saved = row.state;
-    onRecord?.(row);
+    const state=replayWorkflowJournalRecord(saved,row);
+    if (row.seq !== ++sequence || state?.seq !== row.seq || !state
+      || !UUID.test(state.runId ?? '') || state.runId !== basename(directory)
+      || state.version !== 2 || !Array.isArray(state.definitions) || !Array.isArray(state.completed)
+      || !isDeepStrictEqual(state.definition?.stages,state.definitions) || state.name!==state.definition?.name
+      || saved && (state.runId !== saved.runId || state.root !== saved.root || state.gitDir !== saved.gitDir
+        || !isDeepStrictEqual(state.assignment, saved.assignment)
+        || ['name','agent','repo','base','inputDigest','contextDigest'].some(k=>state[k]!==saved[k])
+        || !isDeepStrictEqual(state.definition,saved.definition) || !isDeepStrictEqual(state.launchSelection,saved.launchSelection))) fail('Saved workflow journal is invalid.');
+    saved = state;
+    onRecord?.({...row,state:saved});
   };
   try {
     const info = fstatSync(fd);
@@ -152,11 +155,14 @@ function readSaved(directory, onRecord) {
     || saved.version !== 2 || !Array.isArray(saved.completed) || !saved.definition || !saved.assignment
     || !['codex', 'claude'].includes(saved.agent) || !isDeepStrictEqual(saved.definitions, saved.definition.stages)
     || saved.name !== saved.definition.name || saved.assignment.runId !== saved.runId) fail('Saved workflow identity or definitions changed.');
+  journalStates.set(saved,JSON.parse(JSON.stringify(saved)));
   return saved;
 }
 async function record(s, directory, event, metadata = {}) {
   s.seq = (s.seq ?? 0) + 1;
-  durable(join(directory, 'journal.jsonl'), { seq: s.seq, event, ...(s.__decisionId && !metadata.decisionId ? { decisionId: s.__decisionId } : {}), ...metadata, state: s });
+  const row=encodeWorkflowJournalRecord(journalStates.get(s),s,{event,...(s.__decisionId&&!metadata.decisionId?{decisionId:s.__decisionId}:{}),...metadata});
+  durable(join(directory,'journal.jsonl'),row);
+  journalStates.set(s,JSON.parse(JSON.stringify(s)));
   const ports = s.__recordPorts;
   if (!ports) return;
   if (event === 'run.started') {
@@ -305,6 +311,7 @@ function nativePorts(s, directory, r, options, p) {
         if (pending.backend?.[field] != null && !isDeepStrictEqual(pending.backend[field], backend[field]))
           fail('An established native backend identity changed.');
       }
+      if(!transition&&isDeepStrictEqual(pending.backend,backend))return;
       pending.backend = structuredClone(backend);
       await record(s, directory, 'agent.backend');
     }
@@ -451,7 +458,11 @@ async function makePr(s, stage, r, directory, p) {
   if (stage.publication === 'verified') {
     const checked = s.completed.findLast(entry => s.definitions.find(definition => definition.id === entry.id)?.protocol === 'verify');
     const verification = checked?.verification, plan = s.accepted?.testCommands;
-    if (!verification || !isDeepStrictEqual(verification.output, s.expected)
+    const checkpoint = s.artifactCommits?.findLast(entry => entry.stage === stage.id);
+    const verifiedInput = isDeepStrictEqual(verification?.output, s.expected)
+      || checkpoint && isDeepStrictEqual(verification?.output, checkpoint.previous)
+        && isDeepStrictEqual(checkpoint.current, s.expected) && checkpoint.evidenceDigest === verification?.evidenceDigest;
+    if (!verification || !verifiedInput
       || !isDeepStrictEqual(verification.testCommands, plan) || !plan?.length
       || checked.handoff?.checks?.length !== plan.length || checked.handoff.checks.some(check => check.exitCode !== 0)
       || verification.evidenceDigest !== checked.acceptance?.evidenceDigest)
@@ -459,6 +470,27 @@ async function makePr(s, stage, r, directory, p) {
   }
   for (const merged of s.completed.filter(entry => entry.mergeCommit && (!stage.requiresMerge || entry.id === stage.requiresMerge)))
     await git(p, r.root, 'merge-base', '--is-ancestor', merged.mergeCommit, 'HEAD');
+  const files = structuredClone(s.accepted?.files ?? []);
+  await assertWorkflowArtifacts({cwd:r.root, files:s.completed.flatMap(step => step.handoff?.files ?? []).filter((file, index, all) =>
+    all.findLastIndex(other => other.path === file.path) === index)});
+  const previous = structuredClone(s.expected);
+  s.artifactCommitIntent = {stage:stage.id, previous, files, headBranch:s.assignment.branch};
+  await record(s, directory, 'publication.artifacts.intent');
+  const checkpoint = await commitWorkflowArtifacts({cwd:r.root,runId:s.runId,stageId:stage.id,
+    headBranch:s.assignment.branch,baseBranch:s.base,expectedHead:previous.head,files},p.commandPorts);
+  await assertWorkflowArtifacts({cwd:r.root, files:s.completed.flatMap(step => step.handoff?.files ?? []).filter((file, index, all) =>
+    all.findLastIndex(other => other.path === file.path) === index)});
+  await assignedRepository(s.assignment,p);
+  const updated = await fingerprint(r,p);
+  if (updated.head !== checkpoint.headSha) fail('Artifact checkpoint source changed before recording.');
+  if (checkpoint.headSha !== previous.head) {
+    const checked = s.completed.findLast(entry => s.definitions.find(definition => definition.id === entry.id)?.protocol === 'verify');
+    s.artifactCommits ??= [];
+    s.artifactCommits.push({stage:stage.id,previous,current:updated,files,committedPaths:checkpoint.committedPaths,
+      evidenceDigest:checked?.verification?.evidenceDigest ?? null});
+  } else if (!isDeepStrictEqual(previous,updated)) fail('Artifact checkpoint changed the saved source input.');
+  s.expected = updated; s.artifactCommitIntent = null;
+  await record(s,directory,'publication.artifacts.committed');
   const intent = await prepareWorkflowPr({ cwd: r.root, runId: s.runId, stageId: stage.id,
     repository: s.repo, baseBranch: s.base, bodyFile: join(directory, `pr-${stage.id}.md`) }, p.commandPorts);
   if(typeof p.scanWorkflowPublication==='function'){

@@ -19,5 +19,8 @@ The [owning prompt](../../prompts/cli/workflow-github.prompt.md) defines the con
 - **AC12:** Closed-unmerged readback never claims a merge.
 - **AC13:** A scan finding adds a redacted warning but does not block otherwise authorized publication.
 
+- **AC14:** Accepted scope artifacts left uncommitted by the agent are committed with their exact approved bytes before the implementation PR; the PR includes both artifacts and the agent commit.
+- **AC15:** Unrelated dirty paths, altered artifact hashes or branch/HEAD drift refuse before publication, with unrelated paths and repair guidance; inspection and uncertain recovery do not repeat commits.
+
 [Expected cases](../../vectors/cli/workflow-github.json) are independent synthetic
 expectations. They are not observed program output or a claim that code ran.

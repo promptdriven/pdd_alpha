@@ -1,0 +1,106 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { buildBootstrap } from '../../launcher/build-bootstrap.mjs';
+import { directoryDigest } from '../../src/owned-node.mjs';
+import { readInstallRecord } from '../../src/install-record.mjs';
+import { temporary, put, repo } from './pkg-fixtures.mjs';
+
+const execute = promisify(execFile);
+
+// Actual shell, shipped entry/modules/native helpers, selected Node, activation,
+// launcher and public setup. Only HTTPS delivery, Herdr and service-manager
+// commands are local stand-ins; the restricted PATH cannot reach a real service.
+async function stockRuntime(t) {
+  const root = await temporary(t), home = join(root, 'home'), tools = join(root, 'tools');
+  const cwd = join(root, 'caller project'), capture = join(root, 'service-calls');
+  await fs.mkdir(home); await fs.mkdir(tools); await fs.mkdir(cwd);
+  for (const name of ['uname', 'openssl', 'tar', 'gzip', 'awk', 'df', 'mktemp', 'mkdir', 'chmod', 'cat', 'cp']) {
+    const file = (await execute('/bin/sh', ['-c', `command -v ${name}`])).stdout.trim();
+    await fs.symlink(file, join(tools, name));
+  }
+  await put(join(tools, 'systemctl'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$PDD_SERVICE_CALLS"\n[ "${PDD_SERVICE_FAILURE:-0}" = 0 ]\n', 0o755);
+  await put(join(tools, 'systemd-run'), '#!/bin/sh\nexit 99\n', 0o755);
+  await put(join(tools, 'herdr'), '#!/bin/sh\n[ "$1" = --version ] || exit 98\nprintf "herdr synthetic-offline\\n"\n', 0o755);
+  const nodeName = `node-v${process.versions.node}-${process.platform}-${process.arch}`;
+  const nodeTree = join(root, nodeName), alpha = join(root, 'package');
+  await fs.mkdir(join(nodeTree, 'bin'), { recursive: true });
+  await fs.copyFile(process.execPath, join(nodeTree, 'bin/node'));
+  await fs.mkdir(alpha);
+  for (const path of ['src', 'launcher', 'bin', 'docs', 'skills/pdd', '.pdd/workflows', 'package.json']) {
+    await fs.cp(join(repo, path), join(alpha, path), { recursive: true });
+  }
+  const nodeArchive = join(root, 'node.tar.gz'), alphaArchive = join(root, 'alpha.tar.gz');
+  await execute('tar', ['-czf', nodeArchive, '-C', root, nodeName], { env: { ...process.env, GZIP: '-1' } });
+  await execute('tar', ['-czf', alphaArchive, '-C', root, 'package']);
+  const asset = async (path, name) => {
+    const bytes = await fs.readFile(path);
+    return { url: `https://release.invalid/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'),
+      integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64'), provenance: 'synthetic offline release' };
+  };
+  const descriptor = { releaseId: 'C4-stock', pddVersion: JSON.parse(await fs.readFile(join(alpha, 'package.json'))).version,
+    alpha: await asset(alphaArchive, 'alpha'), nodes: { [`${process.platform}-${process.arch}`]: { ...await asset(nodeArchive, 'node'), version: process.versions.node } } };
+  const installer = join(root, 'install.sh');
+  await buildBootstrap({ descriptor, destination: installer });
+  await put(join(tools, 'curl'), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do case "$1" in https://release.invalid/node) source=$PDD_NODE_ARCHIVE ;; https://release.invalid/alpha) source=$PDD_ALPHA_ARCHIVE ;; -o) shift; destination=$1 ;; esac; shift; done\n[ -n "${source:-}" ] && [ -n "${destination:-}" ] || exit 97\n/bin/cp "$source" "$destination"\n', 0o755);
+  const env = { HOME: home, PATH: tools, LC_ALL: 'C', PDD_SERVICE_CALLS: capture, PDD_NODE_ARCHIVE: nodeArchive, PDD_ALPHA_ARCHIVE: alphaArchive };
+  const run = extra => execute('/bin/sh', ['-c', 'umask 002; exec /bin/sh "$1" --no-phone', 'stock-case', installer], { cwd, env: { ...env, ...extra }, timeout: 90000 });
+  return { home, tools, capture, run };
+}
+
+test('stock installer reaches real public setup after publication; rerun discloses retained release and repairs only mutable roots', { timeout: 120000 }, async t => {
+  const f = await stockRuntime(t);
+  const first = await f.run();
+  assert.match(first.stdout, /Public recovery service ready\./);
+  assert.doesNotMatch(first.stderr, /lock_unavailable|record_io/);
+  const record = (await readInstallRecord({ home: f.home })).value;
+  assert.equal(record.transaction.phase, 'ready'); assert.equal(record.transaction.to.releaseId, 'C4-stock');
+  const runtime = record.transaction.to;
+  assert.equal(await fs.realpath(join(f.home, '.pdd/current')), runtime.versionRoot);
+  await fs.access(join(f.home, '.pdd/launcher/pdd-launch'), 1);
+  assert.equal(record.herdr, join(f.tools, 'herdr'));
+  const inspect = async path => {
+    assert.equal((await fs.lstat(path)).mode & 0o7777, 0o700, path);
+    for (const entry of await fs.readdir(path, { withFileTypes: true })) if (entry.isDirectory()) await inspect(join(path, entry.name));
+  };
+  await inspect(join(f.home, '.pdd'));
+  const immutable = [runtime.versionRoot, join(f.home, '.pdd/tools/node', runtime.nodeVersion)];
+  const snapshots = [];
+  for (const path of immutable) {
+    // Simulate a historical published tree. The private parent suffices; its
+    // directory modes and mode-sensitive integrity receipt must remain exact.
+    await fs.chmod(path, 0o775);
+    snapshots.push({ path, mode: (await fs.stat(path)).mode, digest: await directoryDigest(path),
+      receipt: await fs.readFile(join(path, path === runtime.versionRoot ? '.pdd-release.json' : '.pdd-node.json')) });
+  }
+  // Only the root mode was widened; descendants and receipts remain valid.
+  const mutable = ['logs', 'runs', 'fleet', 'accounts', 'claims', 'install', 'link'];
+  for (const name of mutable) { await fs.mkdir(join(f.home, '.pdd', name), { recursive: true }); await fs.chmod(join(f.home, '.pdd', name), 0o775); }
+  await fs.chmod(join(f.home, '.pdd'), 0o775);
+  const second = await f.run();
+  assert.match(second.stdout, /did not install a new release/i);
+  assert.match(second.stdout, /existing.*retained/i);
+  assert.match(second.stdout, /Public recovery service ready\./);
+  assert.equal((await fs.stat(join(f.home, '.pdd'))).mode & 0o7777, 0o700);
+  for (const name of mutable) assert.equal((await fs.stat(join(f.home, '.pdd', name))).mode & 0o7777, 0o700);
+  for (const item of snapshots) {
+    assert.equal((await fs.stat(item.path)).mode, item.mode);
+    assert.equal(await directoryDigest(item.path), item.digest);
+    assert.deepEqual(await fs.readFile(join(item.path, item.path === runtime.versionRoot ? '.pdd-release.json' : '.pdd-node.json')), item.receipt);
+  }
+  assert.equal((await readInstallRecord({ home: f.home })).value.transaction.id, record.transaction.id);
+  assert.match(await fs.readFile(f.capture, 'utf8'), /enable --now pdd-runs-keeper\.service/);
+});
+
+test('stock installer preserves a genuine service failure after ready runtime publication', { timeout: 120000 }, async t => {
+  const f = await stockRuntime(t);
+  await assert.rejects(f.run({ PDD_SERVICE_FAILURE: '1' }), error => error.code === 1 && /service_unavailable/.test(error.stderr));
+  const record = (await readInstallRecord({ home: f.home })).value;
+  assert.equal(record.transaction.phase, 'ready');
+  assert.equal(await fs.realpath(join(f.home, '.pdd/current')), record.transaction.to.versionRoot);
+  assert.equal((await fs.stat(join(f.home, '.pdd'))).mode & 0o7777, 0o700);
+});

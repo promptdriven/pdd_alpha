@@ -65,7 +65,10 @@ Only a different published release is an automatic retry candidate. Reports are
 `release.block`. Persist before delivery; retry delivery by the same report id.
 Reports contain no account, token, prompt, message or device credential.
 
-Create install directory 0700 and record 0600. Write the complete JSON to an
+Create missing PDD directories at exactly 0700 through the private-directory
+owner, repairing existing `.pdd` and direct mutable children only; preserve
+existing deeper directory modes and immutable runtime receipts. Create the record 0600. Refuse aliased
+or differently owned directories without replacing the record. Write the complete JSON to an
 exclusive temporary sibling, fsync it, rename atomically and sync the containing
 directory before an effect depends on it. ENOSPC, interrupted write or rename
 failure keeps the last complete record and gives `record_io`; do not launch or
@@ -78,6 +81,8 @@ fields on rewrites; unknown phases give `recovery_required`, never ready.
 ## Dependencies
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
+- [Private directories](pdd-directory.prompt.md): generation/runtime for private
+  PDD ancestors of durable record files.
 - [Install lock](update-lock.prompt.md): required for generation/runtime writes;
   determines valid exclusive lease ownership.
 - [Versions](versions.prompt.md): required for generation/runtime; owns Runtime.

@@ -1,9 +1,10 @@
-// Generated from prompts/cli/workflow-github.prompt.md (sha256: e2492f285f593683787948c66b0a1f52b0b45e7b7f6501d6104068dc4be64138).
+// Generated from prompts/cli/workflow-github.prompt.md (sha256: 420934d5b784327eb1259a1336d85f502e8f69adecd404772c08f636b5551b33).
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { lstat, open, readFile, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { lstat, mkdtemp, open, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { assertWorkflowArtifacts } from './workflow-artifacts.mjs';
 
 const execute = promisify(execFile);
 const fields = 'number,url,state,headRefName,baseRefName,headRefOid,mergeCommit,body,isCrossRepository,headRepository,headRepositoryOwner';
@@ -17,11 +18,11 @@ const parseJson = value => { try { return JSON.parse(value); } catch { fail('wor
 const outcome = (state, message, pr = null) => ({ state, pr, message });
 
 function dependencies(ports = {}) {
-  const run = ports.execFile ?? ((file, args, { cwd }) => execute(file, args,
-    { cwd, encoding: 'utf8', shell: false, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }));
-  async function raw(cwd, file, args) {
+  const run = ports.execFile ?? ((file, args, { cwd, env }) => execute(file, args,
+    { cwd, ...(env ? {env} : {}), encoding: 'utf8', shell: false, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }));
+  async function raw(cwd, file, args, options = {}) {
     let result;
-    try { result = await run(file, args, { cwd }); }
+    try { result = await run(file, args, { cwd, ...options }); }
     catch (error) {
       if (!Number.isInteger(error?.code) || error.code === 0) fail('workflow_github_command_unavailable');
       result = { code: error.code, stdout: error.stdout ?? '' };
@@ -30,8 +31,8 @@ function dependencies(ports = {}) {
       || result.code !== undefined && !Number.isInteger(result.code)) fail('workflow_github_command_invalid');
     return { code: result.code ?? 0, stdout: result.stdout };
   }
-  async function command(cwd, file, args) {
-    const result = await raw(cwd, file, args);
+  async function command(cwd, file, args, options) {
+    const result = await raw(cwd, file, args, options);
     if (result.code !== 0) fail('workflow_github_command_failed');
     return result.stdout;
   }
@@ -133,6 +134,154 @@ function markerBody(body, marker) {
   return true;
 }
 
+function dirtyPaths(status) {
+  const rows = status.split('\0'), paths = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    if (row.length < 4 || row[2] !== ' ') fail('workflow_github_status_invalid');
+    paths.push(row.slice(3));
+    if (/[RC]/.test(row.slice(0, 2))) {
+      if (!rows[++i]) fail('workflow_github_status_invalid');
+      paths.push(rows[i]);
+    }
+  }
+  return [...new Set(paths)].sort();
+}
+function dirtyFailure(paths) {
+  throw Object.assign(new Error('workflow_github_worktree_dirty: ' + paths.map(path => JSON.stringify(path)).join(', ')
+    + '. Please commit or move unrelated changes before advancing; PDD preserves them.'), {code:'workflow_github_worktree_dirty'});
+}
+
+export async function commitWorkflowArtifacts(input, ports = {}) {
+  const {cwd,runId,stageId,headBranch,baseBranch,expectedHead,files} = structuredClone(input ?? {});
+  if (!identifier(runId) || !identifier(stageId) || !text(headBranch) || !text(baseBranch)
+    || headBranch === baseBranch || !sha(expectedHead) || !Array.isArray(files)
+    || files.some(file => !['prompt','story','cases'].includes(file?.role))) fail('workflow_github_artifact_intent_invalid');
+  const deps = dependencies(ports), accepted = new Set(files.map(file => file.path));
+  const literal = args => ['--literal-pathspecs', ...args];
+  const git = args => deps.command(cwd, 'git', args);
+  const status = async () => dirtyPaths(await git(['status','--porcelain=v1','-z','--untracked-files=all']));
+  const identity = async () => {
+    if ((await git(['rev-parse','--verify','HEAD'])).trim() !== expectedHead
+      || (await git(['symbolic-ref','--quiet','--short','HEAD'])).trim() !== headBranch)
+      fail('workflow_github_source_changed');
+  };
+  const acceptedOnly = async () => {
+    const paths = await status(), unrelated = paths.filter(path => !accepted.has(path));
+    if (unrelated.length) dirtyFailure(unrelated);
+    return paths;
+  };
+  await identity();
+  await assertWorkflowArtifacts({cwd,files});
+  const changed = new Set(await acceptedOnly());
+  // Compare exact unfiltered Git blobs, so ignored/missing or converted artifacts
+  // cannot be mistaken for accepted files already present in the commit.
+  const blobs = new Map();
+  for (const file of files) {
+    const blob = (await git(literal(['hash-object','--no-filters','--',file.path]))).trim();
+    if (!sha(blob)) fail('workflow_github_artifact_blob_invalid');
+    blobs.set(file.path,blob);
+    const saved = await deps.raw(cwd,'git',literal(['rev-parse','--verify',`HEAD:${file.path}`]));
+    if (saved.code !== 0 || saved.stdout.trim() !== blob) changed.add(file.path);
+  }
+  const indexChanged = path => {
+    throw Object.assign(new Error('workflow_github_artifact_index_changed: Accepted artifact '
+      + JSON.stringify(path) + ' has different staged changes. Commit or move those changes before advancing; PDD preserved your index.'),
+    {code:'workflow_github_artifact_index_changed'});
+  };
+  const assertIndex = async () => {
+    const existingStaged = (await git(['diff','--cached','--name-only','-z'])).split('\0').filter(Boolean);
+    const entries = new Map();
+    for (const path of existingStaged) {
+      if (!accepted.has(path)) dirtyFailure([path]);
+      if ((await git(literal(['rev-parse','--verify',`:${path}`]))).trim() !== blobs.get(path))
+        indexChanged(path);
+      entries.set(path,await git(literal(['ls-files','--stage','-z','--',path])));
+    }
+    return entries;
+  };
+  await assertIndex();
+  if (!changed.size) {
+    await identity(); await assertWorkflowArtifacts({cwd,files}); await acceptedOnly();
+    return {previousHead:expectedHead,headSha:expectedHead,committedPaths:[]};
+  }
+  const selected = [...changed].sort();
+  await identity(); await assertWorkflowArtifacts({cwd,files}); await acceptedOnly();
+  const indexPath = (await git(['rev-parse','--path-format=absolute','--git-path','index'])).trim();
+  if (!isAbsolute(indexPath) || await realpath(dirname(indexPath)) !== dirname(indexPath))
+    fail('workflow_github_artifact_index_changed');
+  await identity(); await assertWorkflowArtifacts({cwd,files}); await acceptedOnly();
+  const lockPath = indexPath + '.lock';
+  let lock;
+  try { lock = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); }
+  catch {
+    throw Object.assign(new Error('workflow_github_artifact_index_busy: Another Git operation holds the index lock, or it could not be created. Wait for Git to finish or check repository permissions; PDD left the index and any existing lock untouched.'),
+      {code:'workflow_github_artifact_index_busy'});
+  }
+  const lockIdentity = await lock.stat();
+  let scratch, indexPublished = false, headSha, committed;
+  try {
+    // Ordinary Git writers now exclude themselves on the real index. Recheck
+    // its contents AFTER the last status await, before staging anything.
+    const stagedBefore = await assertIndex();
+    const original = await open(indexPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let indexBytes;
+    try {
+      const entry = await original.stat();
+      if (!entry.isFile() || entry.nlink !== 1) fail('workflow_github_artifact_index_changed');
+      indexBytes = await original.readFile();
+    } finally { await original.close(); }
+    scratch = await mkdtemp(join(dirname(indexPath),'pdd-artifacts-'));
+    const privateIndex = join(scratch,'index'), seed = await open(privateIndex,'wx',0o600);
+    try { await seed.writeFile(indexBytes); } finally { await seed.close(); }
+    const env = {...process.env,GIT_INDEX_FILE:privateIndex};
+    const privateGit = args => deps.command(cwd,'git',args,{env});
+    await privateGit(literal(['add','--',...selected]));
+    const staged = (await privateGit(['diff','--cached','--name-only','-z'])).split('\0').filter(Boolean).sort();
+    if (JSON.stringify(staged) !== JSON.stringify(selected)) fail('workflow_github_artifact_index_changed');
+    for (const [path,entry] of stagedBefore)
+      if (await privateGit(literal(['ls-files','--stage','-z','--',path])) !== entry) indexChanged(path);
+    for (const path of selected) {
+      if ((await privateGit(literal(['rev-parse','--verify',`:${path}`]))).trim() !== blobs.get(path))
+        fail('workflow_github_artifact_index_changed');
+      const mode = (await privateGit(literal(['ls-files','--stage','-z','--',path]))).slice(0,6);
+      if (!['100644','100755'].includes(mode)) fail('workflow_github_artifact_index_changed');
+    }
+    await identity(); await assertWorkflowArtifacts({cwd,files});
+    // Commit the validated private index once; never reconstruct it from the
+    // worktree with --only or retry an interrupted response.
+    await privateGit(['commit','-m',`pdd: record accepted artifacts for ${runId}/${stageId}`]);
+    headSha = (await git(['rev-parse','--verify','HEAD'])).trim();
+    if (!sha(headSha) || headSha === expectedHead
+      || (await git(['symbolic-ref','--quiet','--short','HEAD'])).trim() !== headBranch
+      || (await git(['rev-list','--parents','-n','1',headSha])).trim() !== `${headSha} ${expectedHead}`)
+      fail('workflow_github_artifact_commit_unconfirmed');
+    committed = (await git(['diff-tree','--no-commit-id','--name-only','-z','-r',expectedHead,headSha,'--'])).split('\0').filter(Boolean).sort();
+    if (JSON.stringify(committed) !== JSON.stringify(selected)) fail('workflow_github_artifact_commit_unconfirmed');
+    for (const file of files)
+      if ((await git(literal(['rev-parse','--verify',`${headSha}:${file.path}`]))).trim() !== blobs.get(file.path))
+        fail('workflow_github_artifact_commit_unconfirmed');
+    await assertWorkflowArtifacts({cwd,files});
+    const currentLock = await lstat(lockPath);
+    if (currentLock.dev !== lockIdentity.dev || currentLock.ino !== lockIdentity.ino)
+      fail('workflow_github_artifact_index_changed');
+    await lock.writeFile(await readFile(privateIndex));
+    await lock.sync();
+    await rename(lockPath,indexPath);
+    indexPublished = true;
+  } finally {
+    await lock.close();
+    if (!indexPublished) {
+      const currentLock = await lstat(lockPath).catch(() => null);
+      if (currentLock?.dev === lockIdentity.dev && currentLock?.ino === lockIdentity.ino) await rm(lockPath);
+    }
+    if (scratch) await rm(scratch,{recursive:true,force:true});
+  }
+  const dirty = await status(); if (dirty.length) dirtyFailure(dirty);
+  return {previousHead:expectedHead,headSha,committedPaths:committed};
+}
+
 async function localTopic(cwd, baseBranch, bodyFile, deps) {
   if (!text(baseBranch) || !text(bodyFile)) fail('workflow_github_topic_invalid');
   await assertBodyPath(bodyFile);
@@ -146,8 +295,9 @@ async function localTopic(cwd, baseBranch, bodyFile, deps) {
     if (tracked.code !== 1) fail('workflow_github_body_must_be_untracked');
   }
   const status = await deps.command(cwd, 'git', ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
-  if (status.split('\0').filter(Boolean).some(row => !(inside && row === '?? ' + bodyRelative)))
-    fail('workflow_github_worktree_dirty');
+  const dirty = dirtyPaths(status).filter(path => !(inside && path === bodyRelative
+    && status.split('\0').includes('?? ' + bodyRelative)));
+  if (dirty.length) dirtyFailure(dirty);
   const headBranch = (await deps.command(cwd, 'git', ['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim();
   await deps.command(cwd, 'git', ['check-ref-format', '--branch', headBranch]);
   if (!text(headBranch) || headBranch === baseBranch) fail('workflow_github_topic_required');

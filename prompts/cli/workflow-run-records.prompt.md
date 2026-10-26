@@ -154,18 +154,20 @@ end, for example a no-decision resume or a `next-advance` proposal.
 <details>
 <summary><strong>Journal and assignment readers (for runs without a status file)</strong></summary>
 
-The [workflow runner](workflow-runner.prompt.md) owns the journal format: one
-JSON line `{seq, event, state}` per record, with the full state, so lines can
-be large. Both journal readers read `<runDir>/journal.jsonl` backwards from
+The [journal codec](workflow-journal.prompt.md) owns legacy full-state lines and
+new snapshots/deltas. The runner owns authoritative full-history validation;
+these display readers grant no execution authority. Both journal readers read `<runDir>/journal.jsonl` backwards from
 the end in 1 MB chunks and never load the whole file. A **complete line** ends
 with a newline. Bytes after the last newline are ignored with warning
 `partial_line`.
 
-- `readJournalLast` decodes only the last complete line. It returns `null`
-  with a warning when the file is missing (`missing`), the line is over 64 MB
-  (`too_large`), the line is not JSON (`bad_json`), `seq` is not an integer
-  ≥ 1 or `state` is not an object (`bad_record`), or `state.runId` is not the
-  last name of `runDir` (`run_mismatch`). It never falls back to an older line.
+- `readJournalLast` starts at the last complete line and collects its contiguous
+  delta predecessors back to the nearest snapshot, then replays forward to return
+  the complete latest state. A corrupt/unsupported delta or missing base yields
+  `null`, `bad_record`; do not fall back to an older visible state. Retain the
+  existing missing/too-large/bad-json/run-mismatch warnings. Legacy full-state
+  lines retain their existing shape and behavior. This bounded snapshot tail is
+  display evidence, not a substitute for the runner's full-history reader.
 - `readJournalSince` walks complete lines backwards and collects
   `{seq, event, decisionId}` for each line with `seq > afterSeq`.
   `decisionId` is the line's top-level `decisionId` string, else `null`. It
@@ -195,6 +197,8 @@ All readers only read. One bad line or file never hides the others.
 </details>
 
 ## Dependencies
+
+- [Journal codec](workflow-journal.prompt.md): required generation/runtime/verification context for snapshot and delta replay.
 
 | Input | Role | Uses |
 |---|---|---|

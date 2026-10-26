@@ -3,7 +3,7 @@
 Own `src/workflow-controller.mjs`. Draft for review. The module function
 `startWorkflowController({runId, runDir, root, workflow, issueNumber, runtime,
 decision = null}, ports)` starts the saved controller in the default Herdr
-session. It returns `{state, code, controller}` (plus a safe `message` on identity refusal), state `started`, `refused`,
+session. It returns `{state, code, controller}` (plus a safe `message` on refusal or uncertain proof), state `started`, `refused`,
 `failed` or `uncertain`. Preservation: new local launch interface; retain actual
 run identity, no repeated unknown effects and the person's panes and focus.
 
@@ -20,7 +20,11 @@ flowchart TD
     C -->|No| F([Refused: herdr_identity_unavailable])
     T -->|Reply or reply lost| R
     R -->|Exact live process proved| S([Started])
-    R -->|Unproved or conflicting| U([Uncertain, retain intent])
+    R -->|Bound start, stopped or human wait, lifetime lock free| E[Save exited proof]
+    E -->|New decision, current admission valid| W
+    E -->|Same request| X([Exited, inspect only])
+    R -->|Not yet bound, within 15 seconds| R
+    R -->|Still unproved or conflicting| U([May be running, retain intent])
 ```
 
 <details>
@@ -80,7 +84,9 @@ process before its generation record is durable remains pending/uncertain,
 never started. Persist both the process and journal proof. A typed-line
 acknowledgement is insufficient. If the controller already exited, a validated
 journal record for this launch/decision can prove it ran, but not that it is live.
-Missing or conflicting proof gives `uncertain`, even after an ok type reply.
+Poll fresh journal and process evidence for up to 15 seconds after delivery or inspection, allowing controller.started to become durable after the process begins. Each read remains bound to the same saved pane/launch; never redeliver during polling. Recheck the monotonic deadline after awaited observations and lifetime-lock results and before accepting or persisting either live or exited proof: an elapsed time greater than 15000 ms returns `uncertain` without proof persistence or replacement admission, even if an overdue timer callback has not run. Evidence completed at exactly 15000 ms remains eligible for the same strict proof checks. Missing or conflicting proof at the deadline gives `uncertain`, even after an ok type reply. Its message says `Workflow controller may be running; check pdd workflow status RUN_ID.` rather than asserting it did not start.
+Before comparing a new decision with a prior non-exited launch, reconcile that prior launch against its own saved argv and decision. A matching live process remains owned: a different request refuses controller_busy, while the same request returns its proof. A strict journal controller.started for that prior launch, together with a free controller lifetime lock and either a proved stopped original process or the journal's current human wait, permits a durable exited phase before admitting a new current decision. Unknown lock, unbound journal, changed frozen proof or runtime/run conflict never authorizes replacement. A human wait does not override positive matching live process evidence. Recheck current revision, accepted artifacts, assignment, runtime and free lifetime lock through the existing admission authority for the new launch. Same-decision retries remain inspect-only.
+
 An uncertain launch is inspect-only until journal/process evidence settles it;
 absence from one read is not permission to type again.
 

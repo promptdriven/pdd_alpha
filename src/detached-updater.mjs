@@ -1,4 +1,4 @@
-// Generated from prompts/cli/detached-updater.prompt.md (sha256: 8c96d2c5165de3f53aa04be956dcf52cce8effc322397b324666f0dfe0bf1ae9).
+// Generated from prompts/cli/detached-updater.prompt.md (sha256: e9bfe9a39d0617a0cca025e62f13708635bc5ed4172de95dc399e621668309c1).
 import * as fs from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -9,6 +9,7 @@ import { withUpdateLock } from './update-lock.mjs';
 import { readInstallRecord, writeInstallRecord, initialInstallRecord, durableJson } from './install-record.mjs';
 import { resolveRuntime } from './versions.mjs';
 import { stageOwnedNode, ensureOwnedNode, downloadArtifact, verifyArtifactBytes, extractVerifiedTar, directoryDigest } from './owned-node.mjs';
+import { ensurePrivateDirectory } from './pdd-directory.mjs';
 import { replaceInstallPointer, localProcessProof } from './pdd-launch.mjs';
 
 const execute = promisify(execFile), terminal = new Set(['ready', 'rolled_back']);
@@ -144,7 +145,7 @@ async function publish(home, staged, target, lease, ports) {
   } catch (e) { if (e.code !== 'ENOENT') throw e; try { await fs.lstat(expected); throw new Error('stage_failed'); } catch (missing) { if (missing.code !== 'ENOENT') throw missing; } }
   await durableJson(join(staged.alphaRoot, 'runtime.json'), runtime);
   await durableJson(join(staged.alphaRoot, '.pdd-release.json'), receipt);
-  await fs.mkdir(dirname(expected), { recursive: true, mode: 0o700 });
+  await ensurePrivateDirectory(dirname(expected));
   await fs.rename(staged.alphaRoot, expected);
   return resolveRuntime({ home, versionRoot: expected }, ports);
 }

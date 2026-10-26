@@ -1,12 +1,14 @@
 #!/bin/sh
-# Generated from prompts/cli/bootstrap.prompt.md (sha256: d198a03e4fa35a1aa37c81f1fc660e09baca624a604ce12c0ac2625a2021e069).
+# Generated from prompts/cli/bootstrap.prompt.md (sha256: b4716bbd06c91a122df8403b0cf352e4676439489aa53c59ee394a492594f45b).
 set -eu
+# This installer is a child process; never change the invoking shell's umask.
+umask 077
 # Release CI replaces this empty, pinned table in its verified installer. A
 # checkout deliberately contains no production URL, key or fabricated artifact.
 pdd_release_table='__PDD_RELEASE_TABLE__'
 pdd_bootstrap_fail() { printf '%s\n' "$1" 'Next: Obtain the verified GitHub release installer, then rerun pdd setup.' >&2; exit 1; }
 case "$pdd_release_table" in '__PDD_RELEASE_TABLE__') pdd_bootstrap_fail 'verification_error: trusted release descriptor is unavailable.' ;; esac
-for pdd_tool in uname curl openssl tar gzip awk df mktemp mkdir chmod cat; do
+for pdd_tool in uname curl openssl tar gzip awk df mktemp mkdir chmod cat cp; do
   command -v "$pdd_tool" >/dev/null 2>&1 || pdd_bootstrap_fail "Missing prerequisite: $pdd_tool"
 done
 case "$(uname -s)" in Darwin) pdd_os=darwin ;; Linux) pdd_os=linux ;; *) pdd_bootstrap_fail 'Unsupported runtime.' ;; esac
@@ -17,9 +19,54 @@ fi
 [ -n "${HOME:-}" ] || pdd_bootstrap_fail 'Owned install home is unavailable.'
 case "$HOME" in /*) ;; *) pdd_bootstrap_fail 'Owned install home must be absolute.' ;; esac
 [ ! -L "$HOME/.pdd" ] || pdd_bootstrap_fail 'Owned install path is a symlink.'
+# Enter through the current verified directory, then operate on ".". A path
+# recheck after chmod would be too late if an ancestor had become a symlink.
+pdd_enter_private() {
+  [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] || pdd_bootstrap_fail 'Owned install directory changed.'
+  [ ! -L "$1" ] || pdd_bootstrap_fail 'Owned install directory is a symlink.'
+  pdd_created=false
+  if [ -e "$1" ]; then
+    [ -d "$1" ] && [ -O "$1" ] || pdd_bootstrap_fail 'Owned install directory has an unsafe type or owner.'
+  else
+    pdd_created=true
+    mkdir -m 700 "./$1" || pdd_bootstrap_fail 'Owned install directory cannot be created.'
+  fi
+  pdd_directory="$pdd_directory/$1"
+  CDPATH= cd -P "./$1" || pdd_bootstrap_fail 'Owned install directory cannot be opened.'
+  [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] && [ -O . ] || pdd_bootstrap_fail 'Owned install directory changed.'
+  if [ "$pdd_created" = true ] || [ "${2:-}" = repair ]; then
+    chmod 700 . || pdd_bootstrap_fail 'Owned install directory cannot be made private.'
+  fi
+  [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] || pdd_bootstrap_fail 'Owned install directory changed.'
+}
+# This traversal is used only inside the newly extracted transaction tree.
+# Each child inherits the entered parent as its filesystem authority.
+pdd_normalize_fresh_tree() {
+  [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] || pdd_bootstrap_fail 'Extracted directory changed.'
+  for pdd_child in .[!.]* ..?* *; do
+    if [ -L "./$pdd_child" ]; then
+      pdd_bootstrap_fail 'Extracted directory contains an unsafe link.'
+    elif [ -d "./$pdd_child" ]; then
+      (pdd_enter_private "$pdd_child" repair; pdd_normalize_fresh_tree) || return 1
+    elif [ -e "./$pdd_child" ] && [ ! -f "./$pdd_child" ]; then
+      pdd_bootstrap_fail 'Extracted tree contains an unsafe type.'
+    fi
+  done
+  [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] || pdd_bootstrap_fail 'Extracted directory changed.'
+}
+(
+  CDPATH= cd -P "$HOME" || pdd_bootstrap_fail 'Owned install home cannot be opened.'
+  pdd_directory="$HOME"
+  pdd_enter_private .pdd repair
+  for pdd_mutable in logs runs fleet accounts claims install link; do
+    if [ -e "$pdd_mutable" ] || [ -L "$pdd_mutable" ]; then
+      (pdd_enter_private "$pdd_mutable" repair) || exit 1
+    fi
+  done
+) || exit 1
 if [ -e "$HOME/.pdd/current" ] || [ -L "$HOME/.pdd/current" ] || [ -e "$HOME/.pdd/install/record.json" ]; then
   if [ -x "$HOME/.pdd/launcher/pdd-launch" ]; then
-    printf '%s\n' 'Continue with pdd setup'
+    printf '%s\n' 'This installer did not install a new release. The existing PDD runtime is retained.' 'Continue with pdd setup to check that existing installation.'
     exec "$HOME/.pdd/launcher/pdd-launch" cli setup "$@"
   fi
   # Re-enter only through this verified installer. Its Node entry must reconcile
@@ -32,9 +79,15 @@ $pdd_row
 EOF
 IFS=$pdd_old_ifs
 case "$pdd_node_url $pdd_alpha_url" in https://*' 'https://*) ;; *) pdd_bootstrap_fail 'Release assets require HTTPS.' ;; esac
-mkdir -p "$HOME/.pdd/update/staging" || pdd_bootstrap_fail 'Owned path is not writable.'
-[ ! -L "$HOME/.pdd/update" ] && [ ! -L "$HOME/.pdd/update/staging" ] || pdd_bootstrap_fail 'Staging path is a symlink.'
-pdd_stage=$(mktemp -d "$HOME/.pdd/update/staging/bootstrap-XXXXXXXX") || pdd_bootstrap_fail 'Cannot stage this install.'
+pdd_stage=$(
+  CDPATH= cd -P "$HOME" || pdd_bootstrap_fail 'Owned install home cannot be opened.'
+  pdd_directory="$HOME"
+  pdd_enter_private .pdd repair
+  pdd_enter_private update
+  pdd_enter_private staging
+  pdd_name=$(mktemp -d ./bootstrap-XXXXXXXX) || pdd_bootstrap_fail 'Cannot stage this install.'
+  printf '%s/%s\n' "$pdd_directory" "${pdd_name#./}"
+) || pdd_bootstrap_fail 'Cannot stage this install.'
 # Incomplete data remains transaction-owned after interruption. No trap removes
 # a folder that an accepted worker or a flipped current might reference.
 printf '%s\n' 'Downloading verified runtime. Continue with pdd setup'
@@ -59,11 +112,23 @@ awk 'substr($0,1,1)!="-" {exit 1} END {if (NR!=1) exit 1}' "$pdd_stage/node-memb
 pdd_safe_archive "$pdd_stage/alpha.tar.gz" || pdd_bootstrap_fail 'Unsafe Alpha archive.'
 tar -tvzf "$pdd_stage/alpha.tar.gz" > "$pdd_stage/alpha-members" || pdd_bootstrap_fail 'Invalid Alpha archive.'
 awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" {exit 1}' "$pdd_stage/alpha-members" || pdd_bootstrap_fail 'Alpha archive contains unsupported links.'
-mkdir "$pdd_stage/node" "$pdd_stage/alpha"
-tar -xzf "$pdd_stage/node.tar.gz" -C "$pdd_stage/node" --strip-components=1 "$pdd_node_member" || pdd_bootstrap_fail 'Runtime extraction failed.'
-tar -xzf "$pdd_stage/alpha.tar.gz" -C "$pdd_stage/alpha" --strip-components=1 || pdd_bootstrap_fail 'Alpha extraction failed.'
+(
+  CDPATH= cd -P "$pdd_stage" || pdd_bootstrap_fail 'Verified staging directory cannot be opened.'
+  pdd_directory="$pdd_stage"
+  [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] && [ -O . ] || pdd_bootstrap_fail 'Verified staging directory changed.'
+  mkdir node alpha || pdd_bootstrap_fail 'Fresh extraction directories cannot be created.'
+  tar -xzf ./node.tar.gz -C ./node --strip-components=1 "$pdd_node_member" || pdd_bootstrap_fail 'Runtime extraction failed.'
+  tar -xzf ./alpha.tar.gz -C ./alpha --strip-components=1 || pdd_bootstrap_fail 'Alpha extraction failed.'
+  for pdd_tree in node alpha; do
+    (pdd_enter_private "$pdd_tree" repair; pdd_normalize_fresh_tree) || exit 1
+  done
+  # Publication moves alpha into versions/. Keep the executing module/native
+  # closure at its own stable path until activation and support setup finish.
+  cp -R -P ./alpha ./bootstrap || pdd_bootstrap_fail 'Bootstrap support cannot be staged.'
+  (pdd_enter_private bootstrap repair; pdd_normalize_fresh_tree) || exit 1
+) || exit 1
 pdd_probe=$("$pdd_stage/node/bin/node" -p 'process.versions.node+"|"+process.platform+"|"+process.arch') || pdd_bootstrap_fail 'Verified runtime cannot execute.'
 [ "$pdd_probe" = "$pdd_version|$pdd_os|$pdd_arch" ] || pdd_bootstrap_fail 'Runtime identity mismatch.'
 printf '%s' "$pdd_descriptor" > "$pdd_stage/release.json"
 printf '%s\n' 'Runtime ready. Continue with pdd setup'
-exec "$pdd_stage/node/bin/node" "$pdd_stage/alpha/launcher/bootstrap-entry.mjs" "$HOME" "$pdd_stage" "$@"
+exec "$pdd_stage/node/bin/node" "$pdd_stage/bootstrap/launcher/bootstrap-entry.mjs" "$HOME" "$pdd_stage" "$@"

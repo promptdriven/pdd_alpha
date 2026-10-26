@@ -233,6 +233,81 @@
         "needsYou": true,
         "blockedOnlyByScan": false
       }
+    },
+    {
+      "id": "accepted-scope-artifact-composition",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "scope": "accepted prompt, Story and cases remain untracked",
+        "change": "agent commits implementation only",
+        "verification": "exact accepted native checks succeeded"
+      },
+      "when": {
+        "call": "runner open-pr"
+      },
+      "expected": {
+        "localCommit": "exact accepted artifact files and bytes only",
+        "prIncludes": "scope artifacts and agent implementation commit",
+        "originalVerificationPreserved": true,
+        "pushCount": 1,
+        "createCount": 1
+      }
+    },
+    {
+      "id": "artifact-checkpoint-unrelated-dirty",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "scope": "accepted artifact hashes match",
+        "worktree": "unrelated staged or unstaged or untracked path"
+      },
+      "when": {
+        "call": "runner open-pr"
+      },
+      "expected": {
+        "rejected": true,
+        "message": "lists unrelated paths and asks to commit or move them",
+        "artifactCommit": false,
+        "remoteWrites": false,
+        "unrelatedIndexAndBytesPreserved": true
+      }
+    },
+    {
+      "id": "artifact-checkpoint-drift",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "scope": "hash mismatch, unsafe file or changed branch/HEAD"
+      },
+      "when": {
+        "call": "commitWorkflowArtifacts"
+      },
+      "expected": {
+        "rejected": true,
+        "commit": false,
+        "remoteWrites": false
+      }
+    },
+    {
+      "id": "artifact-checkpoint-inspection-and-interruption",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "checkpoint": "commit took effect but success record was not durable"
+      },
+      "when": {
+        "call": "resume or inspect"
+      },
+      "expected": {
+        "savedInputDriftRefuses": true,
+        "noCommitRepeat": true,
+        "noPublication": true
+      }
     }
   ]
 }

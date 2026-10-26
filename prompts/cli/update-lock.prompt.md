@@ -3,7 +3,10 @@
 Own `src/update-lock.mjs`. Draft for review; new work, behavioral refinement.
 Own the one kernel lock on `~/.pdd/update.lock` for setup and activation, including
 their record updates, startup recovery, rollback and version collection. Download
-staging is outside this lock. Concurrent install mutations wait without
+staging is outside this lock. Own `launcher/native/build.mjs` as the release-time
+native build entry: build the kernel lock and the private-directory owner's
+separate executable for the current supported platform/architecture. Building
+that directory helper does not change kernel-lock behavior or grant it leases. Concurrent install mutations wait without
 corrupting an install. A process id or an old file is never lock ownership.
 
 Module function `withUpdateLock({home, onWait, signal}, operation, ports)` runs
@@ -12,6 +15,13 @@ waiting caller gets one `onWait("Another setup or update is running. Waiting…"
 Cancellation before acquisition gives `cancelled` and no operation. A kernel-lock
 failure gives `lock_unavailable`; there is no PID-file fallback. Exceptions inside
 the operation propagate after release. Internals and the native binding are free.
+
+Before acquisition secure `~/.pdd` and its existing direct mutable children
+through `repairPrivatePddHome` from the
+[private-directory owner](pdd-directory.prompt.md). Do not traverse runtime trees
+or change their receipts. A symlink, different owner or
+failed repair gives `lock_unavailable` without invoking the operation. Preserve
+the persistent lock inode and all lease/lifetime rules.
 
 <details>
 <summary><strong>Lifetime, durable lock identity and nested callers</strong></summary>
@@ -44,6 +54,8 @@ the last durable record without this lock and cannot claim it is current truth.
 ## Dependencies
 
 - [Prompting guide](../../docs/prompting-guide.md): required for authoring.
+- [Private directories](pdd-directory.prompt.md): required generation/runtime
+  context for the owned install directory before lock acquisition.
 - [Story](../../story/cli/UPDATE-LOCK.md) and [cases](../../vectors/cli/update-lock.json):
   required for verification.
 - Runtime: a bundled kernel-lock binding/helper on Mac and Linux; it must work

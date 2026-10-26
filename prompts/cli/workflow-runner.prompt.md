@@ -104,7 +104,7 @@ stage/check/artifact/PR in its immutable assigned worktree, and keep its journal
 worktree gitDir. Missing/ambiguous assignments or incomplete post-allocation journals
 refuse, never allocate another attempt automatically.
 
-Keep append-only durable journal snapshots and artifacts under the actual absolute Git
+Keep append-only durable journal events, periodic snapshots and artifacts under the actual absolute Git
 directory's `pdd/workflows/<UUID>/`, never a tracked product file or global config.
 Metadata directories and journal files must be canonical ordinary paths, never symlink
 redirects or multiply linked journal files; refuse before writing through an alias.
@@ -121,13 +121,31 @@ Refuse changed frozen context, and retain exact saved definition/Markdown/contex
 snapshots. The current source guide is not a resume input. New runs use loader selection
 from the original project root before allocation; a complete local recipe overrides the
 bundle, including for arbitrary safe workflow names. Read durable JSONL incrementally
-with memory bounded by the current record rather than total journal size.
+with memory bounded by the reconstructed state and current record rather than total journal size.
 
 Validate every historical sequence and run binding in order before returning the
 complete latest state; a large valid journal must not require one whole-file string.
 Preserve append-only bytes, terminal-newline completeness, malformed-history refusal and
 controller-lock ordering; do not compact, drop records or replace saved context. A
 malformed or torn journal refuses rather than inventing state.
+
+The [journal codec](workflow-journal.prompt.md) owns the backward-compatible
+snapshot/delta representation. Append changes against the last durable state,
+with a full snapshot on the first record and every 128th committed sequence.
+Never rewrite existing journals to adopt the format. Replay every delta before
+applying the same historical identity and definition checks as legacy snapshots.
+`readWorkflowJournal` and its `onRecord` callback continue to expose complete
+reconstructed states, not storage deltas.
+
+A repeated, identical `agent.backend` observation does not create an event,
+advance sequence or rewrite derived status. Check identity and transition guards
+before treating the checkpoint as unchanged. Changed observations and all effect
+intents remain durable before callers proceed; timestamps alone must not force
+backend checkpoints. Recovery after a process restart must recover the same
+backend, request, evidence and native identity without delivery or retry.
+At four identical observations per second, a one-hour idle stage with roughly
+77 KB state including 57 KB context keeps its journal below 5 MB. Periodic
+snapshots count committed changes, not polling attempts or elapsed idle time.
 
 Before any native launch, push or PR create, flush its specific intent. After crash or unknown delivery, reconcile existing state; never blindly replay a native session, push or PR create. No-decision resume may inspect journal/artifacts and read existing PR/merge state, but cannot launch a new agent, push, create a PR or automatically advance into an effect. Explicit approve permits ordinary next progress, with the same guards; skip is confined to optional steps.
 
@@ -214,6 +232,26 @@ publication additionally requires a completed successful verify record bound to 
 exact current HEAD/worktree fingerprint and accepted argv plan, with actual zero-exit
 results for every command. Persist that verification binding with its accepted evidence
 and carry it into completion.
+
+Before preparing a PR, checkpoint only the pinned accepted proposal handoff files
+(prompt, Story and cases) through `commitWorkflowArtifacts`. Preserve the initial
+currentness/assignment/ancestry checks and, for verified publication, require the
+successful verify binding before any checkpoint effect. Durably save the exact
+files/hashes, branch, previous fingerprint and stage as `publication.artifacts.intent`
+before the local commit. Other dirty files refuse with their paths and guidance;
+never add a whole directory, include unrelated staged changes, or commit agent code.
+
+A successful artifact-only commit changes HEAD/index bookkeeping without changing
+any tested file bytes. Recheck all completed handoff files and record the previous
+and current fingerprint, exact committed paths and verification evidence digest as
+`publication.artifacts.committed` before preparing the remote intent. Preserve the
+original test execution fingerprint and evidence; only this recorded, validated
+artifact-only transition may connect it to the publication HEAD. An interrupted
+checkpoint is not blanket permission to adopt a new HEAD: existing saved-input drift
+checks refuse inspection/resume after an unrecorded commit, without repeating it.
+No-decision inspection performs no checkpoint. A completed checkpoint is idempotent:
+already committed files are not committed again and remote publication keeps its
+existing durable intent, one-call and read-only recovery rules.
 
 A later agent edit, including a report stage writing files, cannot reuse earlier test
 results for changed source. Proposal publication keeps its independently accepted
@@ -683,6 +721,8 @@ Prompts, pane command text, paths, environment and arbitrary error text must not
 enter the log; the trace owner defines positive projection and secure bounds.
 
 ## Dependencies
+
+- [Journal codec](workflow-journal.prompt.md): required generation/runtime/verification context for new storage records and legacy replay.
 
 - [Herdr executable](workflow-herdr-executable.prompt.md): required generation/runtime
   for the absolute executable resolver and explicit missing-path refusal.

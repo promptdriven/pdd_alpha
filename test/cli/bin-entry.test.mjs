@@ -9,7 +9,7 @@ import { cases, temporary, runtime, pointer, put, repo, seed } from './pkg-fixtu
 const execute = promisify(execFile);
 async function packageEntry(root, name) {
   for (const path of ['bin', 'src']) await fs.mkdir(join(root, path), { recursive: true });
-  for (const file of ['versions', 'update-lock', 'install-record']) await fs.copyFile(join(repo, 'src', `${file}.mjs`), join(root, 'src', `${file}.mjs`));
+  for (const file of ['versions', 'update-lock', 'install-record', 'pdd-directory']) await fs.copyFile(join(repo, 'src', `${file}.mjs`), join(root, 'src', `${file}.mjs`));
   await fs.copyFile(join(repo, 'bin/pdd.mjs'), join(root, 'bin/pdd.mjs'));
   await put(join(root, 'package.json'), '{"type":"module","version":"1.0.0"}');
   await put(join(root, 'src/pdd-cli.mjs'), `export async function runPdd(argv){process.stdout.write(JSON.stringify({argv,cwd:process.cwd(),release:${JSON.stringify(name)},node:process.execPath})+'\\n');return Number(process.env.PDD_TEST_EXIT??0);}`);

@@ -97,7 +97,7 @@ unsupported-platform refusal or replaces controller identity, lifecycle, lock or
 durable generation proof. Stage
 agents use panes in that run tab.
 
-When controller start returns anything other than `started`, exit 1 and print
+When controller start is `uncertain` or lacks a definite refused/failed result, exit 1 and print `Workflow controller may be running: STATE (CODE). Check pdd workflow status RUN_ID.` followed by any known missing-Herdr explanation. Do not say not started or suggest relaunching that run. For a definite refused/failed result, exit 1 and print
 `Workflow controller not started: STATE (CODE).` once on stderr, followed by
 `Inspect the saved run before retrying.` Preserve the actual returned state and
 code, including unfamiliar codes; strip terminal control characters, use

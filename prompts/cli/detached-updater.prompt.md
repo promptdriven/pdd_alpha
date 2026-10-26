@@ -6,6 +6,11 @@ terminal, Herdr, controllers or agents. Own install effects and recovery; releas
 selection, modes, pins, channel, signature policy and report transport are inputs.
 Private mechanisms may vary; the durable phases and process-survival promise may not.
 
+Missing owned staging and publication directories are created at exactly 0700
+through the private-directory owner; existing-directory repair stays within its
+bounded mutable-home policy. Published runtime trees and receipts remain unchanged. This does not relax artifact verification,
+activation exclusion, transaction ownership or the compatibility barrier.
+
 Module functions `startUpdate({target, requestId}, ports)` → `{transactionId, state}`,
 `runUpdate({transactionId}, ports)` and `recoverUpdate({home}, ports)` →
 `{transactionId, phase, code}`. The CLI only requests and follows progress; an
@@ -109,6 +114,8 @@ launcher's durable count. Artifact/record I/O errors alone cannot invent one.
 ## Dependencies
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
+- [Private directories](pdd-directory.prompt.md): generation/runtime for PDD
+  publication directories.
 - [Versions](versions.prompt.md), [owned Node](owned-node.prompt.md),
   [install record](install-record.prompt.md), [install lock](update-lock.prompt.md):
   required for generation/runtime; layout, runtime, phase persistence and exclusion.

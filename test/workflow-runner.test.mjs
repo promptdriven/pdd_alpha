@@ -11,6 +11,7 @@ import { runWorkflow, resumeWorkflow, attachWorkflow, prepareWorkflow, driveWork
 import { loadGuidance as actualGuidance } from '../src/guidance.mjs';
 import { runHerdrStage, inspectHerdrStage, closeHerdrStage, attachHerdrStage } from '../src/workflow-stage-herdr.mjs';
 import {readHerdrTrace} from '../src/herdr-trace.mjs';
+import {encodeWorkflowJournalRecord,replayWorkflowJournalRecord} from '../src/workflow-journal.mjs';
 
 import {withWorkflowLock,inspectWorkflowLock} from './cli/workflow-test-lock.mjs';
 const exec = promisify(callbackExec);
@@ -18,6 +19,17 @@ const packageRoot = resolve(import.meta.dirname, '..');
 const sha = value => createHash('sha256').update(value).digest('hex');
 const issueUrl = 'https://github.com/example/project/issues/17';
 const output = { write() {} };
+// Tests inspect logical state through the public storage codec. Intentional
+// corruption fixtures serialize those logical rows as legacy snapshots.
+function journalRows(raw) {
+  let state;
+  return raw.trimEnd().split('\n').filter(line=>line.trim()).map(line=>{
+    const {delta,baseSeq,...row}=JSON.parse(line);
+    state=replayWorkflowJournalRecord(state,JSON.parse(line));
+    return {...row,state};
+  });
+}
+
 async function fixture(t, options = {}) {
   const activePackageRoot = options.packageRoot ?? packageRoot;
   let cwd = mkdtempSync(join(tmpdir(), 'pdd-runner-'));
@@ -47,7 +59,7 @@ async function fixture(t, options = {}) {
       assert.equal(f.saved(native.at(-1).input.runId).pending.kind, 'pr', 'PR intent must be durable BEFORE push');
       if (options.preAuthPushFailure && !f.authFixed) throw Object.assign(Error('Username prompt timed out'), { code: 'ETIMEDOUT' });
       if (options.preAuthPushFailure) {
-        const events = readFileSync(join(f.gitDir, 'pdd/workflows', native.at(-1).input.runId, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        const events = journalRows(readFileSync(join(f.gitDir, 'pdd/workflows', native.at(-1).input.runId, 'journal.jsonl'),'utf8'));
         assert.equal(events.at(-1).event, 'pr.unpublished_retry_intent', 'explicit retry intent durable BEFORE recovered push');
       }
       return { stdout: '', stderr: '' };
@@ -109,10 +121,12 @@ async function fixture(t, options = {}) {
         if (options.mutatingHandoff) contents = `import {readFileSync,writeFileSync} from 'node:fs'; const path=${JSON.stringify(input.handoffPath)}; const h=JSON.parse(readFileSync(path)); h.summary='changed during checks'; writeFileSync(path,JSON.stringify(h));\n`;
         add('check.mjs', contents, 'tests');
       }
-      if (files.length) {
-        await git('add', '.');
+      if (files.length && !(options.leaveScopeUncommitted && input.protocol !== 'work')) {
+        await git('add', ...(options.leaveScopeUncommitted ? ['--', ...files.map(file => file.path)] : ['.']));
         if (await git('status', '--porcelain')) await git('commit', '-m', input.stageId);
       }
+      if (options.unrelatedPublicationFile && input.protocol === 'verify')
+        writeFileSync(join(cwd, 'unrelated draft.txt'), 'preserve this unrelated work\n');
       const h = { version: 1, runId: input.runId, stageId: input.stageId, issueUrl,
         inputRevision: options.staleHandoff ? initial.replace(/^./, initial[0] === 'a' ? 'b' : 'a') : input.inputRevision,
         summary: `Completed current ${input.stageId}; observable expectations remain independent.`, files };
@@ -180,7 +194,7 @@ async function fixture(t, options = {}) {
     } };
   f.run = (name = 'small-change', agent = 'claude') => runWorkflow({ name, issue: '17', agent, cwd, packageRoot: activePackageRoot }, executionPorts());
   f.resume = (runId, decision, binding = {}) => resumeWorkflow({ runId, decision, ...binding, cwd: options.defaultWorktree ? sourceCwd : cwd, packageRoot: activePackageRoot }, executionPorts());
-  f.saved = runId => readFileSync(join(f.gitDir, 'pdd', 'workflows', runId, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).at(-1).state;
+  f.saved = runId => journalRows(readFileSync(join(f.gitDir, 'pdd', 'workflows', runId, 'journal.jsonl'),'utf8')).at(-1).state;
   return f;
 }
 function projectWorkflow(f, marker = 'OWNED_RECIPE_A__') {
@@ -394,7 +408,10 @@ test('a journal beyond the Node string limit resumes its latest optional stage w
     }
     const end = statSync(journal).size, tail = Buffer.alloc(Math.min(end, 512 * 1024));
     readSync(input, tail, 0, tail.length, end - tail.length);
-    const last = JSON.parse(tail.toString('utf8').trimEnd().split('\n').at(-1));
+    const complete=tail.toString('utf8').trimEnd().split('\n').slice(1);
+    const snapshot=complete.findIndex(line=>Object.hasOwn(JSON.parse(line),'state'));
+    assert.ok(snapshot>=0,'tail contains a retained legacy snapshot before the new deltas');
+    const last=journalRows(complete.slice(snapshot).join('\n')).at(-1);
     assert.ok(last.seq > rows); assert.equal(last.state.context, context);
     assert.equal(last.state.index, 1); assert.equal(last.state.completed[0].id, 'first');
     assert.equal(last.state.completed[0].skipped, true);
@@ -408,7 +425,7 @@ test('streamed journal validates earlier history and refuses malformed or partia
     await t.test(variant, async t => {
       const f = await fixture(t); const first = await f.run();
       const path = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
-      const rows = readFileSync(path, 'utf8').trimEnd().split('\n').map(JSON.parse);
+      const rows = journalRows(readFileSync(path,'utf8'));
       if (variant === 'sequence') { rows[0].seq = 10; rows[0].state.seq = 10; }
       if (variant === 'run') rows[0].state.runId = randomUUID();
       let raw = rows.map(JSON.stringify).join('\n') + '\n';
@@ -425,7 +442,7 @@ test('streamed journal validates earlier history and refuses malformed or partia
 test('streamed journal handles split UTF8 records and trailing whitespace without losing saved identity', async t => {
   const f = await fixture(t); const first = await f.run();
   const path = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
-  const rows = readFileSync(path, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  const rows = journalRows(readFileSync(path,'utf8'));
   rows[0].event = 'checkpoint 🎯 中文 '.repeat(20000);
   writeFileSync(path, rows.map(JSON.stringify).join('\n') + '\n \t\n');
   const before = f.native.length, response = await f.resume(first.runId);
@@ -461,7 +478,7 @@ test('separate prompt PR waits for real merge and refuses code work without its 
 test('saved run identity cannot be substituted under a different journal directory', async t => {
   const f = await fixture(t); const first = await f.run();
   const path = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
-  const rows = readFileSync(path, 'utf8').trim().split('\n').map(JSON.parse);
+  const rows = journalRows(readFileSync(path,'utf8'));
   for (const row of rows) row.state.runId = '00000000-0000-4000-8000-000000000000';
   writeFileSync(path, rows.map(JSON.stringify).join('\n') + '\n');
   const refused = await f.resume(first.runId, 'approve'); assert.equal(refused.state, 'failed'); assert.equal(f.native.length, 1);
@@ -551,7 +568,7 @@ test('saved optional skip survives interruption before skipped completion and ca
   f.ports.runHerdrStage = async () => { throw Error('synthetic next-stage stop before native'); };
   await f.resume(state.runId, 'skip');
   const journal = join(f.gitDir, 'pdd/workflows', state.runId, 'journal.jsonl');
-  const rows = readFileSync(journal, 'utf8').trim().split('\n').map(JSON.parse);
+  const rows = journalRows(readFileSync(journal,'utf8'));
   const boundary = rows.findIndex(row => row.event === 'optional.decision' && row.state.optional?.['prompt-pr']?.decision === 'skip');
   assert.ok(boundary >= 0); writeFileSync(journal, rows.slice(0, boundary + 1).map(JSON.stringify).join('\n') + '\n');
   const before = f.native.length; await f.resume(state.runId, 'approve');
@@ -865,7 +882,7 @@ test('resume owns the controller lock before reading the journal and cannot adva
     competing=await f.resume(first.runId,'skip');
   }finally{writeFileSync(releasePath,'release');}
   assert.equal(await closed,0,output+errors);
-  const rows=readFileSync(journal,'utf8').trim().split('\n').map(JSON.parse);
+  const rows=journalRows(readFileSync(journal,'utf8'));
   t.diagnostic(`Competing controller: ${competing?.state}; duplicate sequences: ${new Set(rows.map(row=>row.seq)).size!==rows.length}`);
   assert.equal(competing.state,'failed',competing.message);assert.match(competing.message,/Another workflow command/);
   assert.equal(new Set(rows.map(row=>row.seq)).size,rows.length);
@@ -967,7 +984,7 @@ async function unsentFirstDispatch(t, phase) {
   const first = await f.run(); assert.equal(first.state, 'waiting', first.message); assert.equal(f.native.length, 0);
   const journal = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
   return { f, first, calls, observations, rewrite(change) {
-    const rows = readFileSync(journal, 'utf8').trim().split('\n').map(JSON.parse);
+    const rows = journalRows(readFileSync(journal,'utf8'));
     change(rows.at(-1).state); writeFileSync(journal, rows.map(JSON.stringify).join('\n') + '\n');
   } };
 }
@@ -1032,7 +1049,7 @@ async function p1Fixture(t,options={}) {
     const value=await prepareWorkflow({name:'small-change',issue:'17',agent:'claude',cwd:f.sourceCwd,packageRoot,...extra},f.ports);f.activeId=value.runId;return value;
   };
   f.drive=(extra={})=>{f.activeDrive=extra;return driveWorkflow({runId:f.activeId,cwd:f.sourceCwd,packageRoot,...extra},f.ports);};
-  f.rewrite=change=>{const path=join(f.gitDir,'pdd/workflows',f.activeId,'journal.jsonl'),rows=readFileSync(path,'utf8').trim().split('\n').map(JSON.parse);change(rows.at(-1).state);writeFileSync(path,rows.map(JSON.stringify).join('\n')+'\n');};
+  f.rewrite=change=>{const path=join(f.gitDir,'pdd/workflows',f.activeId,'journal.jsonl'),rows=journalRows(readFileSync(path,'utf8'));change(rows.at(-1).state);writeFileSync(path,rows.map(JSON.stringify).join('\n')+'\n');};
   return f;
 }
 
@@ -1218,7 +1235,7 @@ for(const known of [true,false])test(`public attachment actual stage forwards du
   const h=await publicAttachment(t,{known}),before=h.f.saved(h.runId),result=await h.attach();
   assert.equal(result.state,'waiting',result.message);assert.equal(h.attachments,1);assert.equal(h.claims,1);assert.equal(h.promotions,1);assert.equal(h.starts,1);
   const after=h.f.saved(h.runId);assert.equal(after.pending.attemptId,before.pending.attemptId);assert.equal(after.pending.backend.backendGen,1);assert.equal(after.pending.backend.phase,'submitted');assert.equal(after.index,before.index);assert.deepEqual(after.completed,before.completed);
-  const rows=readFileSync(h.journal,'utf8').trim().split('\n').map(JSON.parse);assert.equal(new Set(rows.map(row=>row.seq)).size,rows.length);
+  const rows=journalRows(readFileSync(h.journal,'utf8'));assert.equal(new Set(rows.map(row=>row.seq)).size,rows.length);
 });
 for(const mode of ['claim-busy','claim-uncertain','claim-unacknowledged','promote-busy','promote-uncertain','wrong-generation','wrong-attempt','checkpoint-fails','wrong-process'])test(`public attachment actual stage refuses ${mode} without attachment or replacement`,async t=>{
   const h=await publicAttachment(t,{known:false});h.mode=mode;const result=await h.attach();
@@ -1288,4 +1305,161 @@ test('P1 enabled trace observes actual controller process request without replac
   assert.deepEqual(observed,[{args:['--session','default','pane','process-info','--pane','controller'],options:{cwd:prepared.root,env:f.ports.env}}]);
   const saved=f.saved(prepared.runId);assert.equal(saved.controller.started,true);assert.equal(saved.controller.generation,1);assert.equal(saved.controller.startIdentity,'controller-process-start');
   const encoded=JSON.stringify(readHerdrTrace(f.ports));assert.ok(encoded.includes('pane.process_info'));assert.ok(!encoded.includes(prepared.root));assert.ok(!encoded.includes('controller-process-start'));
+});
+
+test('C3 one hour of unchanged backend checkpoints at 4Hz stays below 5 MB and recovers exact work',async t=>{
+  const f=await fixture(t);let checkpoints=0,original,dir,stableSeq,now=Date.now();
+  f.ports.now=()=>now;
+  f.ports.observeWorkflowActivity=async()=>({observable:true,idle:true,rolloutBytes:100});
+  f.ports.runHerdrStage=async(input,ports)=>{
+    dir=join(f.gitDir,'pdd/workflows',input.runId);
+    const backend={version:2,runId:input.runId,stageId:input.stageId,attemptId:input.attemptId,agent:input.agent,cwd:input.cwd,
+      session:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p3',terminalId:'term',agentName:'owned',backendGen:1,
+      phase:'submitted',promptDigest:sha(`${input.context}\n\n# Current workflow stage\n${input.instructions}`),evidence:{readySeq:1,workingSeq:2},nativeSession:{kind:'id',agent:input.agent,value:'original-history'}};
+    original=structuredClone(backend);await ports.checkpoint(backend);checkpoints++;
+    const started=now,path=join(dir,'journal.jsonl');
+    for(let tick=0;tick<4*60*60;tick++){
+      now=started+tick*250;
+      await ports.onStageObservation({backend,status:'working'});
+      const before=statSync(path).size;
+      await ports.checkpoint(structuredClone(backend));checkpoints++;
+      assert.equal(statSync(path).size,before,'identical checkpoints do not append even while stall sampling remains durable');
+    }
+    now=started+60*60*1000;await ports.onStageObservation({backend,status:'working'});
+    stableSeq=f.saved(input.runId).seq;
+    await assert.rejects(ports.checkpoint({...backend,paneId:'other-pane'}),/identity changed/);
+    assert.equal(f.saved(input.runId).seq,stableSeq,'identity guards still refuse before suppression or append');
+    // A genuine evidence change must remain durable before the callback resolves.
+    backend.lastSeq=3;backend.evidence.workingSeq=3;await ports.checkpoint(backend);checkpoints++;
+    return {state:'active',backend,evidence:backend.evidence};
+  };
+  const first=await f.run();assert.ok(['waiting','recovery_required'].includes(first.state),first.message);assert.equal(checkpoints,14402);
+  const bytes=readFileSync(join(dir,'journal.jsonl')),physical=bytes.toString('utf8').trimEnd().split('\n').map(JSON.parse);
+  assert.ok(bytes.length<5_000_000,`${bytes.length} journal bytes`);
+  assert.ok(physical.filter(row=>row.event==='agent.backend').length===2,'only changed backend observations are journaled');
+  assert.equal(physical.filter(row=>row.event==='stall.alarm').length,1,'one thirty-minute alarm across the full idle hour');
+  assert.ok(physical.filter(row=>row.event==='stall.sample').length>=59,'size includes durable periodic activity observations');
+  assert.ok(physical.filter(row=>row.delta).length>0,'ordinary events store deltas');
+  assert.ok(!physical.filter(row=>row.event==='agent.backend').some(row=>row.state),'backend records do not copy full state');
+  const {state,seq}=await readWorkflowJournal({runDir:dir});assert.equal(seq,state.seq);assert.equal(state.pending.backend.nativeSession.value,original.nativeSession.value);
+  assert.equal(state.pending.backend.evidence.workingSeq,3);assert.ok(Buffer.byteLength(state.context)>57_000,'full bundled context is represented');
+  const displayed=await (await import('../src/workflow-run-records.mjs')).readJournalLast(dir);assert.deepEqual(displayed.value.state,state);
+  const before=Buffer.from(bytes),effects=f.native.length;const inspected=await f.resume(first.runId);assert.equal(inspected.runId,first.runId);
+  assert.deepEqual(readFileSync(join(dir,'journal.jsonl')),before);assert.equal(f.native.length,effects,'recovery observation cannot resend work');
+  t.diagnostic(`3600000 virtual milliseconds, 14400 unchanged polls, ${bytes.length} journal bytes, ${physical.length} committed records, one stall alarm, ${Buffer.byteLength(state.context)} context bytes.`);
+});
+
+test('C3 mixed legacy and delta history materializes callbacks and resumes without another delivery',async t=>{
+  const f=await fixture(t),first=await f.run(),dir=join(f.gitDir,'pdd/workflows',first.runId),path=join(dir,'journal.jsonl');
+  const logical=journalRows(readFileSync(path,'utf8')),rows=[];let previous;
+  for(const row of logical){
+    const {v,runId,state,...metadata}=row;
+    rows.push(previous?encodeWorkflowJournalRecord(previous,state,metadata):{...metadata,state});previous=state;
+  }
+  assert.ok(rows.some(row=>row.delta));assert.equal(Object.hasOwn(rows[0],'v'),false);
+  writeFileSync(path,rows.map(JSON.stringify).join('\n')+'\n');
+  const callbacks=[],saved=await readWorkflowJournal({runDir:dir},{onRecord:row=>callbacks.push(row)});
+  assert.deepEqual(saved.state,logical.at(-1).state);
+  assert.deepEqual(callbacks.map(row=>row.state),logical.map(row=>row.state),'every callback receives the complete state at its sequence');
+  const before=readFileSync(path),effects=f.native.length;
+  assert.equal((await f.resume(first.runId)).runId,first.runId);
+  assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,effects);
+});
+
+test('C3 authoritative recovery rejects damaged history before a valid later periodic snapshot',async t=>{
+  const f=await fixture(t),first=await f.run(),dir=join(f.gitDir,'pdd/workflows',first.runId),path=join(dir,'journal.jsonl');
+  const original=readFileSync(path,'utf8'),start=(await readWorkflowJournal({runDir:dir})).state;
+  let previous=start;const rows=[];
+  for(let seq=start.seq+1;seq<=128;seq++){
+    const state={...previous,seq,observation:{counter:seq}};
+    rows.push(encodeWorkflowJournalRecord(previous,state,{event:'agent.backend'}));previous=state;
+  }
+  assert.ok(rows.at(-1).state);assert.ok(rows[0].delta);
+  rows[0].baseSeq--;
+  writeFileSync(path,original+rows.map(JSON.stringify).join('\n')+'\n');
+  const displayed=await (await import('../src/workflow-run-records.mjs')).readJournalLast(dir);
+  assert.equal(displayed.value.state.seq,128,'display tail is explicitly not full-history authority');
+  await assert.rejects(readWorkflowJournal({runDir:dir}),/journal/);
+  const before=readFileSync(path),effects=f.native.length,refused=await f.resume(first.runId,'approve');
+  assert.ok(['failed','recovery_required'].includes(refused.state));assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,effects);
+});
+
+for(const field of ['assignment','definition','launchSelection','root','inputDigest'])test(`C3 delta changing frozen ${field} refuses before effects despite a later restoring snapshot`,async t=>{
+  const f=await fixture(t),first=await f.run(),dir=join(f.gitDir,'pdd/workflows',first.runId),path=join(dir,'journal.jsonl');
+  const original=readFileSync(path,'utf8'),saved=(await readWorkflowJournal({runDir:dir})).state;
+  const row={v:1,runId:saved.runId,seq:saved.seq+1,baseSeq:saved.seq,event:'agent.backend',delta:[{path:[field],value:field==='root'?saved.root+'-other':field==='inputDigest'?'0'.repeat(64):{changed:true}}]};
+  const restoring={v:1,runId:saved.runId,seq:saved.seq+2,event:'agent.backend',state:{...saved,seq:saved.seq+2}};
+  writeFileSync(path,original+JSON.stringify(row)+'\n'+JSON.stringify(restoring)+'\n');
+  await assert.rejects(readWorkflowJournal({runDir:dir}),/journal/);
+  const before=readFileSync(path),effects=f.native.length,refused=await f.resume(first.runId,'approve');
+  assert.ok(['failed','recovery_required'].includes(refused.state));assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,effects);
+});
+
+test('C8 composition commits accepted scope artifacts after agent code commit and opens the exact verified PR', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true });
+  const first = await f.run();
+  assert.equal(first.state, 'waiting', first.message);
+  assert.equal(await f.git('rev-parse', 'HEAD'), f.initial);
+  assert.match(await f.git('status', '--porcelain'), /cases.json/);
+  const beforeInspection = await f.git('rev-parse', 'HEAD');
+  await f.resume(first.runId);
+  assert.equal(await f.git('rev-parse', 'HEAD'), beforeInspection, 'inspection never commits');
+  const opened = await f.resume(first.runId, 'approve');
+  assert.equal(opened.stage, 'wait-merge', opened.message);
+  assert.equal(opened.state, 'waiting', opened.message);
+  assert.equal(await f.git('status', '--porcelain'), '');
+  const saved = f.saved(first.runId), checked = saved.completed.find(step => step.id === 'verify');
+  const transition = saved.artifactCommits.at(-1);
+  assert.deepEqual(transition.previous, checked.verification.output, 'original tested fingerprint is retained');
+  assert.deepEqual(transition.current, saved.expected);
+  assert.notEqual(transition.previous.head, transition.current.head);
+  assert.deepEqual((await f.git('diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD')).split('\n').sort(),
+    ['STORY.md', 'cases.json', 'module.prompt.md']);
+  assert.equal(await f.git('show', 'HEAD:value.mjs'), 'export const value = 2;');
+  assert.equal(f.pr.headRefOid, saved.expected.head);
+  for (const file of saved.accepted.files)
+    assert.equal(sha((await exec('git', ['show', `HEAD:${file.path}`], {cwd:f.cwd})).stdout), file.sha256);
+  assert.equal(f.calls.filter(c => c.file === 'git' && c.args[0] === 'push').length, 1);
+  assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 1);
+  const history = readFileSync(join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert(history.findIndex(row => row.event === 'publication.artifacts.intent') < history.findIndex(row => row.event === 'publication.artifacts.committed'));
+  assert(history.findIndex(row => row.event === 'publication.artifacts.committed') < history.findIndex(row => row.event === 'pr.intent'));
+  const head = saved.expected.head;
+  await f.resume(first.runId);
+  assert.equal(await f.git('rev-parse', 'HEAD'), head, 'read-only PR recovery never repeats checkpoint');
+});
+
+test('C8 unrelated dirty files are listed without committing scope or publishing', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true, unrelatedPublicationFile: true });
+  const first = await f.run(), stopped = await f.resume(first.runId, 'approve');
+  assert.match(stopped.message, /unrelated draft.txt/);
+  assert.match(stopped.message, /commit or move/i);
+  assert.equal(f.pr, null);
+  assert.equal(await f.git('log', '-1', '--format=%s'), 'change');
+  assert.equal(readFileSync(join(f.cwd, 'unrelated draft.txt'), 'utf8'), 'preserve this unrelated work\n');
+  assert.equal(await f.git('diff', '--cached', '--name-only'), '');
+});
+
+test('C8 lost local commit reply preserves saved-input drift refusal and never repeats the commit', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true });
+  const first = await f.run(), original = f.ports.execFile;
+  let commits = 0;
+  f.ports.execFile = async (file, args, options) => {
+    const answer = await original(file, args, options);
+    if (file === 'git' && args.includes('commit')) {
+      commits++; throw Error('synthetic lost local commit response');
+    }
+    return answer;
+  };
+  const stopped = await f.resume(first.runId, 'approve');
+  assert.notEqual(stopped.state, 'completed');
+  assert.equal(commits, 1);
+  assert.equal(f.pr, null);
+  const head = await f.git('rev-parse', 'HEAD');
+  const inspected = await f.resume(first.runId);
+  assert.match(inspected.message, /HEAD or worktree changed/);
+  const retry = await f.resume(first.runId, 'approve');
+  assert.match(retry.message, /HEAD or worktree changed/);
+  assert.equal(await f.git('rev-parse', 'HEAD'), head);
+  assert.equal(commits, 1); assert.equal(f.pr, null);
 });

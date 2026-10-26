@@ -1,4 +1,4 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: d198a03e4fa35a1aa37c81f1fc660e09baca624a604ce12c0ac2625a2021e069).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: b4716bbd06c91a122df8403b0cf352e4676439489aa53c59ee394a492594f45b).
 // Release tooling only: the caller supplies already reviewed, immutable inputs.
 import { readFile, writeFile } from 'node:fs/promises';
 export async function buildBootstrap({ descriptor, destination }) {

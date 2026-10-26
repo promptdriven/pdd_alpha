@@ -1,8 +1,9 @@
-// Generated from prompts/cli/install-record.prompt.md (sha256: 94bbb9939a9f7379b0bbf71494783c2584ba41641c16c5db730aa838f40fc392).
+// Generated from prompts/cli/install-record.prompt.md (sha256: f2ec339ca5c6dcf85d809e9c1983c577bdfceae867937b9884ed34c7290b31ec).
 import * as fs from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validUpdateLease } from './update-lock.mjs';
+import { ensurePrivateDirectory } from './pdd-directory.mjs';
 
 const phases = new Set(['locked', 'staged', 'checked', 'activating', 'flipped', 'link_restarted', 'ready', 'rolling_back', 'rolled_back']);
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -34,7 +35,7 @@ function merge(old, next) {
 }
 export async function durableJson(path, value, io = fs) {
   const directory = path.slice(0, path.lastIndexOf('/'));
-  await io.mkdir(directory, { recursive: true, mode: 0o700 });
+  await ensurePrivateDirectory(directory, io);
   if (await io.realpath(directory) !== resolve(directory)) throw new Error('aliased record directory');
   const tmp = `${path}.${randomUUID()}.tmp`;
   let file;

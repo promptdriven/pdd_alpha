@@ -43,7 +43,7 @@ test('Alpha-only setup uses actual packaging runtime, update lease, launcher and
  writeFileSync(join(versionRoot,'package.json'),JSON.stringify({type:'module',version:'1.0.0'}));
  const runtime={v:1,releaseId:'synthetic',versionRoot,node,bin:join(versionRoot,'bin/pdd.mjs'),pddVersion:'1.0.0',nodeVersion:'22.0.0',alphaDigest:'synthetic',clientDigest:null,credentialHelper:null};
  writeFileSync(join(versionRoot,'runtime.json'),JSON.stringify(runtime));mkdirSync(join(versionRoot,'src'));
- for(const name of ['pdd-launch','detached-updater','update-lock','install-record','owned-node','versions'])cpSync(join(pkgRoot,'src',name+'.mjs'),join(versionRoot,'src',name+'.mjs'));
+ for(const name of ['pdd-launch','detached-updater','update-lock','install-record','owned-node','versions','pdd-directory'])cpSync(join(pkgRoot,'src',name+'.mjs'),join(versionRoot,'src',name+'.mjs'));
  cpSync(join(pkgRoot,'launcher'),join(versionRoot,'launcher'),{recursive:true});
  const stdout=capture(),stderr=capture();let activations=0;
  const deps={home,packageRoot:versionRoot,stdout,stderr,setupModules,workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null,executable:process.execPath})},ports:{activateRecoveryService:async({files})=>{activations++;assert.equal(files.length,1);}}};

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 67544925bef3fb1806f1d6971e099fa2634a644eeccbc280e383d88673c99c55).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 32b51fb409a470f72dbbebbfa857d129059ad63b895257ee5183749eddea566b).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -233,7 +233,9 @@ export async function runPdd(argv, dependencies = {}) {
           const missing=Array.isArray(result?.missingPorts)?result.missingPorts.filter(name=>typeof name==='string'&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)):[];
           const missingHerdr=result?.code==='herdr_not_found'&&typeof result.message==='string'?` ${safeLabel(result.message)}.`:'';
           const identityMessage=result?.code==='herdr_identity_unavailable'?' Herdr process identity is unavailable for the new controller pane. No controller command was sent.':'';
-          line(stderr,`Workflow controller not started: ${state} (${code}).${missingHerdr}${identityMessage}${missing.length?` Missing ports: ${missing.join(', ')}.`:''} Inspect the saved run before retrying.`);
+          line(stderr,!['refused','failed'].includes(result?.state)
+            ?`Workflow controller may be running: ${state} (${code}).${missingHerdr} Check pdd workflow status ${prepared.runId}.`
+            :`Workflow controller not started: ${state} (${code}).${missingHerdr}${identityMessage}${missing.length?` Missing ports: ${missing.join(', ')}.`:''} Inspect the saved run before retrying.`);
         }
         return started?0:1;
       } catch {line(stderr,'The local workflow operation could not be confirmed. Inspect saved state before retrying.');return 1;}

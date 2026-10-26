@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
+import { constants } from 'node:fs';
 import vectors from '../../vectors/cli/workflow-controller.json' with {type:'json'};
 import {startWorkflowController,readControllerLaunches} from '../../src/workflow-controller.mjs';
 import {runId,folder,fakeLocks} from './runner-a-fixtures.mjs';
@@ -11,7 +12,8 @@ async function fixture(t,id){
   const runtime={node:'/saved/node',bin:'/saved/bin/pdd.mjs'};
   const spec={runId,runDir,root:'/assigned',workflow:'feature',issueNumber:7,runtime};
   const calls=[],state={runId,root:spec.root,name:'feature',issue:{number:7},runtime,controlState:'running'},proof={};
-  const ports={acquireLock:fakeLocks(),now:()=>60000,withLifecycleGuard:async(s,fn)=>fn(),validateRun:async()=>true,inspectControllerLock:async()=> 'free',readWorkflowJournal:async()=>({state,seq:2}),herdr:{
+  let proofTime=0;
+  const ports={controllerProofNow:()=>proofTime,controllerProofSleep:async ms=>{proofTime+=ms;},acquireLock:fakeLocks(),now:()=>60000,withLifecycleGuard:async(s,fn)=>fn(),validateRun:async()=>true,inspectControllerLock:async()=> 'free',readWorkflowJournal:async()=>({state,seq:2}),herdr:{
     supportsProcessIdentity:async()=>true,
     listWorkspaces:async()=>[{workspaceId:'w1',cwd:spec.root}],
     createWorkspace:async p=>{calls.push(['workspace',p]);return {workspaceId:'w2'};},
@@ -189,4 +191,146 @@ test('failed identity on the new pane refuses before command and never repeats p
   assert.equal(probes,1);assert.deepEqual(f.calls.map(x=>x[0]),['tab']);
   assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'herdr.identity_unavailable');
  }
+});
+
+for(const publishedAt of [300,14900,15000])test(`issue20 C2 binds delayed controller.started at ${publishedAt}ms without a second delivery`,async t=>{
+  const f=await fixture(t,''),send=f.ports.herdr.paneRun;let clock=0,published;
+  f.ports.controllerProofNow=()=>clock;
+  f.ports.controllerProofSleep=async ms=>{clock+=ms;if(clock>=publishedAt)f.state.controller=published;};
+  f.ports.herdr.paneRun=async p=>{await send(p);published=f.state.controller;delete f.state.controller;};
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'started');assert.equal(clock,publishedAt);assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+  assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'proved');
+});
+test('issue20 C2 deadline is uncertain and the same original is never redelivered',async t=>{
+  const f=await fixture(t,'live-without-generation');let clock=0,reads=0;
+  f.ports.controllerProofNow=()=>clock;f.ports.controllerProofSleep=async ms=>{clock+=ms;};
+  const read=f.ports.herdr.processInfo;f.ports.herdr.processInfo=async()=>{reads++;return read();};
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'uncertain');assert.equal(r.code,'process_unproved');assert.equal(clock,15000);assert.equal(reads,151);
+  assert.match(r.message,new RegExp(`may be running; check pdd workflow status ${runId}`));assert.doesNotMatch(r.message,/not started/);
+  await startWorkflowController(f.spec,f.ports);assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+});
+test('issue20 C6 reconciles pane.run.intent at human wait before comparing approval',async t=>{
+  const f=await fixture(t,''),read=f.ports.herdr.processInfo;
+  f.ports.herdr.processInfo=async()=>null;
+  assert.equal((await startWorkflowController(f.spec,f.ports)).code,'process_unproved');
+  assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'pane.run.intent');
+  f.state.controlState='waiting_person';f.state.rev=57;f.state.waitingPerson={rev:57,decisions:['approve']};
+  f.spec.decision={decision:'approve',id:runId,rev:57};
+  f.ports.herdr.processInfo=async p=>f.calls.filter(c=>c[0]==='run').length===1?null:read(p);
+  const approved=await startWorkflowController(f.spec,f.ports);
+  assert.equal(approved.state,'started');assert.equal(approved.controller.generation,2);
+  const launches=await readControllerLaunches(f.spec);assert.equal(launches.length,2);assert.equal(launches[0].phase,'exited');assert.equal(launches[0].exitedProof.humanWait,true);
+  await startWorkflowController(f.spec,f.ports);assert.equal(f.calls.filter(c=>c[0]==='run').length,2);
+});
+test('issue20 C6 a positively live prior controller fences a different decision',async t=>{
+  const f=await fixture(t,'');assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  f.state.controlState='waiting_person';f.state.rev=57;f.state.waitingPerson={rev:57,decisions:['approve']};f.spec.decision={decision:'approve',id:runId,rev:57};
+  assert.equal((await startWorkflowController(f.spec,f.ports)).code,'controller_busy');assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+});
+for(const blocked of ['unknown-lock','no-bound-start','stale-revision'])test(`issue20 C6 does not replace an unproved or unauthorized prior: ${blocked}`,async t=>{
+  const f=await fixture(t,''),read=f.ports.herdr.processInfo;
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  f.ports.herdr.processInfo=async()=>null;f.state.controlState='waiting_person';f.state.rev=57;f.state.waitingPerson={rev:57,decisions:['approve']};f.spec.decision={decision:'approve',id:runId,rev:57};
+  if(blocked==='unknown-lock')f.ports.inspectControllerLock=async()=> 'unknown';
+  if(blocked==='no-bound-start')f.state.controller.launchId='00000000-0000-4000-8000-000000000000';
+  if(blocked==='stale-revision')f.spec.decision.rev=56;
+  const r=await startWorkflowController(f.spec,f.ports);assert.notEqual(r.state,'started');assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+  if(blocked==='stale-revision')assert.equal(r.code,'stale_decision');
+});
+
+for(const blocked of ['held-lock','throwing-lock','changed-frozen-proof','wrong-argv'])test(`issue20 C6 preserves prior authority: ${blocked}`,async t=>{
+  const f=await fixture(t,''),original=f.ports.herdr.processInfo;
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  f.state.controlState='waiting_person';f.state.rev=57;f.state.waitingPerson={rev:57,decisions:['approve']};
+  f.spec.decision={decision:'approve',id:runId,rev:57};f.ports.herdr.processInfo=async()=>null;
+  if(blocked==='held-lock')f.ports.inspectControllerLock=async()=> 'held';
+  if(blocked==='throwing-lock')f.ports.inspectControllerLock=async()=>{throw Error('unavailable');};
+  if(blocked==='changed-frozen-proof')f.state.controller.startIdentity='different:process';
+  if(blocked==='wrong-argv'){
+    f.state.controlState='running';f.ports.herdr.processInfo=async()=>({...await original(),argv:['/saved/node','unrelated']});
+  }
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'uncertain');assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+  assert.notEqual((await readControllerLaunches(f.spec)).at(-1).phase,'exited');
+});
+test('issue20 C6 same-decision human-wait inspection persists exit without launching',async t=>{
+  const f=await fixture(t,'');assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  f.state.controlState='waiting_person';f.ports.herdr.processInfo=async()=>null;
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.code,'controller_exited');assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'exited');
+  assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+});
+test('issue20 C2 stalled observations stop at the deadline and late evidence cannot persist proof',async t=>{
+  const f=await fixture(t,'');let clockReads=0,release;
+  f.ports.controllerProofNow=()=>clockReads++===0?0:14990;
+  f.ports.herdr.processInfo=()=>new Promise(resolve=>{release=resolve;});
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'uncertain');assert.match(r.message,/may be running/);
+  const before=await readControllerLaunches(f.spec);
+  release({pid:123,startIdentity:'boot:start',paneId:'w1:p1',executable:f.spec.runtime.node,argv:before.at(-1).argv});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(await readControllerLaunches(f.spec),before);assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+});
+
+test('issue20 C2 waits for matching process evidence even when journal started is already durable',async t=>{
+  const f=await fixture(t,''),read=f.ports.herdr.processInfo;let clock=0;
+  f.ports.controllerProofNow=()=>clock;f.ports.controllerProofSleep=async ms=>{clock+=ms;};
+  f.ports.herdr.processInfo=async()=>clock<600?null:read();
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'started');assert.equal(clock,600);assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+});
+test('issue20 C6 failed durable exit cannot authorize another controller',async t=>{
+  const f=await fixture(t,'');assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  f.state.controlState='waiting_person';f.state.rev=57;f.state.waitingPerson={rev:57,decisions:['approve']};
+  f.spec.decision={decision:'approve',id:runId,rev:57};f.ports.herdr.processInfo=async()=>null;
+  f.ports.fs={...fs,open:async(path,flags,...args)=>{
+    if(typeof flags==='number'&&(flags&constants.O_CREAT))throw Error('synthetic persistence failure');
+    return fs.open(path,flags,...args);
+  }};
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'uncertain');assert.equal(r.code,'proof_not_durable');
+  assert.equal(f.calls.filter(c=>c[0]==='run').length,1);assert.equal((await readControllerLaunches(f.spec)).length,1);
+});
+
+// Reviewer-1's synthetic late-observation and late-lock probes, plus the
+// journal side of the same observation boundary. No live Herdr is involved.
+for(const mode of ['live-observation','journal-observation','exit-lock']){
+  for(const completedAt of [15000,15001])test(`issue20 B1 ${mode} completes at ${completedAt}ms`,async t=>{
+    const f=await fixture(t,''),read=f.ports.herdr.processInfo,journal=f.ports.readWorkflowJournal;
+    let clock=0;
+    f.ports.controllerProofNow=()=>clock;
+    if(mode==='live-observation')f.ports.herdr.processInfo=async()=>{const process=await read();clock=completedAt;return process;};
+    if(mode==='journal-observation')f.ports.readWorkflowJournal=async()=>{
+      const observed=await journal();if(f.calls.some(c=>c[0]==='run'))clock=completedAt;return observed;
+    };
+    if(mode==='exit-lock'){
+      f.ports.herdr.processInfo=async()=>({...await read(),stopped:true});
+      let locks=0;f.ports.inspectControllerLock=async()=>{if(++locks>1)clock=completedAt;return 'free';};
+    }
+    const result=await startWorkflowController(f.spec,f.ports),launches=await readControllerLaunches(f.spec),last=launches.at(-1);
+    assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
+    assert.equal(launches.length,1);
+    if(completedAt>15000){
+      assert.equal(result.state,'uncertain');assert.equal(result.code,'process_unproved');
+      assert.equal(last.phase,'pane.run.intent');assert.equal(last.proof,undefined);assert.equal(last.exitedProof,undefined);
+      assert.match(result.message,/may be running/);
+    }else if(mode==='exit-lock'){
+      assert.equal(result.state,'uncertain');assert.equal(result.code,'controller_exited');assert.equal(last.phase,'exited');
+    }else{
+      assert.equal(result.state,'started');assert.equal(last.phase,'proved');
+    }
+  });
+}
+test('issue20 B1 overdue prior-lock proof cannot admit an approval replacement',async t=>{
+  const f=await fixture(t,''),read=f.ports.herdr.processInfo;
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  f.state.controlState='waiting_person';f.state.rev=57;f.state.waitingPerson={rev:57,decisions:['approve']};
+  f.spec.decision={decision:'approve',id:runId,rev:57};f.ports.herdr.processInfo=async()=>({...await read(),stopped:true});
+  let clock=0;f.ports.controllerProofNow=()=>clock;f.ports.inspectControllerLock=async()=>{clock=15001;return 'free';};
+  const result=await startWorkflowController(f.spec,f.ports),launches=await readControllerLaunches(f.spec);
+  assert.equal(result.state,'uncertain');assert.equal(result.code,'process_unproved');
+  assert.equal(launches.length,1);assert.equal(launches[0].phase,'proved');assert.equal(launches[0].exitedProof,undefined);
+  assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
 });
