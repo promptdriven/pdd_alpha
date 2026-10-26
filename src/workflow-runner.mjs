@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 652fe2f4e4e2e8653a5140028599767fd6de934c004f21a19a5aa3671bc98ac1).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: d2268bf9b16e4efa5f1a6777c05fb32be39c21a92595d72fae4fabec8099f1e5).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -125,7 +125,8 @@ function readSaved(directory, onRecord) {
         || ['name','agent','repo','base','inputDigest','contextDigest'].some(k=>state[k]!==saved[k])
         || !isDeepStrictEqual(state.definition,saved.definition) || !isDeepStrictEqual(state.launchSelection,saved.launchSelection))) fail('Saved workflow journal is invalid.');
     saved = state;
-    onRecord?.({...row,state:saved});
+    const {delta,baseSeq,...snapshot} = row;
+    onRecord?.({...snapshot,state:saved});
   };
   try {
     const info = fstatSync(fd);

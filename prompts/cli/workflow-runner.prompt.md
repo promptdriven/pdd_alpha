@@ -135,7 +135,10 @@ with a full snapshot on the first record and every 128th committed sequence.
 Never rewrite existing journals to adopt the format. Replay every delta before
 applying the same historical identity and definition checks as legacy snapshots.
 `readWorkflowJournal` and its `onRecord` callback continue to expose complete
-reconstructed states, not storage deltas.
+reconstructed states, not storage deltas. Each callback record is a complete
+snapshot consumable by the public journal codec: retain event, decision and other
+record metadata, but omit storage-only `delta` and `baseSeq` fields. Reading or
+replaying these observations grants no effects or replacement launch authority.
 
 A repeated, identical `agent.backend` observation does not create an event,
 advance sequence or rewrite derived status. Check identity and transition guards

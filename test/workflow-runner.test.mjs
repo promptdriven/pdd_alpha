@@ -1463,3 +1463,27 @@ test('C8 lost local commit reply preserves saved-input drift refusal and never r
   assert.equal(await f.git('rev-parse', 'HEAD'), head);
   assert.equal(commits, 1); assert.equal(f.pr, null);
 });
+
+test('C3 public journal callbacks compose with codec replay as complete snapshot records', async t => {
+  const f = await fixture(t), first = await f.run();
+  assert.equal(first.state, 'waiting', first.message);
+  const runDir = join(f.gitDir, 'pdd/workflows', first.runId), path = join(runDir, 'journal.jsonl');
+  const before = readFileSync(path), physical = before.toString('utf8').trimEnd().split('\n').map(JSON.parse);
+  assert.ok(physical.some(row => Object.hasOwn(row, 'delta')), 'exercise actual compact storage');
+  const callbacks = [];
+  let replayed;
+  const journal = await readWorkflowJournal({runDir}, {onRecord: row => {
+    replayed = replayWorkflowJournalRecord(replayed, row);
+    assert.equal(Object.hasOwn(row, 'delta'), false);
+    assert.equal(Object.hasOwn(row, 'baseSeq'), false);
+    callbacks.push(row);
+  }});
+  assert.deepEqual(replayed, journal.state);
+  assert.deepEqual(callbacks.map(({seq, event, decisionId, v, runId}) => ({seq, event, decisionId, v, runId})),
+    physical.map(({seq, event, decisionId, v, runId}) => ({seq, event, decisionId, v, runId})), 'record metadata survives projection');
+  assert.equal(journal.seq, physical.at(-1).seq);
+  const deliveries = f.native.length;
+  assert.equal((await f.resume(first.runId)).state, 'waiting');
+  assert.deepEqual(readFileSync(path), before, 'inspection preserves the authoritative compact journal');
+  assert.equal(f.native.length, deliveries, 'callback replay and inspection cannot redeliver work');
+});
