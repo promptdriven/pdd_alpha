@@ -334,3 +334,71 @@ test('issue20 B1 overdue prior-lock proof cannot admit an approval replacement',
   assert.equal(launches.length,1);assert.equal(launches[0].phase,'proved');assert.equal(launches[0].exitedProof,undefined);
   assert.equal(f.calls.filter(c=>c[0]==='run').length,1);
 });
+
+// Synthetic identities with the real workspace.list omission of cwd. A new
+// controller still receives its own tab/pane and exact process generation.
+async function workspaceRelaunch(t) {
+  const f=await fixture(t,''),listed=[];let count=0,process;
+  f.ports.herdr.listWorkspaces=async()=>structuredClone(listed);
+  f.ports.herdr.createWorkspace=async request=>{
+    f.calls.push(['workspace',request]);const workspace={workspaceId:`w${++count}`,cwd:request.cwd};
+    listed.push(workspace);return workspace;
+  };
+  f.ports.herdr.createTab=async request=>{
+    f.calls.push(['tab',request]);const n=f.calls.filter(x=>x[0]==='tab').length;
+    return {tabId:`${request.workspaceId}:t${n}`,paneId:`${request.workspaceId}:p${n}`,terminalId:`term-${n}`};
+  };
+  f.ports.herdr.paneRun=async request=>{
+    f.calls.push(['run',request]);const intent=(await readControllerLaunches(f.spec)).at(-1);
+    f.state.controller={started:true,launchId:intent.launchId,generation:intent.previousGeneration+1,pid:123+intent.admission,startIdentity:`boot:start-${intent.admission}`,paneId:intent.paneId};
+    process={pid:f.state.controller.pid,startIdentity:f.state.controller.startIdentity,paneId:intent.paneId,executable:f.spec.runtime.node,argv:intent.argv};
+  };
+  f.ports.herdr.processInfo=async()=>process;
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  process={...process,stopped:true};
+  assert.equal((await startWorkflowController(f.spec,f.ports)).code,'controller_exited');
+  assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'exited');
+  return {...f,listed};
+}
+
+for(const mode of ['omitted-cwd','null-cwd','other-matching-workspace'])test(`relaunch reuses its durable workspace: ${mode}, with a new proved controller pane`,async t=>{
+  const f=await workspaceRelaunch(t);delete f.listed[0].cwd;
+  if(mode==='null-cwd')f.listed[0].cwd=null;
+  // A matching-cwd workspace does not steal the saved run's grouping.
+  if(mode==='other-matching-workspace')f.listed.unshift({workspaceId:'w9',cwd:f.spec.root});
+  const result=await startWorkflowController(f.spec,f.ports);
+  assert.equal(result.state,'started');assert.equal(result.controller.generation,2);
+  assert.equal(result.controller.workspaceId,'w1');assert.equal(result.controller.paneId,'w1:p2');
+  assert.equal(f.calls.filter(x=>x[0]==='workspace').length,1);
+  assert.deepEqual(f.calls.filter(x=>x[0]==='tab').map(x=>x[1].workspaceId),['w1','w1']);
+  assert.equal(f.calls.filter(x=>x[0]==='run').length,2);
+  const saved=(await readControllerLaunches(f.spec)).at(-1);
+  assert.equal(saved.workspaceId,'w1');assert.equal(saved.phase,'proved');
+  assert.equal(saved.proof.process.paneId,'w1:p2');
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  assert.equal(f.calls.filter(x=>x[0]==='run').length,2);
+});
+
+for(const mode of ['missing','conflicting-cwd','other-root','other-runtime'])test(`workspace reuse excludes ${mode} identity`,async t=>{
+  const f=await workspaceRelaunch(t);
+  if(mode==='missing')f.listed.length=0;
+  if(mode==='conflicting-cwd')f.listed[0].cwd='/someone-else';
+  if(mode==='other-root'){delete f.listed[0].cwd;f.spec.root='/different-assignment';}
+  if(mode==='other-runtime'){delete f.listed[0].cwd;f.spec.runtime={node:'/other/node',bin:'/other/pdd.mjs'};f.state.runtime=f.spec.runtime;}
+  const result=await startWorkflowController(f.spec,f.ports);
+  assert.equal(result.state,'started');assert.equal(result.controller.workspaceId,'w2');
+  assert.equal(f.calls.filter(x=>x[0]==='workspace').length,2);
+  assert.equal(f.calls.filter(x=>x[0]==='tab').length,2);
+  assert.equal(f.calls.filter(x=>x[0]==='run').length,2);
+});
+
+test('duplicate listed workspace identities cannot admit a new tab or controller command',async t=>{
+  const f=await workspaceRelaunch(t);f.listed.push({...f.listed[0]});
+  const result=await startWorkflowController(f.spec,f.ports);
+  assert.equal(result.state,'uncertain');assert.equal(result.code,'workspace_unknown');
+  assert.equal(f.calls.filter(x=>x[0]==='workspace').length,1);
+  assert.equal(f.calls.filter(x=>x[0]==='tab').length,1);
+  assert.equal(f.calls.filter(x=>x[0]==='run').length,1);
+  await startWorkflowController(f.spec,f.ports);
+  assert.equal(f.calls.filter(x=>x[0]==='tab').length,1);
+});

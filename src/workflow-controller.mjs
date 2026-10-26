@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 84ae4beceb1b85cad66b7d5ef9b28433bf075851113c75e40f2521cb5deaffd5).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: e68ad97a232e63bf03903be3cd8d05f3ddcccf9c3f1fa3ec64ff0b3a7cf4db2c).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -154,7 +154,7 @@ export async function startWorkflowController(spec,ports={}){
   if(!['supportsProcessIdentity','listWorkspaces','createWorkspace','createTab','paneRun','processInfo'].every(name=>typeof ports.herdr?.[name]==='function')||!ports.withLifecycleGuard||!ports.readWorkflowJournal||!ports.validateRun||!ports.inspectControllerLock)return result('refused','unsupported');
   try{return await withWorkflowLock({path:join(spec.runDir,'controller-start.lock'),busyCode:'controller_busy'},async()=>{
     let launches;try{launches=await readControllerLaunches(spec,ports);}catch{return result('uncertain','launch_history_invalid');}
-    const prior=launches.at(-1);
+    let prior=launches.at(-1);
     if(prior && prior.phase!=='exited'){
       if(prior.runId!==spec.runId||prior.root!==spec.root||!isDeepStrictEqual(prior.runtime,spec.runtime))return result('refused','launch_binding_conflict',prior);
       if(prior.phase==='herdr.identity_unavailable')return identityRefusal(prior);
@@ -162,6 +162,7 @@ export async function startWorkflowController(spec,ports={}){
       if(reconciled.code!=='controller_exited'||sameDecision)return !sameDecision&&reconciled.state==='started'?result('refused','controller_busy',reconciled.controller):reconciled;
       // The prior proof is now durably exited. A new decision still passes all
       // existing current-state, assignment, revision and lifetime-lock checks.
+      prior=reconciled.controller;
     }
     let intent;
     const admitted=await ports.withLifecycleGuard(spec,async()=>{
@@ -177,8 +178,10 @@ export async function startWorkflowController(spec,ports={}){
     let effected=false;
     const checkpoint=async(phase,extra={})=>{intent={...intent,...extra,phase,step:intent.step+1};await save(intent,ports);};
     try{
-      const workspaces=await herdrRequest(ports,'workspace.list','listWorkspaces',{session:'default'});if(!Array.isArray(workspaces))return result('uncertain','workspace_unknown',intent);
-      let workspace=workspaces.find(w=>w.cwd===spec.root);
+      const workspaces=await herdrRequest(ports,'workspace.list','listWorkspaces',{session:'default'});
+      if(!Array.isArray(workspaces)||workspaces.some(w=>typeof w?.workspaceId!=='string'||!w.workspaceId)||new Set(workspaces.map(w=>w.workspaceId)).size!==workspaces.length)return result('uncertain','workspace_unknown',intent);
+      const sameRun=prior?.phase==='exited'&&prior.runId===spec.runId&&prior.root===spec.root&&isDeepStrictEqual(prior.runtime,spec.runtime);
+      let workspace=(sameRun&&workspaces.find(w=>w.workspaceId===prior.workspaceId&&(w.cwd==null||w.cwd===spec.root)))||workspaces.find(w=>w.cwd===spec.root);
       if(!workspace){await checkpoint('workspace.create.intent');effected=true;workspace=await herdrRequest(ports,'workspace.create','createWorkspace',{session:'default',cwd:spec.root,focus:false});if(!workspace?.workspaceId)return result(workspace?.refused?'failed':'uncertain','workspace_create_failed',intent);await checkpoint('workspace.created',{workspaceId:workspace.workspaceId,workspaceCreation:workspace});}
       else await checkpoint('workspace.selected',{workspaceId:workspace.workspaceId});
       await checkpoint('tab.create.intent');effected=true;

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: d2268bf9b16e4efa5f1a6777c05fb32be39c21a92595d72fae4fabec8099f1e5).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 30fd7bd891bef4b58bc13e1f9977bf9ffdfdc93088782bae56a3b4cb762fe540).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1120,7 +1120,7 @@ export async function readWorkflowJournal({runDir}, ports = {}) {
       const binding = row.state.decisions?.find(d => d.decisionId === row.decisionId);
       decisions.push({decisionId:row.decisionId, ...(binding ?? {}), bindingKnown:!!binding});
     }
-    ports.onRecord?.(row);
+    ports.onRecord?.(structuredClone(row));
   });
   return {state,seq:state.seq,decisions};
 }

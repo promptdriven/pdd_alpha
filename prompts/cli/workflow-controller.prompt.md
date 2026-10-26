@@ -30,8 +30,22 @@ flowchart TD
 <details>
 <summary>Launch identity, line and proof</summary>
 
-Create a tab `run #<issueNumber> <workflow>` without focus in the repository's
-workspace of Herdr `default`; create that workspace only if none matches.
+Create a fresh tab `run #<issueNumber> <workflow>` without focus in Herdr
+`default`. On relaunch after a durably exited controller, prefer that launch's
+saved workspace when its run, root and runtime match the current admitted run
+and exactly one current listing entry has its workspace id. A missing/null cwd
+in that entry is valid: Herdr workspace listings need not disclose cwd. An
+explicitly different cwd disqualifies reuse. This grouping choice grants no
+process or launch authority. If the saved workspace is absent or ineligible,
+select a workspace whose cwd matches the assigned root, or create one if none
+matches; never recreate or close the missing workspace. Duplicate workspace ids
+make the listing ambiguous: return `uncertain / workspace_unknown` before any
+workspace/tab creation or command. Save the selected workspace id before tab
+creation. A prior launch reconciled to a durably exited phase during this same
+request supplies the same workspace provenance; use that saved exit result,
+not its earlier unresolved phase. An overdue proof never authorizes a new tab
+or workspace selection. Never reuse an existing controller or stage pane for
+the new launch.
 Keep the assigned worktree cwd in the controller pane. Stage agents use panes
 in this run tab. Never type into a person's existing pane. No hidden run server.
 

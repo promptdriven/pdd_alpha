@@ -139,6 +139,9 @@ reconstructed states, not storage deltas. Each callback record is a complete
 snapshot consumable by the public journal codec: retain event, decision and other
 record metadata, but omit storage-only `delta` and `baseSeq` fields. Reading or
 replaying these observations grants no effects or replacement launch authority.
+Callback records are independent observations: a consumer may change its own
+record or nested state without changing replay validation, later observations,
+the returned state or decision bindings, or durable history.
 
 A repeated, identical `agent.backend` observation does not create an event,
 advance sequence or rewrite derived status. Check identity and transition guards

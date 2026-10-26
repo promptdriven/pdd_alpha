@@ -1487,3 +1487,33 @@ test('C3 public journal callbacks compose with codec replay as complete snapshot
   assert.deepEqual(readFileSync(path), before, 'inspection preserves the authoritative compact journal');
   assert.equal(f.native.length, deliveries, 'callback replay and inspection cannot redeliver work');
 });
+
+test('C3 journal observers cannot mutate authoritative replay or later observations', async t => {
+  const f = await fixture(t), first = await f.run();
+  assert.equal(first.state, 'waiting', first.message);
+  const progressed = await f.resume(first.runId, 'approve', decisionBinding(f, first.runId));
+  assert.equal(progressed.state, 'waiting', progressed.message);
+  const runDir = join(f.gitDir, 'pdd/workflows', first.runId), path = join(runDir, 'journal.jsonl');
+  const before = readFileSync(path), expectedRows = [], deliveries = f.native.length;
+  assert.ok(before.toString('utf8').split('\n').filter(Boolean).map(JSON.parse)
+    .some(row => Object.hasOwn(row, 'delta')), 'exercise compact history');
+  const expected = await readWorkflowJournal({runDir}, {onRecord: row => expectedRows.push(row)});
+  assert.ok(expected.decisions.length > 0, 'include real saved decision bindings');
+  let count = 0;
+  const observed = await readWorkflowJournal({runDir}, {onRecord: row => {
+    assert.deepEqual(row, expectedRows[count++], 'earlier observers cannot change this snapshot');
+    row.state.seq = 0;
+    row.state.assignment.runId = 'observer-only';
+    row.state.definition.name = 'observer-only';
+    row.state.completed.length = 0;
+    for (const decision of row.state.decisions ?? []) decision.decisionId = 'observer-only';
+    row.event = 'observer-only';
+  }});
+  assert.equal(count, expectedRows.length);
+  assert.deepEqual(observed, expected, 'returned state, sequence and decisions remain authoritative');
+  assert.deepEqual(await readWorkflowJournal({runDir}), expected, 'future reads retain the same state');
+  assert.deepEqual(readFileSync(path), before, 'observation never changes durable history');
+  await f.resume(first.runId);
+  assert.deepEqual(readFileSync(path), before, 'read-only recovery preserves history');
+  assert.equal(f.native.length, deliveries, 'observation and recovery never redeliver work');
+});
