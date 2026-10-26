@@ -1,8 +1,9 @@
 # Move off an old R-line installation
 
 Own the shipped `launcher/migrate-r-line.sh` interface. This is adoption of the
-Mac lead's supplied implementation, retained byte-for-byte; preservation is a
-drop-in packaging change. The script owns discovery, backup, service/process
+Mac lead's supplied implementation. Preserve its behavior except the named
+protected-native-profile repair: shell-profile migration must refuse protected
+Codex/Claude paths before any backup or write. The script owns discovery, backup, service/process
 proof, protected paths, migration and undo. The bootstrap owns consent and
 continuation. Bash3.2 on macOS and Linux is required; do not invoke it with sh.
 
@@ -22,8 +23,15 @@ backup/restore semantics and retained Herdr binary copying from pocket.
 
 Preserve refusals for root/sudo, wrong HOME, protected or aliased paths, insufficient
 disk, concurrent runs, unavailable required managers and the supplied refused-user
-policy. The installer must not disable any refusal. All script bytes remain the
-owner's delivered implementation; no installer-specific rewrite is permitted.
+policy. Shell profiles inside `~/.codex` or `~/.claude`, including normalized
+paths and directory aliases resolving inside them, must remain byte-, mode- and
+mtime-identical. Discovery and the write guard must use the original pathname
+with physical directory resolution: a symlink followed by `..` must not be
+lexically collapsed into a different target before checking it. Report refusal without creating adjacent or migration profile backups.
+Apply the same check to dry-run planning and direct profile editing; an
+unresolvable profile parent refuses. Ordinary profiles retain exact old-line
+replacement and backup behavior. The installer must not disable any refusal or
+rewrite the owner script.
 
 ## Dependencies
 

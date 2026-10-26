@@ -906,7 +906,7 @@ EOF
   local zdot="${ZDOTDIR:-$HOME}" seen=" " p kind lines other_lines ln keep
   for p in "$zdot/.zshrc" "$zdot/.zprofile" "$HOME/.zshrc" "$HOME/.zprofile" \
     "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" "$FISH_DIR/config.fish"; do
-    p=$(norm_path "$p")
+    # Keep the path the filesystem will use, including symlink/.. semantics.
     case "$seen" in *" $p "*) continue ;; esac
     seen="$seen$p "
     if [ ! -f "$p" ]; then continue; fi
@@ -1328,8 +1328,30 @@ EOF
   fi
 }
 
+# A shell profile is not permission to modify native login/configuration data.
+# Resolve directory aliases without changing the caller directory or reading credentials.
+profile_edit_allowed() {
+  local p parent actual native root
+  p=$1
+  case "$p" in
+    "$HOME/.codex"|"$HOME/.codex/"*|"$HOME/.claude"|"$HOME/.claude/"*) return 1 ;;
+  esac
+  [ ! -L "$p" ] || return 1
+  parent=$(cd -P -- "${p%/*}" 2>/dev/null && pwd -P) || return 1
+  actual="$parent/${p##*/}"
+  for native in "$HOME/.codex" "$HOME/.claude"; do
+    root=$(cd -P -- "$native" 2>/dev/null && pwd -P) || continue
+    case "$actual" in "$root"|"$root/"*) return 1 ;; esac
+  done
+  return 0
+}
+
 edit_profile() { # file kind -> replace the old lines; keep a .bak
   local p=$1 kind=$2 bak tmp after old_a old_b new
+  if ! profile_edit_allowed "$p"; then
+    fail_item "$(short "$p") is a protected or unresolved profile. Edit the old PATH line by hand."
+    return
+  fi
   if [ "$kind" = fish ]; then old_a=$FISH_OLD1; old_b=$FISH_OLD2; new=$FISH_NEW
   else old_a=$SH_OLD1; old_b=$SH_OLD2; new=$SH_NEW; fi
   if [ -L "$p" ]; then
@@ -1391,6 +1413,11 @@ step_shell_path() {
   local p kind lines
   while IFS="$TAB" read -r p kind lines <&3; do
     if [ -z "$p" ]; then continue; fi
+    if ! profile_edit_allowed "$p"; then
+      WOULD_REFUSE="a shell profile is protected or unresolved; edit the old PATH line by hand"
+      fail_item "$(short "$p") is a protected or unresolved profile. Nothing in it was changed."
+      continue
+    fi
     plan "edit $(short "$p") line $lines: take \$HOME/pocket/bin out of PATH, keep ~/.local/bin (copy: $(short "$p").pdd-move-$TS.bak)"
     if [ "$MODE" != dry ]; then edit_profile "$p" "$kind"; fi
   done 3<<EOF
@@ -1447,6 +1474,15 @@ do_apply() {
   if [ "$MODE" = dry ]; then say "$SCRIPT_NAME $VERSION ($OS). DRY RUN: nothing changes. User: $USER_NAME. Home: $HOME."
   else say "$SCRIPT_NAME $VERSION ($OS). APPLY. User: $USER_NAME. Home: $HOME."; fi
   discover
+  local profile kind lines
+  while IFS="$TAB" read -r profile kind lines <&3; do
+    [ -n "$profile" ] || continue
+    if ! profile_edit_allowed "$profile"; then
+      refuse "$(short "$profile") is a protected or unresolved profile. Edit the old PATH line by hand."
+    fi
+  done 3<<EOF
+$T_PROFILES
+EOF
   if [ "$NOTHING" = yes ]; then
     say "Nothing to do. The old R line was not found for this user."
     if [ -n "$T_OLD_BACKUPS" ]; then say "Older backups (kept):"; list_lines "  - " "$T_OLD_BACKUPS"; fi
