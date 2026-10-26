@@ -1,5 +1,23 @@
-# Review the contract and cases
+# Check the accepted contract and scenario
 
-Read the prompt and its declared dependencies as a consumer. Trace a normal case and a consequential edge case to their required outcomes. Look for missing inputs, conflicting rules, ambiguous absence/defaults and accidental implementation narration.
+Read the accepted prompt, Story and independent cases. Choose the accepted runtime
+scenario and run these commands in order:
 
-Review expected cases independently of the implementation. Check their expected values against the accepted Story and contract. If a requirement is unresolved, resolve it with the person rather than copying what the code happens to return. Record which criteria have executable cases and which still need another form of review. This is agent/person review, not automated prompt execution or formal proof.
+```sh
+pdd lint
+pdd check <scenario>
+```
+
+Record the verdict, failed criteria, expected versus observed values and the HTTPS
+result link. Run `pdd replay <run-id>` with the returned id and record its replay
+link; never invent a link. A zero exit is a pass.
+
+For exit 1, fix the accepted scope, run `pdd lint` again and rerun
+`pdd check <scenario>`. Allow at most two fix-and-recheck attempts after the
+initial check. If the second retry still fails, stop and ask the person. Include
+the failed criteria, expected versus observed values, and the result link in that
+question. Do not change expected cases just to make a check pass.
+
+Exit 3 means the result is unknown. If the output says the runtime service is not
+configured, report that exact limitation plainly. In either case, record the
+unknown result and continue the workflow; it is not a reason to block the run.

@@ -19,7 +19,7 @@
         "stageCounts": {
           "feature": 12,
           "bug": 11,
-          "small-change": 5
+          "small-change": 6
         }
       }
     },
@@ -90,7 +90,7 @@
         "maximumNativeSessions": [
           7,
           6,
-          3
+          4
         ],
         "humanPrMergeLaunchAgents": false
       }

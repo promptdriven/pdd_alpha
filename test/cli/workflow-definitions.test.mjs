@@ -13,3 +13,12 @@ for(const v of vectors.cases.filter(v=>!['custom-runtime-names','pdd-specificati
 test('every bundled proposal supplies prompt, Story and independent case roles before work',()=>{
  for(const steps of Object.values(WORKFLOW_STAGES))assert.ok(['prompt','story','cases'].every(role=>steps.find(s=>s.protocol==='proposal').requiredRoles.includes(role)));
 });
+test('bundled check stages use the runtime check instruction',()=>{
+ for(const name of ['feature','bug','small-change']){
+  const stage=WORKFLOW_STAGES[name].find(s=>s.id==='check');
+  assert.equal(stage.kind,'agent');
+  assert.equal(stage.protocol,'report');
+  assert.equal(stage.file,'check.md');
+ }
+ assert.equal(WORKFLOW_STAGES.feature.find(s=>s.id==='try').optional,true);
+});

@@ -122,6 +122,32 @@ identity mapping unambiguous for the intended use. Declare necessary runtime
 dependencies and deterministic arithmetic facilities. Tool-specific transport
 formats are derived from the canonical prompt, not another authored policy.
 
+## Describe a runtime and its scenarios
+
+When a prompt is exercised by the PDD runtime, add one **Runtime interface**
+block to the owning prompt. Name each admitted entry point, its concrete inputs,
+normal result, errors, state or side effects, and any seed or allowed-entry
+boundary. Say which result a person can see or type. Keep this block about the
+program's contract; the runtime's HTTP or CLI transport belongs to its client
+documentation.
+
+Write each test scenario from that contract before running it. Give it a stable
+name, starting state or seed, concrete steps and inputs, and independent expected
+outputs, state changes and visible criteria. Include a normal case, a boundary
+case and a meaningful failure when they apply. Keep expected values separate from
+the implementation's observed answer so a failed check explains the difference.
+
+After the prompt, Story and scenario are accepted, run `pdd lint` and then
+`pdd check <scenario>`. A failed check may be fixed and rerun at most twice;
+after that, ask the person with the failed criteria, expected versus observed
+values and the result link. Exit 3 or a message that the runtime is not
+configured is an unknown result: report it plainly and let the workflow continue.
+
+If the change affects what a person sees or types, run `pdd try` and make the
+HTTPS result link a required stop for that person. Use `pdd try --terminal` for a
+terminal surface. For an internal-only change, show the check result and replay
+link, explain the decision, and continue without a person-facing stop.
+
 For a module interface, use the path and exports that the implementation exposes.
 For a CLI, name the module it runs. For an API, name its module and public
 exports. Give function entries useful inputs and outcomes. The prompt-space

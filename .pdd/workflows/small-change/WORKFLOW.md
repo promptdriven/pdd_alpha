@@ -11,10 +11,11 @@ When launched by the runner, obey the supplied current-stage request and handoff
 Before drafting any Story, read the **entire** [Prompting guide](../../../docs/prompting-guide.md) into this agent conversation, including in an existing chat. Summarize the relevant method: describe what and why, preserve observable behavior and consequential edge cases, give each rule one owner, and keep expected results independent of implementation. Then apply it. A link, filename, prior chat summary or format check does not load the guide. If the file is unavailable, ask for its contents before drafting.
 
 1. [Confirm scope and observable expectations](scope.md)
-2. [Make the change](change.md)
-3. [Run focused native checks](verify.md)
-4. [Prepare one reviewable change](open-pr.md)
-5. [Leave merge to the normal process](wait-merge.md)
+2. [Check the accepted contract and scenario](check.md)
+3. [Make the change](change.md)
+4. [Run focused native checks](verify.md)
+5. [Prepare one reviewable change](open-pr.md)
+6. [Leave merge to the normal process](wait-merge.md)
 
 In manual use, a new Story or broad prompt adoption is unnecessary for a small edit. An explicit saved workflow run requires prompt, Story and independent case artifacts plus its concrete test plan before implementation. If a Story is useful, load the guide before drafting it. Update an existing owning prompt first when its behavior changes. Keep prompt/code/tests together unless the person requests another review route. If impact or rollback is unclear, propose the feature or bug recipe before expanding scope.
 

@@ -12,7 +12,7 @@ Before drafting any Story, read the **entire** [Prompting guide](../../../docs/p
 
 1. [Reproduce the reported behavior](reproduce.md)
 2. [Draft the corrected contract, Story and regression cases](prompt-story.md)
-3. [Review the contract and independent expectations](check.md)
+3. [Check the corrected contract and scenario](check.md)
 4. [Use an ordinary project preview if useful](try.md)
 5. [Review the correction with the person](approve.md)
 6. [Prepare a separate prompt PR only if requested](prompt-pr.md)

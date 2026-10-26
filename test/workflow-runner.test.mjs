@@ -218,25 +218,25 @@ function decisionBinding(f, runId) {
 }
 
 test('listed workflow totals distinguish native stages from human, optional and PR steps', () => {
-  assert.deepEqual(Object.values(WORKFLOW_STAGES).map(stages => stages.length), [12, 11, 5]);
-  assert.deepEqual(Object.values(WORKFLOW_STAGES).map(stages => stages.filter(s => s.kind === 'agent').length), [7, 6, 3]);
+  assert.deepEqual(Object.values(WORKFLOW_STAGES).map(stages => stages.length), [12, 11, 6]);
+  assert.deepEqual(Object.values(WORKFLOW_STAGES).map(stages => stages.filter(s => s.kind === 'agent').length), [7, 6, 4]);
   assert.deepEqual(Object.values(WORKFLOW_STAGES).slice(0, 2).map(stages => stages.filter(s => s.kind === 'agent' && !s.optional).length), [5, 5]);
 });
 
 test('small change pins scope, inspection launches nothing, native checks execute, PR waits and actual merge completes', async t => {
   const f = await fixture(t); const started = await f.run();
-  assert.equal(started.state, 'waiting'); assert.equal(started.exitCode, 2); assert.equal(started.stage, 'change');
+  assert.equal(started.state, 'waiting'); assert.equal(started.exitCode, 2); assert.equal(started.stage, 'check');
   assert.match(started.runId, /^[\da-f-]{36}$/); assert.equal(f.native.length, 1);
   const inspect = await f.resume(started.runId); assert.equal(inspect.state, 'waiting'); assert.equal(f.native.length, 1);
   const progressed = await f.resume(started.runId, 'approve');
   assert.equal(progressed.state, 'waiting', progressed.message); assert.equal(progressed.stage, 'wait-merge');
-  assert.deepEqual(f.native.map(v => v.input.stageId), ['scope', 'change', 'verify']);
+  assert.deepEqual(f.native.map(v => v.input.stageId), ['scope', 'check', 'change', 'verify']);
   assert.ok(f.native.every(v => v.agent === 'claude' && v.cwd === f.cwd && v.context.startsWith('# PDD Alpha conversation guidance')));
   assert.equal(f.contexts.length, 1); assert.ok(f.contexts.every(v => v.workflows === false));
   const saved = f.saved(started.runId); assert.equal(saved.completed.find(s => s.id === 'verify').handoff.checks[0].exitCode, 0);
   assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 1);
   f.merged = true; const done = await f.resume(started.runId);
-  assert.equal(done.state, 'completed', done.message); assert.equal(done.exitCode, 0); assert.equal(f.native.length, 3);
+  assert.equal(done.state, 'completed', done.message); assert.equal(done.exitCode, 0); assert.equal(f.native.length, 4);
 });
 
 test('changed source invalidates a saved human advance and launches no replacement session', async t => {
@@ -275,7 +275,7 @@ test('independent real native test rejects a wrong implementation despite agent 
 
 test('implementation cannot rewrite the accepted independent expectations', async t => {
   const f = await fixture(t, { changeAccepted: true }); const first = await f.run(); const failed = await f.resume(first.runId, 'approve');
-  assert.equal(failed.state, 'failed'); assert.equal(f.saved(first.runId).index, 1); assert.equal(f.native.length, 2);
+  assert.equal(failed.state, 'failed'); assert.equal(f.saved(first.runId).index, 2); assert.equal(f.native.length, 3);
 });
 
 test('lost PR reply reconciles the identical original and never repeats push/create', async t => {
@@ -283,7 +283,7 @@ test('lost PR reply reconciles the identical original and never repeats push/cre
   assert.equal(uncertain.state, 'recovery_required', uncertain.message);
   const count = () => f.calls.filter(c => c.file === 'git' && c.args[0] === 'push' || c.file === 'gh' && c.args[1] === 'create').length;
   const before = count(); assert.equal(before, 2); const recovered = await f.resume(first.runId);
-  assert.equal(recovered.state, 'waiting', recovered.message); assert.equal(count(), before); assert.equal(f.native.length, 3);
+  assert.equal(recovered.state, 'waiting', recovered.message); assert.equal(count(), before); assert.equal(f.native.length, 4);
   assert.equal(f.saved(first.runId).completed.find(s => s.id === 'open-pr').pr.number, 23);
 });
 
@@ -303,7 +303,7 @@ test('pre-auth push failure recovers only on explicit approve using the original
   assert.deepEqual(pr.intent, original); assert.equal(pr.pr.headSha, original.headSha);
   assert.equal(after.runId, first.runId); assert.equal(after.context, context);
   assert.deepEqual(after.expected, expected); assert.deepEqual(after.completed.slice(0, -1), completed);
-  assert.equal(f.native.length, 3, 'no stage or attempt replay');
+  assert.equal(f.native.length, 4, 'no stage or attempt replay');
   assert.deepEqual(effects().map(c => c.file), ['git', 'git', 'gh']);
   assert.ok(f.calls.some(c => c.file === 'git' && c.args[0] === 'ls-remote' && c.args.includes('--exit-code')), 'recovery must freshly prove remote absence');
   assert.equal((await f.resume(first.runId, 'approve')).state, 'waiting');
@@ -322,7 +322,7 @@ test('unpublished PR recovery refuses present remote head and unreadable PR or r
       assert.deepEqual(f.saved(first.runId).pending.intent, original);
       assert.equal(f.calls.filter(c => c.file === 'git' && c.args[0] === 'push').length, 1);
       assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 0);
-      assert.equal(f.native.length, 3);
+      assert.equal(f.native.length, 4);
     });
   }
 });
@@ -335,7 +335,7 @@ test('lost reply during unpublished PR recovery reconciles without another push 
   const count = () => f.calls.filter(c => c.file === 'git' && c.args[0] === 'push' || c.file === 'gh' && c.args[1] === 'create').length;
   assert.equal(count(), 3);
   assert.equal((await f.resume(first.runId, 'approve')).state, 'waiting');
-  assert.equal(count(), 3); assert.equal(f.native.length, 3);
+  assert.equal(count(), 3); assert.equal(f.native.length, 4);
 });
 
 test('an existing same issue/workflow run cannot be duplicated or switch its saved agent', async t => {
@@ -495,7 +495,7 @@ test('verify cannot replace the human accepted native argv with a success-only c
 test('work stages cannot use the report-only empty artifact exception', async t => {
   const f = await fixture(t, { emptyWork: true }); const first = await f.run();
   const refused = await f.resume(first.runId, 'approve'); assert.equal(refused.state, 'failed');
-  assert.match(refused.message, /requires concrete project artifacts/); assert.equal(f.native.length, 2);
+  assert.match(refused.message, /requires concrete project artifacts/); assert.equal(f.native.length, 3);
 });
 
 
@@ -637,7 +637,7 @@ test('original guide edits retain the full frozen guide and require a current bo
   t.after(() => rmSync(localPackage, { recursive: true, force: true }));
   for (const directory of ['docs', 'skills', '.pdd']) cpSync(join(packageRoot, directory), join(localPackage, directory), { recursive: true });
   const f = await fixture(t, { packageRoot: localPackage }); const first = await f.run();
-  assert.equal(first.state, 'waiting', first.message); assert.equal(first.stage, 'change');
+  assert.equal(first.state, 'waiting', first.message); assert.equal(first.stage, 'check');
   const saved = f.saved(first.runId), binding = decisionBinding(f, first.runId);
   const inputPath = join(f.sourceCwd, '.git/pdd/workflow-inputs', first.runId, 'input.jsonl');
   const frozenBytes = readFileSync(inputPath);
@@ -649,7 +649,7 @@ test('original guide edits retain the full frozen guide and require a current bo
   assert.ok(JSON.parse(frozenBytes).baseContext.includes(originalGuide));
   writeFileSync(guide, originalGuide + `\n${marker}\n`);
   const inspected = await f.resume(first.runId);
-  assert.equal(inspected.state, 'waiting', inspected.message); assert.equal(inspected.stage, 'change');
+  assert.equal(inspected.state, 'waiting', inspected.message); assert.equal(inspected.stage, 'check');
   const stale = await f.resume(first.runId, 'approve', { ...binding, expect: { ...binding.expect, seq: binding.expect.seq - 1 } });
   assert.equal(stale.state, 'waiting', stale.message); assert.equal(stale.code, 'stale_decision');
   assert.equal(f.native.length, 1); assert.equal(f.closes, 1);
@@ -657,7 +657,7 @@ test('original guide edits retain the full frozen guide and require a current bo
   assert.equal(f.calls.filter(call => call.file === 'git' && call.args[0] === 'push' || call.file === 'gh' && call.args[1] === 'create').length, 0);
   const progressed = await f.resume(first.runId, 'approve', binding);
   assert.equal(progressed.state, 'waiting', progressed.message); assert.equal(progressed.stage, 'wait-merge');
-  assert.deepEqual(f.native.map(stage => stage.input.stageId), ['scope', 'change', 'verify']);
+  assert.deepEqual(f.native.map(stage => stage.input.stageId), ['scope', 'check', 'change', 'verify']);
   assert.ok(f.native.every(stage => stage.context === saved.context && stage.context.includes(originalGuide) && !stage.context.includes(marker)));
   const after = f.saved(first.runId);
   assert.equal(after.context, saved.context); assert.equal(after.contextDigest, saved.contextDigest);
@@ -747,7 +747,7 @@ test('historical admission claims remain byte-identical through normal stage acc
     bytes: JSON.stringify({ runId: randomUUID(), attemptId: randomUUID(), cwd: `/retained/unknown-${i}` }) + '\n' }));
   for (const claim of claims) writeFileSync(claim.path, claim.bytes);
   const first = await f.run();
-  assert.equal(first.state, 'waiting', first.message); assert.equal(first.stage, 'change');
+  assert.equal(first.state, 'waiting', first.message); assert.equal(first.stage, 'check');
   assert.equal(f.native.length, 1); assert.equal(f.closes, 1);
   assert.equal(f.saved(first.runId).accepted, undefined, 'a newly authored proposal still requires the next explicit advance');
   assert.equal(Object.hasOwn(f.saved(first.runId).pending ?? {}, 'admissionSlot'), false);
@@ -841,7 +841,7 @@ test('main transports real handoffs through process-proved stage panes and prese
     }});
   f.ports.runHerdrStage=(input,ports)=>runHerdrStage(input,transport(ports));f.ports.inspectHerdrStage=(input,ports)=>inspectHerdrStage(input,transport(ports));f.ports.closeHerdrStage=(input,ports)=>closeHerdrStage(input,transport(ports));
   const first=await f.run();assert.equal(first.state,'waiting',first.message);const next=await f.resume(first.runId,'approve');assert.equal(next.stage,'wait-merge',next.message);
-  assert.equal(calls.filter(a=>a[0]==='agent'&&a[1]==='prompt').length,3);assert.equal(calls.filter(a=>a[0]==='pane'&&a[1]==='close').length,3);assert.ok(!calls.some(a=>['server','workspace','tab'].includes(a[0])));
+  assert.equal(calls.filter(a=>a[0]==='agent'&&a[1]==='prompt').length,4);assert.equal(calls.filter(a=>a[0]==='pane'&&a[1]==='close').length,4);assert.ok(!calls.some(a=>['server','workspace','tab'].includes(a[0])));
 });
 
 test('resume owns the controller lock before reading the journal and cannot advance a stale optional snapshot', async t => {
@@ -918,7 +918,7 @@ test('verified publication refuses source changed by a later report despite earl
 test('default allocator and lookup preserve the original issue run across providers and complete real assigned checks', async t => {
   const f=await fixture(t,{defaultWorktree:true});
   assert.equal('allocateIssueWorktree' in f.ports,false);assert.equal('lookupIssueWorktree' in f.ports,false);
-  const first=await f.run();assert.equal(first.state,'waiting',first.message);assert.equal(first.stage,'change');
+  const first=await f.run();assert.equal(first.state,'waiting',first.message);assert.equal(first.stage,'check');
   const original=f.saved(first.runId).assignment;
   const conflict=await f.run('small-change','codex');
   assert.equal(conflict.runId,first.runId,conflict.message);assert.equal(conflict.state,'waiting',conflict.message);
@@ -999,7 +999,7 @@ for (const phase of ['start_intent', 'ready']) for (const legacy of [true, false
     assert.equal(blocked.state, 'waiting'); assert.match(blocked.message, /workflow attach/); assert.equal(calls.length, 2); assert.equal(f.native.length, 0);
     f.setupBlocked = false;
     const continued = await f.resume(first.runId, 'approve');
-    assert.equal(continued.state, 'waiting', continued.message); assert.equal(continued.stage, 'change');
+    assert.equal(continued.state, 'waiting', continued.message); assert.equal(continued.stage, 'check');
     assert.equal(continued.runId, first.runId); assert.equal(calls.length, 3); assert.equal(f.native.length, 1);
     assert.equal(f.native[0].attemptId, attempt); assert.equal(f.native[0].context, calls[0].context);
     assert.equal(f.native[0].instructions, calls[0].instructions);
@@ -1156,7 +1156,7 @@ test('P1 missing account ports preserve a quota-limited native stage without res
 });
 
 test('P1 derived status/index writer failures preserve the same resume decisions and publication evidence',async t=>{
-  const f=await fixture(t);f.ports.writeRunStatus=async()=>{throw Error('display failed');};f.ports.appendRunIndex=async()=>{throw Error('index failed');};const first=await f.run();const next=await f.resume(first.runId,'approve');assert.equal(next.stage,'wait-merge',next.message);assert.deepEqual(f.native.map(x=>x.input.protocol),['proposal','work','verify']);assert.equal(f.saved(first.runId).completed.find(x=>x.id==='verify').handoff.checks[0].exitCode,0);
+  const f=await fixture(t);f.ports.writeRunStatus=async()=>{throw Error('display failed');};f.ports.appendRunIndex=async()=>{throw Error('index failed');};const first=await f.run();const next=await f.resume(first.runId,'approve');assert.equal(next.stage,'wait-merge',next.message);assert.deepEqual(f.native.map(x=>x.input.protocol),['proposal','report','work','verify']);assert.equal(f.saved(first.runId).completed.find(x=>x.id==='verify').handoff.checks[0].exitCode,0);
 });
 
 test('P1 public resume is prepare/reconcile-only until pane controller ownership, including a bound decision',async t=>{
@@ -1609,7 +1609,7 @@ for(const diagnosis of ['busy_429','unknown','lost_reply'])test(`C13 live drive 
     const b={...input.backend,phase:'candidate',evidence:{readySeq:3,workingSeq:4,settledSeq:5}};await ports.checkpoint(b);
     return {state:'settled',backend:b,evidence:b.evidence};
   };
-  const prepared=await f.prepare();const result=await f.drive();assert.equal(result.state,'waiting',result.message);assert.equal(result.stage,'change');assert.equal(retries,1);assert.equal(sleeps,diagnosis==='lost_reply'?62:61);assert.equal(f.saved(prepared.runId).completed[0].id,'scope');assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
+  const prepared=await f.prepare();const result=await f.drive();assert.equal(result.state,'waiting',result.message);assert.equal(result.stage,'check');assert.equal(retries,1);assert.equal(sleeps,diagnosis==='lost_reply'?62:61);assert.equal(f.saved(prepared.runId).completed[0].id,'scope');assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
 });
 
 import {claimWorkflowSession as realC13Claim} from '../src/workflow-claims.mjs';

@@ -1,5 +1,15 @@
-# Try a project preview when useful
+# Try the accepted user-facing behavior
 
-When the project already has an ordinary safe preview, prototype or demo, offer it if it will help the person judge the proposal. Use the project's documented command and the person's existing tool access; explain what it exercises. Do not invent a PDD Try command or require a private service.
+Decide from the accepted prompt and Story whether this feature changes what a
+person sees or types: a screen, CLI command, API answer or message. State the
+evidence for that decision in the handoff.
 
-Report what actually ran and what was observed for this revision. A sketch or link alone is not a completed interaction. If no useful preview exists, continue with the contract review and name the untested interaction.
+When it does, run the documented `pdd try` command for the surface (use
+`pdd try --terminal` for a terminal interaction), record the HTTPS link and give
+it to the person. This is a required stop: wait for the person's observation and
+decision before approval or implementation continues. If the command cannot
+start, report the exact reason and keep the stop visible.
+
+For an internal-only change, do not stop for a preview. Report the check verdict
+and its replay link, explain why no person-facing surface changed, and continue.
+Report only links and observations that actually came from the command.
