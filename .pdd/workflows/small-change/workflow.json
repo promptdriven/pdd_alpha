@@ -16,6 +16,12 @@
       "approval": "next-advance"
     },
     {
+      "id": "check",
+      "kind": "agent",
+      "file": "check.md",
+      "protocol": "report"
+    },
+    {
       "id": "change",
       "kind": "agent",
       "file": "change.md",

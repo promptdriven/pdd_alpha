@@ -42,9 +42,9 @@ The backing native shell inherits the owned server environment and its normal sh
 |---|---:|---|---|
 | [Feature](../.pdd/workflows/feature/WORKFLOW.md) | 12 | understand, visual (optional), prompt-story, check, try (optional), build, verify | approve, prompt-pr (optional), prompt-merge (conditional), code-pr, code-merge |
 | [Bug](../.pdd/workflows/bug/WORKFLOW.md) | 11 | reproduce, prompt-story, check, try (optional), build, verify | approve, prompt-pr (optional), prompt-merge (conditional), code-pr, code-merge |
-| [Small change](../.pdd/workflows/small-change/WORKFLOW.md) | 5 | scope, change, verify | open-pr, wait-merge |
+| [Small change](../.pdd/workflows/small-change/WORKFLOW.md) | 6 | scope, check, change, verify | open-pr, wait-merge |
 
-For the bundled definitions, these are 7 possible native sessions for feature (5 required), 6 for bug (5 required), and 3 for small-change. The total step counts include optional/human work. Optional preview uses the project's actual available preview tools, not a PDD-hosted preview service. A recorded skip remains a skip after interruption; the skipped stage must not run on resume. A skipped prompt PR skips its merge wait. Human approval applies to the current revision, not a prior draft.
+For the bundled definitions, these are 7 possible native sessions for feature (5 required), 6 for bug (5 required), and 4 for small-change. The total step counts include optional/human work. Feature try is optional only for an internal-only change; a person-facing feature makes it a required stop. A recorded skip remains a skip after interruption only when the stage's instructions permit skipping. A skipped prompt PR skips its merge wait. Human approval applies to the current revision, not a prior draft.
 
 ## Saved identity and resume
 

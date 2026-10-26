@@ -29,6 +29,30 @@ Choose a manual [feature](../../.pdd/workflows/feature/WORKFLOW.md), [bug](../..
 
 Keep drafted, reviewed, implemented, tested and published separate. Expected cases come from the contract, not from the program's observed answer. Report exact checks actually run, failures and unverified gaps. A source reading is not a test, and a project test is not formal verification.
 
-Use only the documented local PDD commands. Do not recommend unavailable lint/CHECK/Try/replay commands, invent an SDK or install a hosted service to complete a recipe. Use the person's own agent and project tools under their actual authority and budget; do not assume agent work is free. Missing execution does not prevent prompt drafts or authorize claiming they passed.
+## Runtime interface and test scenarios
+
+For runtime-backed behavior, add one **Runtime interface** block to the owning
+prompt. List each allowed entry point, its inputs, normal result, errors, state or
+side effects, seed or allowed-entry boundary, and what a person sees or types.
+Keep the program contract separate from the runtime transport.
+
+Write a test scenario from that block before running it. Give it a stable name,
+starting state or seed, concrete steps, and independent expected outputs, state
+changes and visible criteria. Include normal, boundary and failure cases when
+they matter. Do not replace expected values with the implementation's answer.
+
+After the prompt, Story and scenario are accepted, run `pdd lint` and then
+`pdd check <scenario>`. On exit 1, fix the accepted scope and recheck at most two
+times; then ask the person with failed criteria, expected versus observed values
+and the result link. Exit 3, or a message that the runtime service is not
+configured, is an unknown result that must be reported plainly while the workflow
+continues.
+
+When a change affects a screen, CLI command, API answer or message, run `pdd try`
+and make its HTTPS link a required stop for the person (`pdd try --terminal` for
+terminal behavior). For an internal-only change, report the check result and
+replay link, explain why no stop is needed, and continue. Use only commands that
+the selected project and runtime document; missing execution is evidence of a
+gap, never a pass.
 
 For a complete synthetic example, read [ticket status](../../examples/ticket-status/README.md). For supported local CLI commands, read [CLI guidance](../../docs/cli.md).

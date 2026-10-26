@@ -16,7 +16,7 @@ Use the guide to choose module boundaries and document behavior, inputs, outcome
 
 Write a Story describing the person's useful outcome and observable criteria. Derive independent cases for normal behavior, boundaries and errors from the intended contract. Keep design questions visible and ask for the decision that changes the result. Do not infer approval from an existing implementation or from a model-generated test passing.
 
-For adoption, inspect code, callers, tests and source documentation; keep implementation unchanged until requested. Distinguish observed behavior from accepted policy and mark unavailable context. Do not invent an execution-service interface or require standalone lint to finish a draft.
+For adoption, inspect code, callers, tests and source documentation; keep implementation unchanged until requested. Distinguish observed behavior from accepted policy and mark unavailable context. Describe a program's Runtime interface in its owning prompt, and run the documented lint/check flow after the prompt and scenario are accepted.
 
 ## Continue in the same conversation
 
