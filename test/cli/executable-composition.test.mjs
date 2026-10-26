@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,cpSync,readdirSync,symlinkSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,cpSync,readdirSync,symlinkSync,existsSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {tmpdir} from 'node:os';
@@ -35,8 +35,15 @@ createInterface({input:process.stdin}).on('line',line=>{
  console.log(JSON.stringify({id:r.id,result}));
 });
 `,{mode:0o755});
-  const env={...process.env,PATH:tools+':'+process.env.PATH,HOME:home,PROBE_LOG:log};
-  return {temp,tools,cwd,home,log,env,executable};
+  const herdrLog=join(temp,'herdr-probes.jsonl'),startLog=join(temp,'herdr-starts');
+  writeFileSync(join(tools,'herdr'),`#!/bin/sh
+if [ "$*" != "--session default workspace list" ]; then exit 91; fi
+printf '%s\\n' probe >> "$PROBE_HERDR_LOG"
+printf '%s\\n' '{"result":{"workspaces":[]}}'
+`,{mode:0o755});
+  writeFileSync(join(tools,'systemd-run'),'#!/bin/sh\nprintf start >> "$PROBE_HERDR_STARTS"\nexit 92\n',{mode:0o755});
+  const env={...process.env,PATH:tools+':'+process.env.PATH,HOME:home,PROBE_LOG:log,PROBE_HERDR_LOG:herdrLog,PROBE_HERDR_STARTS:startLog};
+  return {temp,tools,cwd,home,log,env,executable,herdrLog,startLog};
 }
 test('installed Codex adapter pages native models and uses observed defaults and Settings without guessing',async t=>{
   const f=fixture(t),ports=createLocalWorkflowModelPorts({machineId:'local',cwd:f.cwd,executable:f.executable,env:f.env});
@@ -76,6 +83,7 @@ test('actual bin composes default local model and project adapters for workflow 
   const prepared=join(f.temp,'prepared.json');
   const result=spawnSync(process.execPath,[join(pkg,'bin/pdd.mjs'),'workflow','run','feature','7','--project','demo'],{cwd:f.cwd,env:{...f.env,PREPARED:prepared},encoding:'utf8',timeout:5000});
   assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/Started workflow synthetic-run/);
+  assert.equal(readFileSync(f.herdrLog,'utf8').trim().split('\n').length,1);assert.equal(existsSync(f.startLog),false);
   const input=JSON.parse(readFileSync(prepared,'utf8'));
   assert.equal(input.machineId,'local');assert.equal(input.cwd,f.cwd);assert.deepEqual(input.project,{id:`local:${f.cwd}`,name:'demo'});
   assert.equal(input.launchSelection.model,'synthetic-native');assert.equal(input.launchSelection.effort,'deep');assert.equal(input.launchSelection.source,'defaults');

@@ -6,8 +6,12 @@ function `readHerdrTrace(ports={})`. Preserve the exact invocation, returned val
 or thrown error of the supplied operation. Diagnostics grant no launch, identity,
 admission, retry, repair or acceptance authority.
 
-Only the exact environment setting `PDD_TRACE=herdr` enables recording. Use
-`ports.env` when supplied, otherwise the process environment; do not serialize it.
+Read `ports.env.PDD_TRACE` when defined, otherwise `process.env.PDD_TRACE`,
+including when a filtered supplied environment omits that field. An explicit
+empty value disables tracing. Enable Herdr recording when the comma-separated,
+case-sensitive, individually trimmed tokens contain `herdr`; `herdr,git` and
+`git,herdr` both enable it. Unknown-only or default values remain off; unknown
+tokens cannot enable another sink. Do not serialize the environment.
 When disabled, invoke once without any trace filesystem access. When enabled,
 attempt a request record before invoking once, then a matching reply or error
 record with elapsed monotonic milliseconds. Record epoch milliseconds, monotonic
@@ -40,6 +44,13 @@ metadata. Argv diagnostics expose counts and the validated workflow-drive UUID
 binding only; omit all argument text. Never record prompt/message/screen text,
 pane command text, environment, paths, URLs, credentials, approval proofs, raw
 stdout/stderr, arbitrary error messages, unknown fields or unproved free text.
+Failed calls retain a fixed `command_failed` error kind even when no safe native
+code is available. Preserve only allowlisted native error codes (including
+connection refused/reset, missing executable, permission and timeout failures)
+and a nonnegative integer process exit code. Never copy the error message or
+stderr to explain a connection failure. Readback revalidates these fields.
+Recognize `server.start` as the bounded default-session startup observation; it
+grants no readiness or process authority.
 Malformed or unknown observations are omitted, not made printable by escaping or
 hashing them. Keep the original unredacted value solely in the operation's caller.
 

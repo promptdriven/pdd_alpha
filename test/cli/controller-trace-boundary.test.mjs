@@ -10,7 +10,7 @@ const capture=()=>({text:'',write(x){this.text+=x;}});
 test('trace exposes actual strict controller refusal without inventing ports, changing runtime or retrying',async t=>{
   const home=mkdtempSync(join(tmpdir(),'pdd-controller-boundary-'));t.after(()=>rmSync(home,{recursive:true,force:true}));
   const raw={node:'/synthetic/node',bin:'/synthetic/bin',unknown:{kept:true}},frozen={...raw,packageRoot:'/synthetic/frozen'},stdout=capture(),stderr=capture();let resumes=0;
-  assert.equal(await runPdd(['workflow','resume',id],{home,stdout,stderr,ports:{env:{PDD_TRACE:'herdr'},runtime:raw},workflowRunner:{resumeWorkflow:async(input,ports)=>{
+  assert.equal(await runPdd(['workflow','resume',id],{home,stdout,stderr,workflowHerdrBoot:{ensureDefaultHerdr:async()=>({state:'ready',code:null})},ports:{herdr:{supportsProcessIdentity:async()=>false},env:{PDD_TRACE:'herdr'},runtime:raw},workflowRunner:{resumeWorkflow:async(input,ports)=>{
     resumes++;assert.equal(ports.runtime,raw);assert.equal(input.runId,id);return {state:'prepared',runId:id,root:'/synthetic/repo',runDir:'/synthetic/run',workflow:'small-change',issueNumber:17,runtime:frozen};
   }}}),1);
   assert.equal(resumes,1);assert.equal(stdout.text,'');assert.equal(stderr.text,'Workflow controller launch unconfirmed. Inspect the saved run before retrying.\n');

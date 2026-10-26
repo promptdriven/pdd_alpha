@@ -1,9 +1,9 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 381fbea5d0afb83da8c58e524dfa981b40cb1ff82693ea5ea56ce47f55da08cd).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 6ca8ed1ca4c38fa7b59d12498efc7daee1b50c92aa73706056801270d42333f0).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { withWorkflowLock, inspectWorkflowLock, claimWorkflowSession } from './workflow-claims.mjs';
-import { startWorkflowController, readControllerLaunches } from './workflow-controller.mjs';
+import { startWorkflowController, readControllerLaunches, createLocalWorkflowControllerPorts } from './workflow-controller.mjs';
 import { checkWorkflowRuntime } from './workflow-runtime.mjs';
 import { readRunIndex } from './workflow-run-records.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -71,9 +71,10 @@ export async function runWorkflowKeeper({home=homedir()},ports={}){
   const abort=new AbortController(),signal=ports.signal??abort.signal,stop=()=>abort.abort();
   if(!ports.signal){process.on('SIGTERM',stop);process.on('SIGINT',stop);}
   try{return await withWorkflowLock({path:join(home,'.pdd','runs','keeper.lock'),busyCode:'keeper_busy'},async()=>{
+    const local=await createLocalWorkflowControllerPorts({...ports,home});
     // Await each pass before scheduling: slow discovery can never overlap itself.
     while(!signal.aborted){
-      try{const found=await discoverWorkflowRuns({home},ports);for(const warning of found.warnings)ports.warn?.(warning);await reconcileWorkflowControllers({entries:found.entries,now:ports.now?.()??Date.now()},ports);}
+      try{const found=await discoverWorkflowRuns({home},local);for(const warning of found.warnings)local.warn?.(warning);await reconcileWorkflowControllers({entries:found.entries,now:local.now?.()??Date.now()},local);}
       catch{ports.warn?.('recovery_pass_failed');}
       if(!signal.aborted)await (ports.wait??wait)(30000,signal);
     }

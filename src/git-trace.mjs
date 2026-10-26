@@ -1,4 +1,4 @@
-// Generated from prompts/cli/git-trace.prompt.md (sha256: cab3ccce320e900055bcd84087b61aaad103dd35adaf247718195319a15f10d6).
+// Generated from prompts/cli/git-trace.prompt.md (sha256: 6f30b1e5d6f4555aa1674c4a3810fe445e57307eab750aff4487995438dcc22b).
 import {constants} from 'node:fs';
 import {mkdir,lstat,realpath,open} from 'node:fs/promises';
 import {join,isAbsolute,resolve} from 'node:path';
@@ -104,7 +104,11 @@ async function append(row,ports) {
   }finally{await h.close();}
 }
 export async function traceGitCommand({argv,cwd},action,ports={}) {
-  if((ports.env??process.env).PDD_TRACE!=='git')return action();
+  let enabled=false;
+  try{const selector=ports.env?.PDD_TRACE??process.env.PDD_TRACE;
+    enabled=typeof selector==='string'&&selector.split(',').some(token=>token.trim()==='git');
+  }catch{/* Unavailable diagnostics cannot change the original command. */}
+  if(!enabled)return action();
   const savedArgv=[...argv],savedCwd=cwd,startedAt=new Date().toISOString(),start=performance.now();
   let response,outcome='returned';
   try{response=await action();return response;}

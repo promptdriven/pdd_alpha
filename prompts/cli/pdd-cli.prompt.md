@@ -34,7 +34,24 @@ Public `workflow attach RUN_ID` invokes existing main
 `attachWorkflow({runId,cwd,packageRoot},ports)` and uses the same
 returned-message-once/actual-exit contract; CLI does not resolve journals/agent IDs or
 start a conversation on archived history. Workflow run/resume prepares or reconciles the
-saved run, then requests a controller pane through the public launch helper. Stage
+saved run, then lazily calls module function `ensureDefaultHerdr(ports)` from
+`src/workflow-herdr-boot.mjs` with the complete existing ports before requesting
+a controller pane through the public launch helper. A non-prepared result, remote
+dispatch, discovery or drive/attach never invokes this startup helper. A supplied
+`workflowController` keeps its existing injected path unless an explicit
+`workflowHerdrBoot` module is also supplied. An unavailable or invalid startup
+reply exits 1, prints its safe actionable failure once on stderr and never calls
+the controller; a thrown startup failure gives fixed Herdr startup guidance.
+Readiness is only a prerequisite. After it, lazily await the controller module's
+`createLocalWorkflowControllerPorts(ports)` when exported, then pass its composed
+ports to `startWorkflowController`. This factory owns the real public Herdr
+client plus existing strict runner authority; it preserves supplied bindings.
+An injected controller without a factory retains the existing unchanged ports
+path. Drive lazily binds the same public client's `readProcessStartIdentity`
+over complete ports only when that callback is absent. No CLI identity encoding,
+private authority or raw-stat fallback. None of this overrides an
+unsupported-platform refusal or replaces controller identity, lifecycle, lock or
+durable generation proof. Stage
 agents use panes in that run tab.
 
 Help must explain that human waits stop the controller and require a current decision;
@@ -74,7 +91,19 @@ lists public doctor plus optional phone/link; local discovery imports none of th
 
 ## Public setup and recovery
 
-`setup [--no-phone]` first provisions Alpha's public runs-keeper recovery service,
+`setup [--no-phone]` first resolves its verified runtime using the existing
+versions owner; a failed runtime resolution performs no Herdr installation.
+Then call public module function
+`ensureHerdrInstalled(ports)` from `src/workflow-herdr-boot.mjs`, passing the
+complete existing ports. Only its `ready` reply permits recovery provisioning;
+an unavailable/invalid reply or throw exits 1 with safe actionable Herdr guidance,
+without recovery or optional-client effects. The helper owns supported
+installation and actual invocation-PATH proof; installer exit 0 alone is not
+setup success. No CLI profile, environment, sign-in or integration-hook mutation.
+Test dependency `workflowHerdrBoot` may explicitly supply the same two helper
+exports; production loads the real public module lazily.
+
+Then provision Alpha's public runs-keeper recovery service,
 without importing or requiring the client. Resolve the verified runtime from the
 explicit packageRoot with `src/versions.mjs:resolveRuntime({home,versionRoot})`.
 Hold `src/update-lock.mjs:withUpdateLock({home}, action, ports)` while the action
@@ -99,7 +128,7 @@ Add only these routes to the existing parser/catalog contract:
 | `workflow drive RUN_ID [--decision approve|skip --id UUID --rev N]` | Runner `driveWorkflow`; controller pane entry, actual completion/wait/failure result and exit code. Existing expected stage/seq options remain accepted. |
 | `workflow resume RUN_ID [--decision approve|skip] [--id UUID] [--rev N] [--expect-stage STAGE --expect-seq N]` | Reconcile the original; absence of decision grants no new effect. Preserve legacy decision options subject to current revision checks. A launch uses saved runtime and the same controller helper. |
 | `workflow decide RUN_ID --decision approve|skip --id UUID --rev N [--json]` | `decideWorkflow`; legacy expected pair remains supported. Journal record, not launch acknowledgement, completes the decision. |
-| `runs-keeper` | Public `runWorkflowKeeper({home},ports)` service entry installed by setup; boot/login recovery with no private client or fleet sign-in. |
+| `runs-keeper` | Public `runWorkflowKeeper({home},ports)` service entry installed by setup; real service lazily composes the same controller factory first, with no private client or fleet sign-in. An explicitly injected keeper module retains its supplied ports path. Keeper owns its lifetime lock, locator validation and reconciliation. |
 | `workflow adopt RUN_ID` | Runner `adoptWorkflow`; validation/registration only, no launch or approval. |
 | `workflow clean [--dry-run]` | `cleanWorkflowRuns`; prints removed and retained runs/reasons, never discards unpushed work. |
 | `workflow attach RUN_ID` | Existing `attachWorkflow`; current active stage only, finite archived result. |
@@ -200,6 +229,9 @@ the runtime owner's supplied guard. No CLI path writes journal bytes itself.
 
 ## Dependencies
 
+- [Real Herdr client](workflow-herdr-client.prompt.md): required generation/runtime
+  for shared OS identity and actual transport composed by the controller factory.
+- [Herdr readiness](workflow-herdr-boot.prompt.md): required generation/runtime default-session startup and setup executable/PATH prerequisite.
 - [Herdr diagnostics](herdr-trace.prompt.md): required generation/runtime for opt-in local workflow boundary tracing; no launch authority.
 
 - [Model discovery](workflow-models.prompt.md) and [project discovery](workflow-projects.prompt.md): runtime local adapter factories and explicit public port seams.

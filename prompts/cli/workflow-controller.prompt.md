@@ -48,7 +48,15 @@ when supplied. Use one `herdr pane run` call with the whole line as one argv
 argument. Quote absolute paths with single quotes; reject paths containing
 single quote, backslash, control characters or nonabsolute text as `unsupported`
 before effects. Other values must pass the CLI's UUID/enum/integer patterns.
-Do not serialize the environment. Do not type a second time after an unknown reply.
+Do not serialize the environment, except an allowlisted diagnostic `PDD_TRACE`
+assignment for this one drive command. Read the explicit port selector or, when
+missing, `process.env.PDD_TRACE`; project only known comma-separated `herdr` and
+`git` tokens into canonical `herdr`, `git` or `herdr,git`. Save that optional
+selector and the exact line with the intent before delivery. Never include any
+other variable or unknown text. The assignment changes no drive argv, runtime,
+authority or surrounding shell configuration. It allows a drive in an already
+running Herdr session to inherit the requested tracing. Later inspection uses
+the saved line and selector unchanged and never repeats delivery.
 
 **Started proof:** a fresh `pane.process_info` for the saved pane must show the
 recorded Node controller process, its run-specific drive invocation and current
@@ -73,9 +81,31 @@ the local boot owner must supply a ready, separately managed default server.
 
 </details>
 
-The exact installed Herdr command/schema for process start identity and pane
-creation/close remains to be proved by the transport spike. If unavailable,
-return `unsupported`; never replace it with idle status, terminal text or `ps`.
+The real Herdr connection binds the PID actually reported by
+`pane.process_info` to OS process start evidence. Linux uses boot ID plus
+`/proc/<pid>/stat` field 22; macOS uses `ps -o lstart= -p <pid>` or sysctl
+start time. Read around the Herdr observation to reject reuse or conflicting
+processes. Its `supportsProcessIdentity()` must reflect genuine Herdr and OS
+evidence, never a constant assertion. The normalized process result supplies
+the same `startIdentity` bytes drive durably journals. The recorded real
+Herdr foreground-process schema has PID/argv/cwd but no start-identity field;
+the OS binding supplies that missing fact. Idle status, terminal text, shell
+presence and PID alone remain insufficient. Missing evidence refuses before
+launch, or remains uncertain after an admitted effect.
+
+Export async module function `createLocalWorkflowControllerPorts(ports={})`:
+fill missing runner authority bindings from
+`createWorkflowControllerAuthorityPorts(ports)`, and a strict `validateLocator`
+bridge for the keeper, and missing transport bindings through the public
+Herdr owner's async module function `createWorkflowHerdrPorts(ports)`.
+Retain every supplied port, runtime object and callback
+by reference with supplied values winning. The locator bridge compares the
+entry's run/root/commonDir to a fresh strict journal, then asks the same runner
+authority to validate the complete saved canonical spec and state. It returns
+false on missing, changed or unreadable identity. Compose without creating or
+typing into panes. If the caller supplies its own controller-start function
+and inventory observer, do not construct unused transport for that path.
+Readiness is not identity or launch authority.
 
 ## Opt-in transport tracing
 
@@ -95,6 +125,10 @@ enter the log; the trace owner defines positive projection and secure bounds.
 - [Story](../../story/cli/WORKFLOW-CONTROLLER.md) and [cases](../../vectors/cli/workflow-controller.json): verification; expected outcomes, not observed results.
 - [Claims](workflow-claims.prompt.md): required generation/runtime nonblocking
   controller-start exclusion, distinct from drive's lifetime controller lock.
+- [Runner authority](workflow-runner.prompt.md#public-controller-authority-composition):
+  required generation/runtime for the strict four-binding authority factory.
+- [Public Herdr connection](workflow-herdr-client.prompt.md): required
+  generation/runtime for actual transport and shared OS process identity.
 
 - [Frozen runtime](workflow-runtime.prompt.md): required generation/runtime
   input for immutable executable paths and source of the caller's runtime.

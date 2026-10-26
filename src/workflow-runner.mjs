@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 713f4a4d00424dca1ab691da9f7d6887980884880f33680884646de0d4962613).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: bd3fc9efd062d62c9a0b71ba89f47c70db7fe12f5567555f767a0b37eb7a1da2).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -16,7 +16,7 @@ export { WORKFLOW_STAGES } from './workflow-definitions.mjs';
 import { traceHerdrRequest } from './herdr-trace.mjs';
 
 const ordinaryExec = promisify(execFileCallback);
-const defaultExec = (file, args, { cwd }) => ordinaryExec(file, args, { cwd, encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
+const defaultExec = (file, args, { cwd, env }) => ordinaryExec(file, args, { cwd, env, encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STAGE = /^(?=.{1,64}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -24,7 +24,10 @@ const text = value => typeof value === 'string' && value.trim().length > 0;
 const fail = message => { throw Error(message); };
 
 function dependencies(ports = {}) {
-  return { ...ports, execFile: ports.execFile ?? defaultExec, commandPorts: ports.execFile ? { execFile: ports.execFile } : {},
+  const execFile=ports.execFile??((file,args,options)=>defaultExec(file,args,file==='herdr'
+    ?{...options,env:{...(ports.env??process.env),...((ports.env?.PDD_TRACE===undefined&&process.env.PDD_TRACE!==undefined)?{PDD_TRACE:process.env.PDD_TRACE}:{})}}
+    :options));
+  return { ...ports, execFile, commandPorts: ports.execFile ? { execFile: ports.execFile } : {},
     stdout: ports.stdout ?? process.stdout, stderr: ports.stderr ?? process.stderr };
 }
 async function command(p, cwd, executable, args, raw = false) {
@@ -1083,6 +1086,42 @@ export async function readWorkflowJournal({runDir}, ports = {}) {
   return {state,seq:state.seq,decisions};
 }
 
+// Compose real authority without trusting a caller's journal or path validator.
+export function createWorkflowControllerAuthorityPorts(ports = {}) {
+  const p=dependencies(ports);
+  const read=spec=>readWorkflowJournal(spec);
+  async function verified(spec) {
+    if(!UUID.test(spec?.runId??'')||!isAbsolute(spec?.runDir??'')||!isAbsolute(spec?.root??''))fail('Controller locator is invalid.');
+    const journal=await read({runDir:spec.runDir}),s=journal.state,a=s.assignment;
+    if(s.runId!==spec.runId||s.root!==spec.root||s.name!==spec.workflow||s.issue?.number!==spec.issueNumber
+      ||!s.p1||s.removing||s.archived||!isDeepStrictEqual(s.runtime,spec.runtime)
+      ||s.gitDir!==a?.gitDir||s.root!==a.worktreePath||s.repo!==a.repository||s.issue.number!==a.issueNumber
+      ||spec.runDir!==join(a.gitDir,'pdd','workflows',s.runId))fail('Controller run binding changed.');
+    const found=await assignmentFor({cwd:s.root},p,true,s.runId);
+    if(found.state!=='ready'||!isDeepStrictEqual(found.assignment,a))fail('Original controller assignment is unavailable.');
+    await assignedRepository(a,p);
+    await validateInput(s,{packageRoot:s.runtime.packageRoot},p);
+    if(!isDeepStrictEqual((await read({runDir:spec.runDir})).state,s))fail('Controller journal changed during validation.');
+    return journal;
+  }
+  return {
+    readWorkflowJournal:read,
+    withLifecycleGuard:async(spec,action)=>{
+      const first=await verified(spec),release=await lifecycle(first.state.assignment,spec.runId,p);
+      try{await verified(spec);return await action();}finally{await release();}
+    },
+    validateRun:async(spec,state)=>{try{return isDeepStrictEqual((await verified(spec)).state,state);}catch{return false;}},
+    inspectControllerLock:async spec=>{
+      try{
+        await verified(spec);
+        const inspect=p.inspectWorkflowLock??(await import('./workflow-claims.mjs')).inspectWorkflowLock;
+        const observed=await inspect({path:join(spec.runDir,'controller.lock')},p);
+        return ['free','held'].includes(observed)?observed:'unknown';
+      }catch{return 'unknown';}
+    }
+  };
+}
+
 export async function prepareWorkflow(options, ports = {}) {
   const binding=ports.startRequestBinding;
   if(options?.runId) {
@@ -1128,8 +1167,9 @@ async function controllerProof(s,options,p) {
     ...(options.expect?['--expect-stage',options.expect.stage,'--expect-seq',String(options.expect.seq)]:[])];
   const info=reply.result?.process_info,proc=info?.foreground_processes?.find(item=>item.pid===process.pid&&isDeepStrictEqual(item.argv,expectedArgv));
   if(info?.pane_id!==c.paneId||!proc||options.launchId&&!proc.argv.includes(options.launchId))fail('Controller pane process proof is unavailable.');
-  let startIdentity=await p.processStartIdentity?.({pid:process.pid,paneId:c.paneId});
-  if(!startIdentity&&process.platform==='linux'){const stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');startIdentity=stat.slice(stat.lastIndexOf(')')+2).split(' ')[19];}
+  const startIdentity=p.processStartIdentity
+    ?await p.processStartIdentity({pid:process.pid,paneId:c.paneId})
+    :await (await import('./workflow-herdr-client.mjs')).readProcessStartIdentity({pid:process.pid},p);
   if(!text(startIdentity))fail('Controller process start identity is unavailable.');
   return {...c,started:true,pid:process.pid,startIdentity,generation:(s.controller?.generation??0)+1,launchId:options.launchId??null};
 }

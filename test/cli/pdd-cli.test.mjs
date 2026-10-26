@@ -96,12 +96,12 @@ test('Alpha setup provisions public support and recovery under one lease before 
    lock:{withUpdateLock:async(input,operation)=>{calls.push('lock');active=true;try{return await operation(lease);}finally{active=false;calls.push('unlock');}}},
    launcher:{installLauncherSupport:async input=>{assert.equal(input.runtime,runtime);assert.equal(input.lease,lease);assert.ok(active);calls.push('support');return {code:null};},
     provisionRecoveryService:async input=>{assert.equal(input.lease,lease);assert.ok(active);calls.push('service');return {code:null};}}};
-  assert.equal(await runPdd(['setup'],{...io(),setupModules,...(withClient?{clientAdapter:{runSetupCommand:async()=>{assert.equal(active,false);calls.push('client');return 0;}}}:{})}),0);
+  assert.equal(await runPdd(['setup'],{...io(),workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null})},setupModules,...(withClient?{clientAdapter:{runSetupCommand:async()=>{assert.equal(active,false);calls.push('client');return 0;}}}:{})}),0);
   assert.deepEqual(calls,['resolve','lock','support','service','unlock',...(withClient?['client']:[])]);
  }
 });
 test('public setup failure stops client continuation and gives local recovery instructions',async()=>{
- const deps=io();assert.equal(await runPdd(['setup'],{...deps,
+ const deps=io();assert.equal(await runPdd(['setup'],{...deps,workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null})},
   setupModules:{versions:{resolveRuntime:async()=>({})},lock:{withUpdateLock:async(input,op)=>op({})},launcher:{installLauncherSupport:async()=>({code:'runtime_unavailable'}),provisionRecoveryService:()=>assert.fail('No service')}},
   clientAdapter:{runSetupCommand:()=>assert.fail('No client continuation')}}),1);
  assert.match(deps.stderr.text,/verified PDD installer|pdd-launch recover/);assert.doesNotMatch(deps.stderr.text,/needs.*client/);

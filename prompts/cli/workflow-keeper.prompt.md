@@ -40,6 +40,23 @@ process/journal first; it consumes admission and cannot cause another blind star
 When observations are available, recover a killed controller within 90 s.
 Unknown Herdr state never proves an agent or controller stopped.
 
+Inside its lifetime lock, the public keeper fills missing runner authority and
+locator bindings through `createLocalWorkflowControllerPorts(ports)` before
+scheduling reconciliation. The same factory obtains missing real Herdr,
+shared `processStartIdentity` and complete/stable inventory bindings from their
+public owner. It creates no pane and grants no launch authority by itself.
+Explicit test/owner ports win.
+The public keeper uses the same real Herdr/OS identity composition as direct
+controller launch. PID comes from the exact pane's `pane.process_info`; Linux
+start identity includes boot ID and process start ticks, and macOS uses the OS
+process start time. Match the complete durable controller generation, launch,
+pane, argv and runtime proof. A running default server or shell cannot stand
+in for that proof. Fill only missing transport/runner authority bindings;
+explicit supplied callbacks remain intact. Validate registry/index locators
+through the strict journal and physical assignment before effects. Unknown OS
+identity, locator, lock or inventory retains the original run without a new
+start, prompt or reset.
+
 A restarted drive inspects the original stage and claim. Live matching stage:
 reattach without prompt. Absent process with saved native id: drive uses the stage adapter's explicit
 history-only resume intent with stopped proof and new generation; it never

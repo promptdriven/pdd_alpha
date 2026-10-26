@@ -6,7 +6,10 @@ the original command return value or thrown object, including rejected code zero
 No trace failure may retry, repair or change a command result.
 
 The module function `traceGitCommand({argv,cwd}, action, ports={})` invokes the
-supplied Git action exactly once. Only exact `PDD_TRACE=git` enables tracing. Append
+supplied Git action exactly once. Enable tracing only when the comma-separated
+`PDD_TRACE` string contains the case-sensitive token `git` after trimming each
+token. Both `herdr,git` and `git,herdr` enable this sink; unrelated tokens never
+enable it, and `all`, substrings or case aliases have no special meaning. Append
 one redacted JSON line to `~/.pdd/logs/git-trace.jsonl` after the action settles,
 including Git argv, cwd, returned/rejected outcome, numeric exit or null when
 unavailable, signal/error code when observed, stderr, UTC start/end and monotonic
@@ -51,8 +54,13 @@ whether to include this optional field in its support report; adapters cannot
 inject untrusted trace records through their report fields.
 
 `ports.home` optionally supplies an isolated absolute existing home;
-`ports.env` supplies the trace switch for isolated tests. Defaults are the actual
-user home and inherited environment. These diagnostic inputs grant no Git authority.
+`ports.env.PDD_TRACE` supplies the trace switch; when absent or null, use
+`process.env.PDD_TRACE` even if a supplied filtered environment omits the switch.
+An explicit empty string overrides inheritance and disables tracing. If the
+selected value is unset, non-string or unknown-only, tracing stays off. Do not
+mutate or log either environment, and treat unavailable selector access as disabled while preserving
+the one original action. The default home is the actual user home. These
+diagnostic inputs grant no Git authority.
 
 [Worktree allocation](workflow-worktree.prompt.md) owns the caller's command and
 custody rules; [doctor](doctor.prompt.md) owns the report. These caller links are

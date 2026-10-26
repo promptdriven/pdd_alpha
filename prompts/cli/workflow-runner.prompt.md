@@ -623,6 +623,38 @@ the attachment guard; attachment exit never grants acceptance or progression.
 
 Do not cap active or unresolved native stages across a repository. Each running stage is a full Codex or Claude session on the person's computer. Distinct issues may retain independent unresolved stages concurrently; this does not promise tested throughput or automatic cleanup. Preserve one assigned run per issue and one active stage per run, controller and attachment exclusion, exact identity/currentness checks and uncertain-delivery refusal. Do not allocate or release repository admission slots. Historical admission metadata and claims may remain on disk; ignore them without clearing or rewriting live journals or claims.
 
+## Public controller authority composition
+
+Export synchronous module function `createWorkflowControllerAuthorityPorts(ports={})`
+returning `readWorkflowJournal`, `withLifecycleGuard`, `validateRun` and
+`inspectControllerLock`. These are real bindings to this module's strict reader,
+physical assignment, frozen-input validator and lifecycle policy, not an
+alternative admission policy. The reader always uses the strict complete journal.
+Before deriving any lock path, verify the saved run/root/runDir, full canonical
+runtime, workflow and issue against the fresh journal, original physical
+assignment lookup and repository, and frozen inputs. Caller-supplied commonDir
+or a plausible locator never authorizes metadata creation. A supplied stale
+state makes `validateRun` false. Validation errors also return false.
+
+`withLifecycleGuard(spec,action)` validates before acquiring the actual
+common-directory lifecycle lock and again after acquisition, then releases on
+every outcome. Invalid or retired identity throws before action. Controller-lock
+inspection validates the same identity and reports the actual saved
+`controller.lock` as free, held or unknown; unknown/errors never become free.
+Explicit supplied ports are composed by the caller, not substituted inside the
+strict authority reader. Preserve all existing decision, generation, runtime,
+native ownership and no-repeat policies.
+
+Drive's durable `controller.started.startIdentity` uses the supplied
+`processStartIdentity({pid,paneId})` binding or the public Herdr connection's
+module function `readProcessStartIdentity({pid},ports)`:
+Herdr identifies the exact PID and argv,
+Linux identity includes the boot ID and `/proc/<pid>/stat` field 22, and macOS
+uses the exact OS start time. Missing/changed OS evidence refuses; raw PID or
+Linux start ticks without boot ID cannot replace it. There is no local
+raw-stat fallback when the shared reader cannot supply identity. Keep `PDD_TRACE` when
+forwarding a bounded runner environment so diagnostics reach the real process.
+
 ## Opt-in transport tracing
 
 When `PDD_TRACE=herdr` is selected, send actual Herdr requests and their replies
@@ -635,6 +667,9 @@ Prompts, pane command text, paths, environment and arbitrary error text must not
 enter the log; the trace owner defines positive projection and secure bounds.
 
 ## Dependencies
+
+- [Public Herdr connection](workflow-herdr-client.prompt.md): required
+  generation/runtime for the same OS identity reader used by the controller.
 
 - [Herdr trace](herdr-trace.prompt.md): required generation/runtime for the module function `traceHerdrRequest`, opt-in redaction and bounded diagnostics; it grants no transport or controller authority.
 

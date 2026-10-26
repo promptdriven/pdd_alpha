@@ -65,7 +65,13 @@ for(const c of await cases('bin-entry-runtime'))test(c.id,async t=>{
   await git('remote','add','origin','https://github.com/example/project.git');await git('update-ref','refs/remotes/origin/main',await git('rev-parse','HEAD'));
   const tools=join(home,'tools');await fs.mkdir(tools);
   await put(join(tools,'codex'),'#!/bin/sh\nexit 1\n',0o755);
-  const paths=Object.fromEntries(['PREPARE_INPUT','PREPARE_RESULT','CONTROLLER','COMMANDS'].map(n=>[n,join(home,n+'.json')]));
+  await put(join(tools,'herdr'),`#!/bin/sh
+if [ "$*" != "--session default workspace list" ]; then exit 91; fi
+printf '%s\\n' probe >> "$HERDR_PROBES"
+printf '%s\\n' '{"result":{"workspaces":[]}}'
+`,0o755);
+  await put(join(tools,'systemd-run'),'#!/bin/sh\nprintf start >> "$HERDR_STARTS"\nexit 92\n',0o755);
+  const paths=Object.fromEntries(['PREPARE_INPUT','PREPARE_RESULT','CONTROLLER','COMMANDS','HERDR_PROBES','HERDR_STARTS'].map(n=>[n,join(home,n+'.json')]));
   const env={...process.env,HOME:home,PATH:tools+':'+process.env.PATH,...paths,PDD_PINNED_RUNTIME:'1'};
   let selected,entry=join(local,'bin/pdd.mjs');
   if(c.given.current){
@@ -103,6 +109,9 @@ for(const c of await cases('bin-entry-runtime'))test(c.id,async t=>{
     assert.equal(await exists(paths.CONTROLLER),c.expected.controllerRequested);assert.equal(await exists(join(cwd,'.git/pdd')),false);
     assert.equal((await git('worktree','list','--porcelain')).match(/^worktree /gm).length,1);
   }
+  assert.equal(await exists(paths.HERDR_STARTS),false);
+  assert.equal(await exists(paths.HERDR_PROBES),c.expected.prepared===true);
+  if(c.expected.prepared)assert.equal((await fs.readFile(paths.HERDR_PROBES,'utf8')).trim().split('\n').length,1);
   assert.equal(await git('status','--porcelain'),'');assert.equal(await fs.readFile(join(cwd,'README.md'),'utf8'),'Preserved input.\n');
   const commands=await exists(paths.COMMANDS)?(await fs.readFile(paths.COMMANDS,'utf8')).trim().split('\n').map(JSON.parse):[];
   assert.equal(commands.filter(x=>!['git','gh'].includes(x.file)).length,c.expected.nativeEffects);

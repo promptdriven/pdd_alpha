@@ -13,11 +13,24 @@ const secret='sk-proj-syntheticCredential123';
 
 test('disabled tracing has no filesystem effect and preserves exact results and errors',async t=>{
   const p=fixture(t),reply={unknown:{retained:true}},error=Object.assign(Error(secret),{code:'EACCES'});let count=0;
-  for(const env of [{},{PDD_TRACE:'git'},{PDD_TRACE:'HERDR'}]){
+  for(const env of [{PDD_TRACE:''},{PDD_TRACE:'git'},{PDD_TRACE:'HERDR'}]){
     assert.equal(await traceHerdrRequest({operation:'tab.create',request:{prompt:secret}},()=>{count++;return reply;},{...p,env}),reply);
     await assert.rejects(traceHerdrRequest({operation:'pane.run'},()=>{count++;throw error;},{...p,env}),e=>e===error);
   }
   assert.equal(count,6);assert.equal(fs.existsSync(join(p.home,'.pdd')),false);assert.deepEqual(readHerdrTrace(p),[]);
+});
+
+test('trace selector accepts both token orders and process environment when filtered ports omit it',async t=>{
+ const prior=process.env.PDD_TRACE;t.after(()=>{if(prior===undefined)delete process.env.PDD_TRACE;else process.env.PDD_TRACE=prior;});
+ for(const selector of ['herdr,git','git,herdr',' herdr , git ','unknown,herdr']){
+  const p=fixture(t);let calls=0;process.env.PDD_TRACE='';
+  const reply={state:'ready'};assert.equal(await traceHerdrRequest({operation:'workspace.list'},()=>{calls++;return reply;},{...p,env:{PDD_TRACE:selector}}),reply);
+  assert.equal(calls,1);assert.equal(readHerdrTrace(p).length,2);
+ }
+ process.env.PDD_TRACE='herdr,git';
+ const p=fixture(t);await traceHerdrRequest({operation:'workspace.list'},()=>({state:'ready'}),{...p,env:{PATH:'/synthetic'}});assert.equal(readHerdrTrace(p).length,2);
+ const disabled=fixture(t);await traceHerdrRequest({operation:'workspace.list'},()=>({state:'ready'}),{...disabled,env:{PDD_TRACE:''}});assert.equal(fs.existsSync(join(disabled.home,'.pdd')),false);
+ const unknown=fixture(t);await traceHerdrRequest({operation:'workspace.list'},()=>({state:'ready'}),{...unknown,env:{PDD_TRACE:'UNKNOWN,git'}});assert.equal(fs.existsSync(join(unknown.home,'.pdd')),false);
 });
 
 test('synthetic replies retain useful IDs and timing without prompts, argv, paths or error text',async t=>{
@@ -102,4 +115,25 @@ test('reader refuses a private FIFO without blocking or changing it',{skip:proce
   const child=spawnSync(process.execPath,['--input-type=module','-e',code,p.home],{encoding:'utf8',timeout:2000});
   assert.equal(child.error,undefined);assert.equal(child.status,0,child.stderr);assert.equal(child.stdout,'[]');
   assert.equal(fs.lstatSync(path(p)).isFIFO(),true);assert.equal(fs.lstatSync(path(p)).ino,before.ino);assert.equal(fs.readdirSync(join(p.home,'.pdd/logs')).length,1);
+});
+
+test('failed default-session probes and server startup retain safe connection diagnostics once',async t=>{
+  const p=fixture(t);let calls=0;
+  const failures=[Object.assign(Error('connect '+secret+' /private/socket'),{code:'ECONNREFUSED',stderr:secret}),Object.assign(Error(secret),{code:1,stderr:secret}),secret];
+  for(const error of failures)await assert.rejects(traceHerdrRequest({operation:'workspace.list',request:{session:'default'}},()=>{calls++;return Promise.reject(error);},p),e=>e===error);
+  const reply={code:0,stdout:'ignored'};
+  assert.equal(await traceHerdrRequest({operation:'server.start'},()=>{calls++;return reply;},p),reply);
+  const rows=readHerdrTrace(p);assert.equal(calls,4);assert.equal(rows.length,8);
+  assert.equal(rows[1].payload.error.code,'ECONNREFUSED');assert.equal(rows[1].payload.error.kind,'command_failed');
+  assert.equal(rows[3].payload.error.exitCode,1);assert.equal(rows[3].payload.error.kind,'command_failed');
+  assert.deepEqual(rows[5].payload.error,{kind:'command_failed'});assert.equal(rows.at(-1).operation,'server.start');
+  for(let i=0;i<rows.length;i+=2){assert.equal(rows[i].traceId,rows[i+1].traceId);assert.ok(rows[i+1].durationMs>=0);}
+  assert.doesNotMatch(fs.readFileSync(path(p),'utf8'),/syntheticCredential|private|stderr|connect /);
+});
+
+test('diagnostic projection failures preserve the exact rejected value without retry',async t=>{
+ const p=fixture(t);let calls=0;
+ const error=new Proxy({}, {getOwnPropertyDescriptor(){throw Error('synthetic projection fault');}});
+ await assert.rejects(traceHerdrRequest({operation:'workspace.list'},()=>{calls++;return Promise.reject(error);},p),e=>e===error);
+ assert.equal(calls,1);
 });

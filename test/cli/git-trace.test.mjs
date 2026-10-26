@@ -20,7 +20,7 @@ async function log(f,bytes){await mkdir(join(f.home,'.pdd/logs'),{recursive:true
 
 test('disabled tracing invokes once and never creates diagnostic paths',async t=>{
  const f=await fixture(t),value={stdout:'unchanged'};let calls=0;
- for(const valueOfSwitch of [undefined,'','1','herdr','git,herdr']){
+ for(const valueOfSwitch of [undefined,'','1','herdr','unknown']){
   assert.equal(await traceGitCommand(command,async()=>{calls++;return value;},{...f,env:{PDD_TRACE:valueOfSwitch}}),value);
   assert.deepEqual(await readdir(f.home),[]);
  }

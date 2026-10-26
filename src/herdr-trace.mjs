@@ -1,4 +1,4 @@
-// Generated from prompts/cli/herdr-trace.prompt.md (sha256: 7aba3c4253f86ac714ff63189f0f804ddf741d3b261e0e20f0285588be0f0763).
+// Generated from prompts/cli/herdr-trace.prompt.md (sha256: c6485f51df252b6ecce768b34c06917838ba61979c96cf16f5afd648d705c644).
 import {constants,closeSync,fstatSync,ftruncateSync,lstatSync,mkdirSync,openSync,readSync,realpathSync,unlinkSync,writeSync} from 'node:fs';
 import {join,isAbsolute} from 'node:path';
 import {homedir} from 'node:os';
@@ -7,10 +7,10 @@ import {performance} from 'node:perf_hooks';
 
 const LIMIT=1024*1024,ROW_LIMIT=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const OPS=new Set(['workspace.list','workspace.create','tab.create','pane.run','pane.process_info','pane.split','pane.close','pane.list','agent.start','agent.prompt','agent.get','agent.attach','agent.resume','workflow.prepare','workflow.resume','controller.start','other']);
+const OPS=new Set(['server.start','workspace.list','workspace.create','tab.create','pane.run','pane.process_info','pane.split','pane.close','pane.list','agent.start','agent.prompt','agent.get','agent.attach','agent.resume','workflow.prepare','workflow.resume','controller.start','other']);
 const TYPES=new Set(['ok','workspace_list','workspace_created','tab_created','pane_created','pane_list','pane_process_info','agent_started','agent_prompted','agent_attached','agent_state','agent']);
 const STATES=new Set(['prepared','started','refused','failed','uncertain','ready','running','working','idle','done','blocked','unknown','waiting','waiting_agent','waiting_person','recovery_required','completed']);
-const CODES=new Set(['unsupported','controller_busy','launch_history_invalid','launch_binding_conflict','run_not_startable','stale_decision','run_not_waiting','decision_refused','human_wait','runtime_mismatch','assignment_invalid','launch_budget','workspace_unknown','workspace_create_failed','tab_create_failed','launch_io','launch_uncertain','proof_unavailable','process_unproved','proof_conflict','proof_not_durable','controller_exited','herdr_command_uncertain','herdr_invalid_reply','stage_process_unproved','stage_identity_changed','unsupported_platform','ENOENT','EACCES','EPERM','ETIMEDOUT']);
+const CODES=new Set(['unsupported','controller_busy','launch_history_invalid','launch_binding_conflict','run_not_startable','stale_decision','run_not_waiting','decision_refused','human_wait','runtime_mismatch','assignment_invalid','launch_budget','workspace_unknown','workspace_create_failed','tab_create_failed','launch_io','launch_uncertain','proof_unavailable','process_unproved','proof_conflict','proof_not_durable','controller_exited','herdr_command_uncertain','herdr_invalid_reply','stage_process_unproved','stage_identity_changed','unsupported_platform','ENOENT','EACCES','EPERM','ETIMEDOUT','ECONNREFUSED','ECONNRESET','ENOTFOUND','EPIPE','ENOTCONN','EHOSTUNREACH','ECONNABORTED']);
 const NESTED=new Set(['result','process_info','foreground_processes','workspace','workspaces','tab','pane','panes','agent','controller','input']);
 const NUMBERS=new Set(['pid','shell_pid','foreground_process_group_id','generation','previousGeneration','backendGen','seq','issueNumber','code','exitCode','timeout']);
 const BOOLS=new Set(['ok','started','stopped','refused','complete','interactive_ready','launch_pending','focus']);
@@ -68,7 +68,14 @@ function payload(value,depth=0){
     if(NESTED.has(k)&&v&&typeof v==='object'){out[k]=payload(v,depth+1);continue;}
     if(k==='stdout'&&typeof v==='string'&&Buffer.byteLength(v)<=LIMIT){try{out.reply=payload(JSON.parse(v),depth+1);}catch{}continue;}
     if(k==='reply'&&v&&typeof v==='object'){out[k]=payload(v,depth+1);continue;}
-    if(k==='error'&&v&&typeof v==='object'){out.error={};const code=data(v,'code');if(CODES.has(code))out.error.code=code;}
+    if(k==='error'){
+      out.error={kind:'command_failed'};
+      if(v&&typeof v==='object'){
+        const code=data(v,'code');if(CODES.has(code))out.error.code=code;
+        const exit=Number.isInteger(code)?code:data(v,'exitCode');
+        if(Number.isSafeInteger(exit)&&exit>=0&&exit<=255)out.error.exitCode=exit;
+      }
+    }
   }
   return out;
 }
@@ -98,7 +105,7 @@ function append(value,ports){
   finally{try{if(fd!==undefined)closeSync(fd);}catch{}try{if(lock!==undefined){closeSync(lock);unlinkSync(path+'.lock');}}catch{}}
 }
 export async function traceHerdrRequest({operation,request},invoke,ports={}){
-  let trace;try{if((ports.env??process.env).PDD_TRACE==='herdr')trace={v:1,traceId:randomUUID(),operation:OPS.has(operation)?operation:'other'};}catch{}
+  let trace;try{const selector=ports.env?.PDD_TRACE??process.env.PDD_TRACE;if(typeof selector==='string'&&selector.split(',').some(token=>token.trim()==='herdr'))trace={v:1,traceId:randomUUID(),operation:OPS.has(operation)?operation:'other'};}catch{}
   if(!trace)return invoke();
   const start=performance.now();append({...trace,phase:'request',at:Date.now(),monotonicMs:start,payload:request},ports);
   try{

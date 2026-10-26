@@ -121,3 +121,52 @@ test('disabled or unavailable trace storage preserves controller launch result',
     if(!setting)assert.deepEqual(await fs.readdir(f.ports.home),[]);
   }
 });
+
+test('changed OS boot identity with the same Herdr PID remains inspect-only',async t=>{
+  const f=await fixture(t,'');
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  const original=f.ports.herdr.processInfo;
+  f.ports.herdr.processInfo=async()=>({...await original(),startIdentity:'different-boot:same-start-ticks'});
+  for(let i=0;i<2;i++){
+    const r=await startWorkflowController(f.spec,f.ports);assert.equal(r.state,'uncertain');assert.equal(r.code,'process_unproved');
+  }
+  assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+  assert.equal((await readControllerLaunches(f.spec)).length,1);
+});
+
+test('Herdr foreground PID and OS start evidence cannot substitute a shell for the exact Node invocation',async t=>{
+  const f=await fixture(t,''),original=f.ports.herdr.processInfo;
+  // Public foreground-process shape observed in Herdr: a shell is a process,
+  // but it is not the saved Node controller or its run-specific drive argv.
+  f.ports.herdr.processInfo=async()=>({...await original(),executable:'/bin/bash',argv:['/bin/bash']});
+  const r=await startWorkflowController(f.spec,f.ports);
+  assert.equal(r.state,'uncertain');assert.equal(r.code,'process_unproved');
+  await startWorkflowController(f.spec,f.ports);
+  assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+});
+
+test('only allowlisted tracing enters the durable drive command, without changing process argv or repeating delivery',async t=>{
+  const before=process.env.PDD_TRACE;process.env.PDD_TRACE='git';t.after(()=>{if(before===undefined)delete process.env.PDD_TRACE;else process.env.PDD_TRACE=before;});
+  for(const [selector,expected] of [['herdr,git','herdr,git'],['git,herdr','herdr,git'],['herdr,PRIVATE_TEXT','herdr'],['PRIVATE; touch /tmp/never',null],[undefined,'git']]){
+    const f=await fixture(t,'');f.ports.home=await folder(t);f.ports.env={PDD_TRACE:selector,SECRET:'not-forwarded'};
+    assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+    const intent=(await readControllerLaunches(f.spec)).at(-1);
+    assert.equal(intent.traceSelector??null,expected);
+    assert.equal(intent.line,(expected?`PDD_TRACE='${expected}' `:'')+intent.argv.map(x=>`'${x}'`).join(' '));
+    assert.ok(!intent.line.includes('PRIVATE'));assert.ok(!intent.line.includes('SECRET'));assert.ok(!intent.line.includes('not-forwarded'));
+    assert.deepEqual(intent.proof.process.argv,intent.argv);
+    f.ports.env.PDD_TRACE='git';assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+    assert.equal((await readControllerLaunches(f.spec)).at(-1).line,intent.line);
+    assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+  }
+});
+
+test('saved selector changes invalidate launch history and never authorize another pane command',async t=>{
+  const f=await fixture(t,'');f.ports.home=await folder(t);f.ports.env={PDD_TRACE:'herdr'};
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  const intent=(await readControllerLaunches(f.spec)).at(-1),dir=join(f.spec.runDir,'controller-launch',intent.launchId);
+  const last=(await fs.readdir(dir)).sort().at(-1),path=join(dir,last),record=JSON.parse(await fs.readFile(path,'utf8'));
+  record.traceSelector='git';await fs.writeFile(path,JSON.stringify(record)+'\n');
+  assert.equal((await startWorkflowController(f.spec,f.ports)).code,'launch_history_invalid');
+  assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+});

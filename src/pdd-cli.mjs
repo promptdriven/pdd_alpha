@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: a02bdfa8ca9018d20b67ff7484e4cf6c70866e1d85e547c10457fb37562fc8c9).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 1c422953a8dcf282368e42b5e109dc31454a940d47160e7627355c9ea378b453).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +35,7 @@ function guidanceError(stderr) {
 export async function runPdd(argv, dependencies = {}) {
   const {stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
     nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages, workflowDecider,
-    phoneCli, clientAdapter = phoneCli, workflowController, workflowKeeper, workflowCleaner, workflowRuntime,
+    phoneCli, clientAdapter = phoneCli, workflowController, workflowHerdrBoot, workflowKeeper, workflowCleaner, workflowRuntime,
     workflowRecords, workflowProjects, workflowModels, workflowPlacement, machinePlacement,
     machineId = 'local', home = homedir(), projectPorts, modelPorts, settings,
     updateModule, doctorModule, doctorDeps = {}, ports: suppliedPorts = {}} = dependencies;
@@ -58,6 +58,17 @@ export async function runPdd(argv, dependencies = {}) {
     line(stdout,result.message);return result.exitCode;
   };
   const unsupported = () => {line(stderr,'This command needs an available optional client adapter.');return 1;};
+  async function readyHerdr(method) {
+    try {
+      const mod=workflowHerdrBoot??await import('./workflow-herdr-boot.mjs');
+      const result=await mod[method](ports);
+      if(result?.state==='ready'&&result.code===null)return true;
+      if(result?.state==='unavailable'&&typeof result.message==='string'&&result.message.trim()) {
+        line(stderr,safeLabel(result.message));return false;
+      }
+    } catch {/* Startup failures never authorize a controller or optional setup effects. */}
+    line(stderr,method==='ensureHerdrInstalled'?'Herdr installation or PATH could not be confirmed. Install Herdr from https://herdr.dev/ and make herdr available on PATH, then rerun pdd setup.':'Herdr is not running and could not be started. Check Herdr and the user service, then inspect the saved run before retrying.');return false;
+  }
   const safeLabel = value => String(value??'unknown').replace(/[\x00-\x1f\x7f-\x9f]/g,'');
   async function statuses(runId, journal=true) {
     const records=workflowRecords??await import('./workflow-run-records.mjs');
@@ -163,7 +174,10 @@ export async function runPdd(argv, dependencies = {}) {
           }
         }
         Object.assign(ports,{loadGuidance,launchNativeSession:nativeSession});
-        if(plan.local==='workflow-drive') return printResult(await runner.driveWorkflow(input,ports));
+        if(plan.local==='workflow-drive') {
+          if(ports.processStartIdentity===undefined){const {readProcessStartIdentity}=await import('./workflow-herdr-client.mjs');ports.processStartIdentity=spec=>readProcessStartIdentity(spec,ports);}
+          return printResult(await runner.driveWorkflow(input,ports));
+        }
         if(plan.local==='workflow-attach') return printResult(await runner.attachWorkflow(input,ports));
         const {traceHerdrRequest}=await import('./herdr-trace.mjs');
         let prepared;
@@ -173,9 +187,11 @@ export async function runPdd(argv, dependencies = {}) {
           prepared=await traceHerdrRequest({operation:'workflow.prepare',request},()=>runner.prepareWorkflow(request,ports),ports);
         } else prepared=await traceHerdrRequest({operation:'workflow.resume',request:input},()=>runner.resumeWorkflow(input,ports),ports);
         if(prepared?.state!=='prepared') return printResult(prepared);
+        if((!workflowController||workflowHerdrBoot)&&!await readyHerdr('ensureDefaultHerdr'))return 1;
         const controller=workflowController??await import('./workflow-controller.mjs');
+        const controllerPorts=typeof controller.createLocalWorkflowControllerPorts==='function'?await controller.createLocalWorkflowControllerPorts(ports):ports;
         const controllerInput={...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null};
-        const result=await traceHerdrRequest({operation:'controller.start',request:controllerInput},()=>controller.startWorkflowController(controllerInput,ports),ports);
+        const result=await traceHerdrRequest({operation:'controller.start',request:controllerInput},()=>controller.startWorkflowController(controllerInput,controllerPorts),controllerPorts);
         const started=result?.state==='started';
         line(started?stdout:stderr,started?`Started workflow ${prepared.runId}.`:'Workflow controller launch unconfirmed. Inspect the saved run before retrying.');
         return started?0:1;
@@ -216,7 +232,10 @@ export async function runPdd(argv, dependencies = {}) {
       }catch {line(stderr,'Run runtime upgrade could not be confirmed. Inspect the saved run.');return 1;}
     }
     case 'runs-keeper': {
-      try {const mod=workflowKeeper??await import('./workflow-keeper.mjs');const result=await mod.runWorkflowKeeper({home},ports);
+      try {const mod=workflowKeeper??await import('./workflow-keeper.mjs');
+        let keeperPorts=ports;
+        if(!workflowKeeper){const controller=workflowController??await import('./workflow-controller.mjs');if(typeof controller.createLocalWorkflowControllerPorts==='function')keeperPorts=await controller.createLocalWorkflowControllerPorts(ports);}
+        const result=await mod.runWorkflowKeeper({home},keeperPorts);
         if(Number.isInteger(result))return result;
         if(Number.isInteger(result?.exitCode) && !result.message)return result.exitCode;
         if(result?.message)return printResult(result);
@@ -242,6 +261,7 @@ export async function runPdd(argv, dependencies = {}) {
         const lock=modules.lock??await import('./update-lock.mjs');
         const launcher=modules.launcher??await import('./pdd-launch.mjs');
         const runtime=await versions.resolveRuntime({home,versionRoot:packageRoot},ports);
+        if(!await readyHerdr('ensureHerdrInstalled'))return 1;
         const result=await lock.withUpdateLock({home},async lease=>{
           const support=await launcher.installLauncherSupport({home,runtime,lease},ports);
           if(support?.code!==null)return support;

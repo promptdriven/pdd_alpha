@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: eb1916f5d513d865fb66b8c2988548d09b2cc2017d8be6c920ba1e615864ca70).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 4a50510ae47ce9bba1fa94609df40a422d1b2580758c6867bf471ae08683eb86).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -12,6 +12,31 @@ const safePath=p=>typeof p==='string'&&isAbsolute(p)&&!/[\p{Cc}'\\]/u.test(p);
 const fsOf=p=>p.fs??nodeFs;
 const herdrRequest=(p,operation,method,request)=>traceHerdrRequest({operation,request},()=>p.herdr[method](request),p);
 const result=(state,code=null,controller=null)=>({state,code,controller});
+function traceSelector(p){
+  try{
+    const raw=p.env?.PDD_TRACE??process.env.PDD_TRACE;
+    if(typeof raw!=='string')return null;
+    const tokens=raw.split(',').map(x=>x.trim());
+    return ['herdr','git'].filter(x=>tokens.includes(x)).join(',')||null;
+  }catch{return null;}
+}
+export async function createLocalWorkflowControllerPorts(ports={}){
+  const {createWorkflowControllerAuthorityPorts}=await import('./workflow-runner.mjs');
+  const authority=createWorkflowControllerAuthorityPorts(ports);
+  const needsTransport=(ports.startWorkflowController===undefined&&(ports.herdr===undefined||ports.processStartIdentity===undefined))||ports.observeHerdr===undefined;
+  const transport=needsTransport?await (await import('./workflow-herdr-client.mjs')).createWorkflowHerdrPorts(ports):{};
+  const validateLocator=async entry=>{
+    try{
+      const {state}=await authority.readWorkflowJournal({runDir:entry.runDir});
+      if(entry.runId!==state.runId||entry.root!==state.root||entry.commonDir!==state.assignment?.commonDir)return false;
+      return await authority.validateRun({runId:state.runId,runDir:entry.runDir,root:state.root,
+        workflow:state.name,issueNumber:state.issue?.number,runtime:state.runtime},state);
+    }catch{return false;}
+  };
+  const composed={...ports};
+  for(const [key,value] of Object.entries({...transport,...authority,validateLocator}))if(composed[key]===undefined)composed[key]=value;
+  return composed;
+}
 async function syncDir(fs,path){const h=await fs.open(path,'r');try{await h.sync();}finally{await h.close();}}
 async function save(intent,p){
   const fs=fsOf(p),dir=join(intent.runDir,'controller-launch',intent.launchId);await fs.mkdir(dir,{recursive:true,mode:0o700});
@@ -31,7 +56,7 @@ export async function readControllerLaunches({runDir},ports={}){
       const h=await fs.open(join(dir,name,file),constants.O_RDONLY|(constants.O_NOFOLLOW??0));
       try{const stat=await h.stat();if(!stat.isFile()||stat.nlink!==1||stat.size>256*1024)throw Error('invalid launch');last=JSON.parse(await h.readFile('utf8'));}finally{await h.close();}
       if(last.step!==step++)throw Error('launch sequence invalid');
-      if(first&&!isDeepStrictEqual(Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration'].map(k=>[k,first[k]])),Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration'].map(k=>[k,last[k]]))))throw Error('launch binding changed');
+      if(first&&!isDeepStrictEqual(Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration','traceSelector','line'].map(k=>[k,first[k]])),Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration','traceSelector','line'].map(k=>[k,last[k]]))))throw Error('launch binding changed');
       first??=last;
       if(!Number.isSafeInteger(last.admission)||last.admission<1||last.runDir!==runDir||last.launchId!==name||last.step!==Number(file.slice(0,4))||!Number.isFinite(last.admittedAt))throw Error('invalid launch');
     }
@@ -83,7 +108,7 @@ export async function startWorkflowController(spec,ports={}){
   spec.decision=input.decision??null;
   const args=decisionArgs(spec.decision);
   if(!UUID.test(spec.runId??'')||!safePath(spec.runDir)||!safePath(spec.root)||!safePath(spec.runtime?.node)||!safePath(spec.runtime?.bin)||!NAME.test(spec.workflow??'')||!Number.isSafeInteger(spec.issueNumber)||spec.issueNumber<1||!args)return result('refused','unsupported');
-  // The installed transport cannot supply process start identity yet. There is no PID/ps fallback.
+  // The real transport must bind Herdr's PID to OS start identity; readiness alone is insufficient.
   let supported=false;try{supported=await ports.herdr?.supportsProcessIdentity?.()===true;}catch{}
   if(!supported||!ports.withLifecycleGuard||!ports.readWorkflowJournal||!ports.validateRun||!ports.inspectControllerLock)return result('refused','unsupported');
   try{return await withWorkflowLock({path:join(spec.runDir,'controller-start.lock'),busyCode:'controller_busy'},async()=>{
@@ -100,7 +125,8 @@ export async function startWorkflowController(spec,ports={}){
       if(ports.inspectControllerLock && await ports.inspectControllerLock(spec)!=='free')return result('refused','controller_busy');
       const now=ports.now?.()??Date.now();if(launches.filter(x=>now-x.admittedAt<3600000).length>=3)return result('refused','launch_budget');
       const launchId=randomUUID(),argv=[spec.runtime.node,spec.runtime.bin,'workflow','drive',spec.runId,'--launch-id',launchId,...args];
-      intent={...spec,launchId,argv,line:argv.map(x=>`'${x}'`).join(' '),phase:'admitted',step:0,admission:launches.length+1,admittedAt:now,previousGeneration:state.controller?.generation??0};
+      const selector=traceSelector(ports),line=(selector?`PDD_TRACE='${selector}' `:'')+argv.map(x=>`'${x}'`).join(' ');
+      intent={...spec,launchId,argv,line,...(selector?{traceSelector:selector}:{}),phase:'admitted',step:0,admission:launches.length+1,admittedAt:now,previousGeneration:state.controller?.generation??0};
       await save(intent,ports);return null;
     });if(admitted)return admitted;
     let effected=false;
