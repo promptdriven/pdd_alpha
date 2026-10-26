@@ -1,9 +1,9 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: 17506bf774b40a9f1a9a56fb936fe0595f4b8227a3098fda793de266f9fef47b).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: 852a6bbb9f10c819c32b3cb7c4e986863ffd552843661191f7038abdf9dbdd1e).
 import * as fs from 'node:fs/promises';
 import { cleanupLegacyNpm } from './npm-cleanup.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, createPublicKey, verify } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { runUpdate, recoverUpdate } from '../src/detached-updater.mjs';
@@ -45,6 +45,20 @@ export async function completeBootstrap({ home, stage }, options = {}) {
     const bytes = await fs.readFile(join(stage, `${name}.tar.gz`));
     if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256 || !artifact.provenance) throw new Error('verification_error');
   }
+  if (descriptor.client !== undefined) {
+    try {
+      const client = descriptor.client, trust = join(stage, 'alpha/trust');
+      if (client.path !== 'client' || client.algorithm !== 'pdd-directory-sha256-v1' || !/^[a-f0-9]{64}$/.test(client.digest) || Object.keys(client).sort().join(',') !== 'algorithm,digest,path') throw new Error();
+      const bytes = await fs.readFile(join(trust, 'descriptor.json'));
+      const signature = await fs.readFile(join(trust, 'descriptor.sig'), 'utf8');
+      const root = JSON.parse(await fs.readFile(join(trust, 'release-root.json'), 'utf8'));
+      if (JSON.stringify(JSON.parse(bytes)) !== JSON.stringify(descriptor) || descriptor.environment !== 'staging' || root.environment !== 'staging' || root.keyId !== descriptor.keyId || root.schema !== 'pdd/staging-release-root/v1' || root.purpose !== 'u4-user-release-root' || root.algorithm !== 'Ed25519' || !/^[A-Za-z0-9_-]{86}\n$/.test(signature)) throw new Error();
+      const key = createPublicKey(root.publicKeyPem), token = signature.slice(0, -1);
+      if (key.asymmetricKeyType !== 'ed25519' || createHash('sha256').update(key.export({type:'spki',format:'der'})).digest('hex') !== root.publicKeyDerSha256 || Buffer.from(token,'base64url').toString('base64url') !== token || !verify(null,bytes,key,Buffer.from(token,'base64url'))) throw new Error();
+      const clientPath = join(stage, 'alpha/client');
+      if (await fs.realpath(clientPath) !== clientPath || !(await fs.lstat(clientPath)).isDirectory() || await directoryDigest(clientPath) !== client.digest) throw new Error();
+    } catch { throw new Error('verification_error'); }
+  }
   const versionRoot = join(home, '.pdd/versions', descriptor.releaseId);
   const runtime = { v: 1, releaseId: descriptor.releaseId, versionRoot, node: join(home, '.pdd/tools/node', nodeDescriptor.version, 'bin/node'), bin: join(versionRoot, 'bin/pdd.mjs'), pddVersion: descriptor.pddVersion, alphaDigest: descriptor.alpha.integrity, clientDigest: null, nodeVersion: nodeDescriptor.version, credentialHelper: null };
   const treeDigest = await directoryDigest(join(stage, 'node'));
@@ -70,6 +84,10 @@ export async function completeBootstrap({ home, stage }, options = {}) {
     const proof = await bootstrapProcessProof(process.pid, options);
     if (process.platform === 'darwin' && !proof) return { code: 'recovery_required' };
     const record = read.value ?? initialInstallRecord();
+    if (descriptor.client !== undefined && record.installedClients?.[descriptor.releaseId]) {
+      const prior = record.installedClients[descriptor.releaseId];
+      if (prior.path !== join(versionRoot,'client') || prior.algorithm !== descriptor.client.algorithm || prior.digest !== descriptor.client.digest) return {code:'recovery_required'};
+    }
     if (read.value) {
       const jobs = Object.entries(record.staging);
       if (jobs.length !== 1) return { code: 'recovery_required' };
@@ -102,6 +120,19 @@ export async function completeBootstrap({ home, stage }, options = {}) {
   const selected = await resolveRuntime({ home });
   if (JSON.stringify(selected) !== JSON.stringify(runtime)) throw new Error('recovery_required');
   const support = await withUpdateLock({ home }, async lease => {
+    if (descriptor.client !== undefined) {
+      const path = join(runtime.versionRoot, 'client');
+      if (await fs.realpath(path) !== path || await directoryDigest(path) !== descriptor.client.digest) return {code:'verification_error'};
+      const value = {path, algorithm:descriptor.client.algorithm, digest:descriptor.client.digest};
+      const read = await readInstallRecord({home});
+      if (read.code || !read.value) return {code:read.code ?? 'recovery_required'};
+      const prior = read.value.installedClients?.[runtime.releaseId];
+      if (prior && (prior.path !== value.path || prior.algorithm !== value.algorithm || prior.digest !== value.digest)) return {code:'recovery_required'};
+      if (!prior) {
+        const saved = await writeInstallRecord({home,lease,expectedRev:read.value.rev,next:{installedClients:{[runtime.releaseId]:value}}});
+        if (saved.code) return saved;
+      }
+    }
     const prepared = await installLauncherSupport({ home, runtime, lease }, options);
     if (prepared.code) return prepared;
     return provisionRecoveryService({ home, runtime, lease }, options);

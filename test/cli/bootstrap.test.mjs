@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { completeBootstrap } from '../../launcher/bootstrap-entry.mjs';
+import { directoryDigest } from '../../src/owned-node.mjs';
 import { readInstallRecord } from '../../src/install-record.mjs';
 import { buildBootstrap } from '../../launcher/build-bootstrap.mjs';
-import { cases, temporary, put, repo, mutate } from './pkg-fixtures.mjs';
+import { cases, temporary, put, repo, mutate, seed } from './pkg-fixtures.mjs';
 const execute = promisify(execFile);
 async function fixture(t, c) {
   const home = await temporary(t), tools = join(home, 'stock-tools'), capture = join(home, 'captured-argv'), cwd = join(home, 'my project');
@@ -362,4 +363,53 @@ test('Mac bootstrap saves no intent when fresh process identity cannot be establ
     await assert.rejects(completeBootstrap({ home, stage }, { ...macOptions, bootstrapExecFile: async () => { throw Error('unavailable'); } }), /recovery_required/);
     assert.equal((await readInstallRecord({ home })).value, null);
   });
+});
+
+// Synthetic signed release edge; real bootstrap, update lock, publication and record.
+async function signedClientStage(home) {
+  const stage = await recoveryStage(home, 'signed-client');
+  await put(join(stage, 'alpha/client/src/client.mjs'), 'export const client = true;\n');
+  const descriptor = JSON.parse(await fs.readFile(join(stage, 'release.json')));
+  descriptor.environment = 'staging'; descriptor.keyId = 'staging-test';
+  descriptor.client = {path:'client',algorithm:'pdd-directory-sha256-v1',digest:await directoryDigest(join(stage, 'alpha/client'))};
+  const {privateKey,publicKey} = generateKeyPairSync('ed25519');
+  const bytes = Buffer.from(JSON.stringify(descriptor, null, 2)+'\n');
+  const root = {schema:'pdd/staging-release-root/v1',purpose:'u4-user-release-root',environment:'staging',keyId:descriptor.keyId,algorithm:'Ed25519',publicKeyPem:publicKey.export({format:'pem',type:'spki'}).toString(),publicKeyDerSha256:createHash('sha256').update(publicKey.export({format:'der',type:'spki'})).digest('hex')};
+  await put(join(stage, 'alpha/trust/descriptor.json'), bytes, 0o600);
+  await put(join(stage, 'alpha/trust/descriptor.sig'), sign(null,bytes,privateKey).toString('base64url')+'\n', 0o600);
+  await put(join(stage, 'alpha/trust/release-root.json'), JSON.stringify(root), 0o600);
+  await fs.writeFile(join(stage, 'release.json'), JSON.stringify(descriptor));
+  return {stage,descriptor,bytes};
+}
+test('D10 signed client digest is recorded after actual publication without inventing runtime helper authority', async t => {
+  const home = await temporary(t), f = await signedClientStage(home);
+  const installed = await completeBootstrap({home,stage:f.stage},{selfTest:async()=>true,activateRecoveryService:async()=>{}});
+  const record = (await readInstallRecord({home})).value;
+  assert.equal(record.transaction.phase,'ready');
+  assert.deepEqual(record.installedClients.R1,{path:join(installed.runtime.versionRoot,'client'),algorithm:'pdd-directory-sha256-v1',digest:f.descriptor.client.digest});
+  assert.equal(installed.runtime.clientDigest,null);assert.equal(installed.runtime.credentialHelper,null);
+  assert.equal(await directoryDigest(join(installed.runtime.versionRoot,'client')),f.descriptor.client.digest);
+  assert.deepEqual(await fs.readFile(join(installed.runtime.versionRoot,'trust/descriptor.json')),f.bytes);
+  assert.equal((await fs.stat(join(home,'.pdd/install/record.json'))).mode&0o777,0o600);
+  await mutate(home,next=>{next.unrelated={keep:true};});
+  assert.deepEqual((await readInstallRecord({home})).value.installedClients,record.installedClients);
+});
+for (const change of ['client bytes','signature','descriptor','missing custody']) test(`D10 refuses changed ${change} before creating install state`, async t => {
+  const home=await temporary(t),f=await signedClientStage(home);
+  if(change==='client bytes')await fs.appendFile(join(f.stage,'alpha/client/src/client.mjs'),'changed');
+  if(change==='signature')await fs.writeFile(join(f.stage,'alpha/trust/descriptor.sig'),'A'.repeat(86)+'\n');
+  if(change==='descriptor')await fs.appendFile(join(f.stage,'alpha/trust/descriptor.json'),' ');
+  if(change==='missing custody')await fs.rm(join(f.stage,'alpha/trust'),{recursive:true});
+  await assert.rejects(completeBootstrap({home,stage:f.stage}),/verification_error/);
+  assert.equal((await readInstallRecord({home})).value,null);
+  await assert.rejects(fs.lstat(join(home,'.pdd/current')),{code:'ENOENT'});
+});
+
+test('D10 refuses a conflicting recorded client digest without rewriting any install record', async t=>{
+  const home=await temporary(t),f=await signedClientStage(home);
+  await seed(home,{installedClients:{R1:{path:join(home,'.pdd/versions/R1/client'),algorithm:'pdd-directory-sha256-v1',digest:'0'.repeat(64)}},unrelated:{keep:true}});
+  const path=join(home,'.pdd/install/record.json'),before=await fs.readFile(path),info=await fs.stat(path);
+  await assert.rejects(completeBootstrap({home,stage:f.stage}),/recovery_required/);
+  assert.deepEqual(await fs.readFile(path),before);assert.equal((await fs.stat(path)).mtimeMs,info.mtimeMs);
+  await assert.rejects(fs.lstat(join(home,'.pdd/current')),{code:'ENOENT'});
 });

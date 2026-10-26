@@ -1,5 +1,5 @@
 #!/bin/sh
-# Generated from prompts/cli/bootstrap.prompt.md (sha256: 17506bf774b40a9f1a9a56fb936fe0595f4b8227a3098fda793de266f9fef47b).
+# Generated from prompts/cli/bootstrap.prompt.md (sha256: 852a6bbb9f10c819c32b3cb7c4e986863ffd552843661191f7038abdf9dbdd1e).
 set -eu
 # This installer is a child process; never change the invoking shell's umask.
 umask 077

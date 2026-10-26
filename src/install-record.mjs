@@ -1,4 +1,4 @@
-// Generated from prompts/cli/install-record.prompt.md (sha256: 78ea416443b1a7cefb15d9bd3e29fcf92a4179797c5ba8e56e3819d029d1db9f).
+// Generated from prompts/cli/install-record.prompt.md (sha256: f8add730bb0b00e7054d4735e7debb0ed09b13269f9f31b13449cad95b8e4c33).
 import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, resolve } from 'node:path';

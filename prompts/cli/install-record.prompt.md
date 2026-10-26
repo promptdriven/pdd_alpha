@@ -30,6 +30,11 @@ means no managed install; it is not evidence that an existing current is safe.
 Fleet setup owns one additive field, `fleetSetup`, written through
 `writeInstallRecord` under the same lease and revision (see
 [fleet setup](../fleet/setup.prompt.md)); there is no second install-state file.
+Bootstrap owns optional additive `installedClients[releaseId] = {path, algorithm,
+digest}`: retained absolute client path, `pdd-directory-sha256-v1`, and 64 lowercase
+hex. This records verified installation provenance under the ordinary lease and
+revision, not runtime authentication or membership authority. Preserve it and
+unknown sibling entries through subsequent record updates.
 
 `staging[id] = {requestId, target, paths, phase, processProof}` registers each
 detached job independently; phase is `downloading`, `staged`, `checked` or `failed`.

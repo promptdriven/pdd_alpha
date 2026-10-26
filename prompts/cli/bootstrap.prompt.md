@@ -70,7 +70,25 @@ directory0700/files0600. Publication's existing tree digest includes these files
 keep existing immutable runtimes, receipts and lifetime/GC rules unchanged.
 Existing-install delegation does not add or replace custody. A private consumer
 uses its actual retained physical versionRoot, not current or cwd. Bootstrap adds
-no runtime reader, provider, clientDigest or credential-helper inference.
+no runtime reader, provider or credential-helper inference.
+
+For the Wednesday staging release, a signed descriptor may include
+`client: {path:"client", algorithm:"pdd-directory-sha256-v1", digest}` where digest
+is 64 lowercase hex from the owned Node directoryDigest function over the
+normalized staged client tree. Before any install-state mutation, verify the
+retained exact descriptor bytes and canonical signature against the staging root
+carried by the verified installer, require equality with the artifact-table
+descriptor, and verify the client digest. Malformed custody or changed client
+bytes refuse with verification_error. This installer root input is not a new
+runtime authority provider. Unsigned legacy descriptors without client remain valid.
+After ready publication, recheck the retained physical client tree and record
+`installedClients[releaseId] = {path, algorithm, digest}` under the existing
+install lease/revision before continuation; path is versionRoot/client. Refuse
+a conflicting existing entry without overwriting it. Equal entries are retained.
+This additive install provenance does not set Runtime.clientDigest, infer a
+credential helper, authenticate a machine to Keeper, or change custody paths.
+Keeper machine authority remains fleet membership; public-user authenticated
+binary binding is a later design issue.
 
 Preflight OS/architecture, HTTPS/download tools, verification tools, owned-path
 writability and disk requirements. Missing prerequisites yield one next step,

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: 17506bf774b40a9f1a9a56fb936fe0595f4b8227a3098fda793de266f9fef47b).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: 852a6bbb9f10c819c32b3cb7c4e986863ffd552843661191f7038abdf9dbdd1e).
 // Release tooling only: the caller supplies already reviewed, immutable inputs.
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash, createPublicKey, verify } from 'node:crypto';
@@ -11,6 +11,7 @@ export async function buildBootstrap({ descriptor, destination, custody }) {
   };
   const validAsset = asset => asset?.url?.startsWith('https://') && /^[a-f0-9]{64}$/.test(asset.sha256 ?? '') && typeof asset.integrity === 'string' && asset.provenance;
   if (!safeId(descriptor?.releaseId) || typeof descriptor.pddVersion !== 'string' || !descriptor.pddVersion || !validAsset(descriptor.alpha) || !descriptor.nodes) throw new TypeError('Trusted immutable release descriptor required');
+  if (descriptor.client !== undefined && (!custody || descriptor.client?.path !== 'client' || descriptor.client.algorithm !== 'pdd-directory-sha256-v1' || !/^[a-f0-9]{64}$/.test(descriptor.client.digest ?? '') || Object.keys(descriptor.client).sort().join(',') !== 'algorithm,digest,path')) throw new TypeError('Verified signed client digest required');
   const rows = [];
   const encoded = JSON.stringify(descriptor);
   if (/[|'\r\n]/.test(encoded)) throw new TypeError('Release descriptor is not representable in the bootstrap table');
