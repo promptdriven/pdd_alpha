@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -12,7 +12,7 @@ import vectors from '../vectors/cli/workflow-worktree.json' with {type:'json'};
 const execute=promisify(execFile);
 const auth=vectors.cases.find(c=>c.id==='fetch-auth-diagnostic');
 async function fixture(t) {
- const temp=await mkdtemp(join(tmpdir(),'pdd-git-failure-'));t.after(()=>rm(temp,{recursive:true,force:true}));
+ const temp=await realpath(await mkdtemp(join(tmpdir(),'pdd-git-failure-')));t.after(()=>rm(temp,{recursive:true,force:true}));
  const cwd=join(temp,'project'),home=join(temp,'home');await mkdir(cwd);await mkdir(home,{mode:0o700});
  const gitAt=(path,...args)=>execute('git',args,{cwd:path,encoding:'utf8',env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});
  const git=(...args)=>gitAt(cwd,...args);

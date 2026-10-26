@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {traceHerdrRequest,readHerdrTrace} from '../../src/herdr-trace.mjs';
 
-function fixture(t){const home=fs.mkdtempSync(join(tmpdir(),'pdd-herdr-trace-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));return {home,env:{PDD_TRACE:'herdr'},now:()=>assert.fail('Workflow clocks are not diagnostic clocks')};}
+function fixture(t){const home=fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'pdd-herdr-trace-')));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));return {home,env:{PDD_TRACE:'herdr'},now:()=>assert.fail('Workflow clocks are not diagnostic clocks')};}
 const path=p=>join(p.home,'.pdd/logs/herdr-trace.jsonl');
 const secret='sk-proj-syntheticCredential123';
 

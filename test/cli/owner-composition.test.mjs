@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,cpSync,existsSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,cpSync,existsSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -11,7 +11,7 @@ const repo=dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const runnerRoot=process.env.PDD_CLI_RUNNER_ROOT??repo,pkgRoot=process.env.PDD_CLI_PACKAGING_ROOT??repo,placementRoot=process.env.PDD_CLI_PLACEMENT_ROOT??repo;
 const capture=()=>({text:'',write(s){this.text+=s;}});
 const runId='123e4567-e89b-42d3-a456-426614174000',decisionId='223e4567-e89b-42d3-a456-426614174000';
-function temp(t){const path=mkdtempSync(join(tmpdir(),'pdd-owner-composition-'));t.after(()=>rmSync(path,{recursive:true,force:true}));return path;}
+function temp(t){const path=realpathSync(mkdtempSync(join(tmpdir(),'pdd-owner-composition-')));t.after(()=>rmSync(path,{recursive:true,force:true}));return path;}
 for(const legacy of [false,true])test('CLI human resume composes with actual public controller and fake Herdr process proof'+(legacy?' including legacy expectations':'' ),{skip:!existsSync(join(runnerRoot,'src/workflow-controller.mjs'))},async t=>{
  const controller=await import(pathToFileURL(join(runnerRoot,'src/workflow-controller.mjs')));
  const runDir=join(temp(t),runId);mkdirSync(runDir);const runtime={node:'/saved/node',bin:'/saved/bin/pdd.mjs'};

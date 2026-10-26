@@ -225,7 +225,7 @@ test('captured intent cannot be changed by caller while command awaits', async t
 
 
 test('real disposable Git checkout enforces topic commits, dirt and root-gitdir metadata with fake GitHub only', async t => {
-  const cwd = await mkdtemp(join(tmpdir(), 'pdd-github-real-git-'));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), 'pdd-github-real-git-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const execute = promisify(execFile);
   const git = (...args) => execute('git', args, { cwd, encoding: 'utf8' });
@@ -283,7 +283,7 @@ test('rejected push with numeric zero is unknown and cannot continue to create o
 });
 
 for (const alias of ['file symlink', 'ancestor symlink', 'hard link']) test(`real Git metadata ${alias} refuses before body write and preserves tracked bytes`, async t => {
-  const cwd = await mkdtemp(join(tmpdir(), 'pdd-github-alias-'));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), 'pdd-github-alias-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const execute = promisify(execFile), git = (...args) => execute('git', args, { cwd, encoding: 'utf8' });
   await git('init', '--initial-branch=main');
@@ -436,7 +436,7 @@ test('unpublished-only rejects nonboolean mode without effects', async t => {
 });
 
 test('real local Git proves absent remote branch, recovers one original publication and refuses its present head', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'pdd-unpublished-real-'));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'pdd-unpublished-real-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const cwd = join(directory, 'source'), remote = join(directory, 'remote.git'); await mkdir(cwd);
   const execute = promisify(execFile), git = (...args) => execute('git', args, { cwd, encoding: 'utf8' });
@@ -504,7 +504,7 @@ for(const c of vectors.cases.filter(c=>c.id!=='scan-advisory'))test(`independent
 
 
 async function checkpointFixture(t, paths = ['README.prompt.md', 'README.story.md', 'README.cases.md']) {
-  const cwd = await mkdtemp(join(tmpdir(), 'pdd-artifact-commit-'));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), 'pdd-artifact-commit-')));
   t.after(() => rm(cwd, {recursive:true, force:true}));
   const execute = promisify(execFile), calls = [];
   const git = async (...args) => (await execute('git', args, {cwd})).stdout.trim();

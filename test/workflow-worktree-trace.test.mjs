@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,realpath} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {join} from 'node:path';
@@ -11,7 +11,7 @@ import {readGitTrace} from '../src/git-trace.mjs';
 const execute=promisify(execFile);
 const errorText="fatal: could not read Username for 'https://github.com': terminal prompts disabled\n";
 for(const rejected of [true,false])test(`allocator trace captures recorded transport diagnostic (${rejected?'rejected':'returned'}128) and preserves all work/refusal/claim boundaries`,async t=>{
- const temp=await mkdtemp(join(tmpdir(),'pdd-traced-allocation-'));t.after(()=>rm(temp,{recursive:true,force:true}));
+ const temp=await realpath(await mkdtemp(join(tmpdir(),'pdd-traced-allocation-')));t.after(()=>rm(temp,{recursive:true,force:true}));
  const cwd=join(temp,'project'),home=join(temp,'home');await mkdir(cwd);await mkdir(home,{mode:0o700});
  const git=(...args)=>execute('git',args,{cwd,encoding:'utf8',env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}});
  await git('init','-b','main');await git('config','user.name','Synthetic allocator');await git('config','user.email','test@example.invalid');

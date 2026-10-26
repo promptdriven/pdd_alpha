@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,cpSync,readdirSync,symlinkSync,existsSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,cpSync,readdirSync,symlinkSync,existsSync,realpathSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {tmpdir} from 'node:os';
@@ -11,7 +11,7 @@ import {createLocalWorkflowProjectPorts,listWorkflowProjects,resolveWorkflowProj
 const root=dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const capture=()=>({text:'',write(s){this.text+=s;}});
 function fixture(t) {
-  const temp=mkdtempSync(join(tmpdir(),'pdd-executable-'));t.after(()=>rmSync(temp,{recursive:true,force:true}));
+  const temp=realpathSync(mkdtempSync(join(tmpdir(),'pdd-executable-')));t.after(()=>rmSync(temp,{recursive:true,force:true}));
   const tools=join(temp,'tools'),cwd=join(temp,'demo'),home=join(temp,'home'),log=join(temp,'protocol.jsonl');
   for(const dir of [tools,cwd,home])mkdirSync(dir);
   const executable=join(tools,'codex'),authLog=join(temp,'native-status.jsonl');

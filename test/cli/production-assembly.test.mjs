@@ -17,7 +17,7 @@ import {readHerdrTrace} from '../../src/herdr-trace.mjs';
 const execute=promisify(execFile),repo=resolve(import.meta.dirname,'../..');
 const capture=()=>({text:'',write(text){this.text+=text;}});
 async function fixture(t){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-real-cli-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-real-cli-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const cwd=join(home,'project'),tools=join(home,'tools'),versionRoot=join(home,'.pdd/versions/synthetic');
  await fs.mkdir(cwd);await fs.mkdir(tools);await fs.mkdir(join(home,'.pdd'),{mode:0o700});await fs.mkdir(versionRoot,{recursive:true});
  for(const name of ['src','bin','launcher','docs','skills','.pdd','package.json']){
@@ -133,7 +133,7 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
 });
 
 test('fleet conditional CLI paths explicitly refuse without importing or creating client state',async t=>{
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-no-client-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-no-client-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  for(const argv of [['phone'],['link','status'],['fleet','status'],['join'],['accounts'],['settings'],['models','--on','desktop','--agent','codex'],['projects','--on','desktop'],['session','--on','desktop']]){
   const stdout=capture(),stderr=capture();
   assert.equal(await runPdd(argv,{home,cwd:home,stdout,stderr}),1,JSON.stringify(argv));
