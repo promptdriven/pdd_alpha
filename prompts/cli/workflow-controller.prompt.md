@@ -3,7 +3,7 @@
 Own `src/workflow-controller.mjs`. Draft for review. The module function
 `startWorkflowController({runId, runDir, root, workflow, issueNumber, runtime,
 decision = null}, ports)` starts the saved controller in the default Herdr
-session. It returns `{state, code, controller}`, state `started`, `refused`,
+session. It returns `{state, code, controller}` (plus a safe `message` on identity refusal), state `started`, `refused`,
 `failed` or `uncertain`. Preservation: new local launch interface; retain actual
 run identity, no repeated unknown effects and the person's panes and focus.
 
@@ -15,7 +15,9 @@ journal durable. Starting the pane does not mean a decision or stage passed.
 flowchart TD
     I{Earlier launch intent?} -->|Yes| R[Inspect its exact pane and journal]
     I -->|No| W[Save intent and create run tab]
-    W -->|Identity saved| T[Type drive line once]
+    W -->|Pane identity saved| C{Herdr and OS identity available for this pane?}
+    C -->|Yes| T[Type drive line once]
+    C -->|No| F([Refused: herdr_identity_unavailable])
     T -->|Reply or reply lost| R
     R -->|Exact live process proved| S([Started])
     R -->|Unproved or conflicting| U([Uncertain, retain intent])
@@ -41,7 +43,16 @@ starts share this gate; concurrent callers cannot launch two controllers.
 Count relaunch admissions durably in the launch-intent records, not the index.
 Save launch intent under `<runDir>/controller-launch/` with a unique launch id,
 run, recorded runtime, decision binding if present and phase before tab/create
-or `pane run`. Save returned workspace/tab/pane/terminal ids before typing.
+or `pane run`. Save returned workspace/tab/pane/terminal ids before probing or typing.
+After `tab.create` and its durable `tab.created` record, call the real Herdr
+connection's `supportsProcessIdentity({session:'default',paneId})` on this new
+pane, before any `pane.run`. An empty or fresh Herdr is valid: no existing pane
+is a prerequisite. False or thrown capability reads return `refused` with code
+`herdr_identity_unavailable` and fixed message `Herdr process identity is unavailable for the new controller pane. No controller command was sent.`
+Save the refusal phase durably, retaining known pane identities. Subsequent
+calls return that refusal without another probe, tab creation or command; if
+saving the refusal fails, keep the existing uncertain/inspect-only behavior.
+Never close the pane or bypass the OS identity requirement to recover.
 The line uses absolute saved Node and bin followed by `workflow drive RUN_ID --launch-id LAUNCH_ID`. The internal launch id is a lowercase UUIDv4 and binds drive's `controller.started` journal record to this intent.
 A decision adds `--decision D --id ID --rev N`, and legacy expected stage/seq
 when supplied. Use one `herdr pane run` call with the whole line as one argv
@@ -85,13 +96,12 @@ The real Herdr connection binds the PID actually reported by
 `pane.process_info` to OS process start evidence. Linux uses boot ID plus
 `/proc/<pid>/stat` field 22; macOS uses `ps -o lstart= -p <pid>` or sysctl
 start time. Read around the Herdr observation to reject reuse or conflicting
-processes. Its `supportsProcessIdentity()` must reflect genuine Herdr and OS
-evidence, never a constant assertion. The normalized process result supplies
+processes. Its targeted `supportsProcessIdentity({session,paneId})` must reflect genuine Herdr and OS
+evidence for the newly created pane, never a constant assertion. The normalized process result supplies
 the same `startIdentity` bytes drive durably journals. The recorded real
 Herdr foreground-process schema has PID/argv/cwd but no start-identity field;
 the OS binding supplies that missing fact. Idle status, terminal text, shell
-presence and PID alone remain insufficient. Missing evidence refuses before
-launch, or remains uncertain after an admitted effect.
+presence and PID alone remain insufficient. Missing capability evidence refuses before controller command delivery while retaining the admitted pane effect; missing started proof remains uncertain.
 
 Export async module function `createLocalWorkflowControllerPorts(ports={})`:
 fill missing runner authority bindings from

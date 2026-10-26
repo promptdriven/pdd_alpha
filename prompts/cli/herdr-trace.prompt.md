@@ -49,6 +49,8 @@ code is available. Preserve only allowlisted native error codes (including
 connection refused/reset, missing executable, permission and timeout failures)
 and a nonnegative integer process exit code. Never copy the error message or
 stderr to explain a connection failure. Readback revalidates these fields.
+Retain the fixed controller refusal code `herdr_identity_unavailable`; omit its
+message text and all underlying OS or transport error text.
 Recognize `server.start` as the bounded default-session startup observation; it
 grants no readiness or process authority.
 Malformed or unknown observations are omitted, not made printable by escaping or

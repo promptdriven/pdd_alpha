@@ -67,3 +67,14 @@ test('controller started and thrown failure retain their distinct output and exi
     assert.equal(stderr.text,started?'':'The local workflow operation could not be confirmed. Inspect saved state before retrying.\n');
   }
 });
+
+test('identity refusal prints its code and safe explanation without raw controller message',async()=>{
+ const stdout=capture(),stderr=capture();let calls=0;
+ assert.equal(await runPdd(['workflow','resume',id],{stdout,stderr,
+  workflowRunner:{resumeWorkflow:async()=>({state:'prepared',runId:id})},
+  workflowController:{startWorkflowController:async()=>{calls++;return {state:'refused',code:'herdr_identity_unavailable',message:'private raw failure'};}}
+ }),1);
+ assert.equal(calls,1);assert.equal(stdout.text,'');
+ assert.equal(stderr.text,'Workflow controller not started: refused (herdr_identity_unavailable). Herdr process identity is unavailable for the new controller pane. No controller command was sent. Inspect the saved run before retrying.\n');
+ assert.doesNotMatch(stderr.text,/private raw failure/);
+});

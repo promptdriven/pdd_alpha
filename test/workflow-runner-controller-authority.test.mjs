@@ -129,7 +129,7 @@ test('drive refuses unavailable shared OS identity instead of falling back to ra
   assert.equal(r.exitCode,1);assert.match(r.message,/start identity is unavailable/);
   assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
 });
-test('real public adapter joins Herdr-shaped replies to OS identity and actual frozen drive journal',async t=>{
+for(const empty of [false,true]) test(`real public adapter joins Herdr-shaped replies to OS identity and actual frozen drive journal${empty?' — fresh Herdr, no panes':''}`,async t=>{
   const f=await fixture(t),execute=f.ports.execFile;let intent,starts=0,local;
   f.ports.acquireLock=fakeLocks();
   f.ports.env={...process.env,PDD_TRACE:''};
@@ -140,8 +140,9 @@ test('real public adapter joins Herdr-shaped replies to OS identity and actual f
     assert.deepEqual(args.slice(0,2),['--session','default']);
     const op=args.slice(2,4).join('.');
     let result;
-    if(op==='pane.list')result={type:'pane_list',panes:[{pane_id:'w1:p1'}]};
-    else if(op==='workspace.list')result={type:'workspace_list',workspaces:[{workspace_id:'w1',cwd:f.spec.root}]};
+    if(op==='pane.list')result={type:'pane_list',panes:empty?[]:[{pane_id:'w1:p1'}]};
+    else if(op==='workspace.list')result={type:'workspace_list',workspaces:empty?[]:[{workspace_id:'w1',cwd:f.spec.root}]};
+    else if(op==='workspace.create'){assert.equal(empty,true);result={workspace:{workspace_id:'w1',cwd:f.spec.root}};}
     else if(op==='tab.create')result={tab:{tab_id:'w1:t2'},root_pane:{tab_id:'w1:t2',pane_id:'w1:p2',terminal_id:'synthetic-terminal'}};
     else if(op==='pane.run'){
       starts++;intent=(await readControllerLaunches(f.spec)).at(-1);
@@ -150,6 +151,7 @@ test('real public adapter joins Herdr-shaped replies to OS identity and actual f
       result={type:'ok'};
     }else if(op==='pane.process-info'){
       const paneId=args.at(-1),argv=paneId==='w1:p2'&&intent?intent.argv:['/bin/bash'];
+      if(empty)assert.equal(paneId,'w1:p2','fresh startup must probe only its own new pane');
       // Synthetic identifiers with the real public foreground-process schema;
       // OS evidence belongs only to this test's Node PID, not a lab controller.
       result={type:'pane_process_info',process_info:{pane_id:paneId,shell_pid:process.pid,foreground_process_group_id:process.pid,

@@ -63,7 +63,12 @@ if(!['initialize','config/read','model/list'].includes(r.method))process.exit(93
     if(broken)throw Object.assign(Error('synthetic-secret'),{code:'ECONNRESET'});
     return {stdout:JSON.stringify({result:{panes}})};
    }
-   if(op==='pane.process-info')return {stdout:JSON.stringify({result:{process_info:{pane_id:args.at(-1),shell_pid:process.pid,foreground_processes:[{pid:process.pid,argv:[process.execPath,'synthetic-child']}]}}})};
+   if(op==='workspace.create')return {stdout:JSON.stringify({result:{workspace:{workspace_id:'wB'}}})};
+   if(op==='tab.create')return {stdout:JSON.stringify({result:{tab:{tab_id:'wB:t1'},root_pane:{tab_id:'wB:t1',pane_id:'wB:p1',terminal_id:'synthetic-terminal'}}})};
+   if(op==='pane.process-info'){
+    if(broken)throw Object.assign(Error('synthetic-secret'),{code:'ECONNRESET'});
+    return {stdout:JSON.stringify({result:{process_info:{pane_id:args.at(-1),...(panes.length?{shell_pid:process.pid,foreground_processes:[{pid:process.pid,argv:[process.execPath,'synthetic-child']}]}:{foreground_processes:[]})}}})};
+   }
    assert.fail('No native mutation was authorized: '+op);
   }
   // Only the remote transport is redirected: Git itself performs a genuine
@@ -83,21 +88,28 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
  f.stdout.text='';assert.equal(await runPdd(['projects'],f.deps),0);assert.match(f.stdout.text,/project/);
  f.stdout.text='';f.stderr.text='';
  assert.equal(await runPdd(['workflow','run','small-change','17'],f.deps),1,f.stderr.text);
- assert.match(f.stderr.text,/Workflow controller not started: refused \(unsupported\)/);
+ assert.match(f.stderr.text,/Workflow controller not started: refused \(herdr_identity_unavailable\)/);
  const index=await readRunIndex({home:f.home});assert.equal(index.entries.length,1);const entry=index.entries[0];
  const spec={runDir:entry.runDir},journal=await readWorkflowJournal(spec);
  assert.equal(journal.state.controlState,'running');assert.equal(journal.state.runtime.node,f.runtime.node);
  assert.equal((await fs.readFile(join(f.cwd,'README.md'),'utf8')),'Retain this checkout.\n');
- assert.equal((await readControllerLaunches(spec)).length,0,'empty capability refuses before controller intent');
+ const launches=await readControllerLaunches(spec);assert.equal(launches.length,1);
+ assert.equal(launches[0].phase,'herdr.identity_unavailable');assert.equal(launches[0].paneId,'wB:p1');
+ assert.match(f.stderr.text,/No controller command was sent/);
+ assert.equal(f.calls.filter(([,args])=>args.slice(2,4).join('.')==='tab.create').length,1);
  const before=await fs.readFile(join(entry.runDir,'journal.jsonl'));
  f.stderr.text='';f.setBroken(true);
- assert.equal(await runPdd(['workflow','resume',entry.runId],f.deps),1);assert.match(f.stderr.text,/Workflow controller not started: refused \(unsupported\)/);
+ const failedLocal=await createPddCliPorts(f.ports,{capability:'controller'});
+ assert.equal(await failedLocal.herdr.supportsProcessIdentity({session:'default',paneId:'wB:p1'}),false);
+ assert.equal(await runPdd(['workflow','resume',entry.runId],f.deps),1);assert.match(f.stderr.text,/Workflow controller not started: refused \(herdr_identity_unavailable\)/);
  assert.deepEqual(await fs.readFile(join(entry.runDir,'journal.jsonl')),before);
  assert.equal((await readRunIndex({home:f.home})).entries.length,1,'resume retains original allocation');
  const rows=readHerdrTrace({home:f.home});
- assert.ok(rows.some(r=>r.operation==='controller.start'&&r.payload.code==='unsupported'),JSON.stringify(rows));
- assert.ok(rows.some(r=>r.operation==='pane.list'&&r.phase==='error'));
+ assert.ok(rows.some(r=>r.operation==='controller.start'&&r.payload.code==='herdr_identity_unavailable'),JSON.stringify(rows));
+ assert.ok(rows.some(r=>r.operation==='pane.process_info'&&r.phase==='error'));
  assert.doesNotMatch(JSON.stringify(rows),/synthetic-secret/);
+ assert.equal(f.calls.filter(([,args])=>args.slice(2,4).join('.')==='tab.create').length,1,'resume never creates a replacement pane');
+ assert.equal(f.calls.filter(([,args])=>args.slice(2,4).join('.')==='pane.run').length,0);
  f.setBroken(false);f.setPanes([{pane_id:'wA:pZ'}]);
  const local=await createPddCliPorts(f.ports,{capability:'controller'});
  assert.equal(local.runtime,f.runtime);assert.equal(local.env,f.env);assert.equal(local.execFile,f.ports.execFile);
@@ -107,7 +119,7 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
  const state=journal.state;
  assert.equal(await local.validateRun({runId:entry.runId,runDir:entry.runDir,root:state.root,runtime:state.runtime,workflow:state.name,issueNumber:17},state),true);
  assert.equal(await local.inspectControllerLock({runId:entry.runId,runDir:entry.runDir,root:state.root,runtime:state.runtime,workflow:state.name,issueNumber:17}),'free');
- assert.ok(f.calls.filter(([file,args])=>file==='herdr').every(([,args])=>['workspace.list','pane.list','pane.process-info'].includes(args.slice(2,4).join('.'))));
+ assert.ok(f.calls.filter(([file,args])=>file==='herdr').every(([,args])=>['workspace.list','workspace.create','tab.create','pane.list','pane.process-info'].includes(args.slice(2,4).join('.'))));
 });
 
 test('fleet conditional CLI paths explicitly refuse without importing or creating client state',async t=>{

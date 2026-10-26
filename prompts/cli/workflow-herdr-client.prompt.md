@@ -31,7 +31,7 @@ the exact same explicit callback, so a durable identity can be compared.
 
 ## Actual default-session operations
 
-`herdr` exposes async methods `supportsProcessIdentity()`,
+`herdr` exposes async methods `supportsProcessIdentity({session,paneId}?)`,
 `listWorkspaces({session})`, `createWorkspace({session,cwd,focus})`,
 `createTab({session,workspaceId,cwd,label,focus})`,
 `paneRun({session,paneId,command})`, and `processInfo({session,paneId})`.
@@ -79,12 +79,16 @@ launch ID, generation or durable journal state: the controller must match those.
 
 ## Read-only capability and keeper observation
 
-`supportsProcessIdentity()` lists existing panes, reads actual process-info and
+`supportsProcessIdentity({session:'default',paneId})` probes that exact pane,
+including a controller-owned pane just returned by `tab.create`, without
+requiring any pre-existing pane inventory. It reads actual process-info and
 obtains consistent OS start identity for at least one foreground PID or reported
-shell_pid. Capability is not unconditional and not a version/help assertion.
-Empty inventory, unsupported OS or unavailable PID/identity returns false. It
-never creates a workspace/tab/pane or runs a process as a probe. Capability does
-not promise a later target process will match; `processInfo` must freshly prove it.
+shell_pid, rechecking the same pane and PID around the OS observations. Invalid
+session/pane, unsupported OS, missing or changed PID/identity, and failed reads
+return false. It never creates a workspace/tab/pane or runs a process as a probe.
+The no-argument compatibility form still examines existing pane inventory and
+returns false for an empty inventory. Capability is neither unconditional nor a
+version/help assertion and cannot replace fresh controller `processInfo` proof.
 
 `observeHerdr()` returns `{complete,upSince,stableSince}` from actual successful
 default pane inventory and process identity observations. Times mean first

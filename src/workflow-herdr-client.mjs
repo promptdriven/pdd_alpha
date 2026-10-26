@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: 38412ab07b0ab96df014d9e8f7e76734cfedf03d0332069e40f98bb9c1bb4399).
+// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: c7393f367570403e97b78eedea19a04716e4203965c2def94b738d69b867fd52).
 import * as nodeFs from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
@@ -83,9 +83,12 @@ export async function createWorkflowHerdrPorts(ports={}){
     return null;
   }
   const herdr={
-    async supportsProcessIdentity(){
+    async supportsProcessIdentity(target){
       if(!['linux','darwin'].includes(p.platform)||typeof identity!=='function')return false;
-      try{for(const paneId of await inventory())if(await capability(paneId))return true;}catch{}
+      try{
+        if(target!==undefined){session(target);operand(target?.paneId,P);return await capability(target.paneId)!==null;}
+        for(const paneId of await inventory())if(await capability(paneId))return true;
+      }catch{}
       return false;
     },
     async listWorkspaces(r){

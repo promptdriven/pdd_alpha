@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 4a50510ae47ce9bba1fa94609df40a422d1b2580758c6867bf471ae08683eb86).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 69dfa311209ce00de17e933d9a85dabb3d66ab39b600f36d82825f331e7aa73c).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -12,6 +12,7 @@ const safePath=p=>typeof p==='string'&&isAbsolute(p)&&!/[\p{Cc}'\\]/u.test(p);
 const fsOf=p=>p.fs??nodeFs;
 const herdrRequest=(p,operation,method,request)=>traceHerdrRequest({operation,request},()=>p.herdr[method](request),p);
 const result=(state,code=null,controller=null)=>({state,code,controller});
+const identityRefusal=intent=>({...result('refused','herdr_identity_unavailable',intent),message:'Herdr process identity is unavailable for the new controller pane. No controller command was sent.'});
 function traceSelector(p){
   try{
     const raw=p.env?.PDD_TRACE??process.env.PDD_TRACE;
@@ -108,14 +109,14 @@ export async function startWorkflowController(spec,ports={}){
   spec.decision=input.decision??null;
   const args=decisionArgs(spec.decision);
   if(!UUID.test(spec.runId??'')||!safePath(spec.runDir)||!safePath(spec.root)||!safePath(spec.runtime?.node)||!safePath(spec.runtime?.bin)||!NAME.test(spec.workflow??'')||!Number.isSafeInteger(spec.issueNumber)||spec.issueNumber<1||!args)return result('refused','unsupported');
-  // The real transport must bind Herdr's PID to OS start identity; readiness alone is insufficient.
-  let supported=false;try{supported=await ports.herdr?.supportsProcessIdentity?.()===true;}catch{}
-  if(!supported||!ports.withLifecycleGuard||!ports.readWorkflowJournal||!ports.validateRun||!ports.inspectControllerLock)return result('refused','unsupported');
+  // Check interfaces before admission; actual OS evidence belongs to the new pane.
+  if(!['supportsProcessIdentity','listWorkspaces','createWorkspace','createTab','paneRun','processInfo'].every(name=>typeof ports.herdr?.[name]==='function')||!ports.withLifecycleGuard||!ports.readWorkflowJournal||!ports.validateRun||!ports.inspectControllerLock)return result('refused','unsupported');
   try{return await withWorkflowLock({path:join(spec.runDir,'controller-start.lock'),busyCode:'controller_busy'},async()=>{
     let launches;try{launches=await readControllerLaunches(spec,ports);}catch{return result('uncertain','launch_history_invalid');}
     const prior=launches.at(-1);
     if(prior && prior.phase!=='exited'){
       if(prior.runId!==spec.runId||!isDeepStrictEqual(prior.runtime,spec.runtime)||!isDeepStrictEqual(prior.decision,spec.decision))return result('refused','launch_binding_conflict',prior);
+      if(prior.phase==='herdr.identity_unavailable')return identityRefusal(prior);
       return prove(prior,ports);
     }
     let intent;
@@ -140,6 +141,9 @@ export async function startWorkflowController(spec,ports={}){
       const tab=await herdrRequest(ports,'tab.create','createTab',{session:'default',workspaceId:intent.workspaceId,cwd:spec.root,label:`run #${spec.issueNumber} ${spec.workflow}`,focus:false});
       if(!tab?.tabId||!tab.paneId||!tab.terminalId)return result(tab?.refused?'failed':'uncertain','tab_create_failed',intent);
       await checkpoint('tab.created',{tabId:tab.tabId,paneId:tab.paneId,terminalId:tab.terminalId});
+      let supported=false;
+      try{supported=await ports.herdr.supportsProcessIdentity({session:'default',paneId:intent.paneId})===true;}catch{}
+      if(!supported){await checkpoint('herdr.identity_unavailable');return identityRefusal(intent);}
       await checkpoint('pane.run.intent');
       try{await herdrRequest(ports,'pane.run','paneRun',{session:'default',paneId:intent.paneId,command:intent.line});}catch{/* Unknown delivery must be reconciled, never repeated. */}
       return prove(intent,ports);

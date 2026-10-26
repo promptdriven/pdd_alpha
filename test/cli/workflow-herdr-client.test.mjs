@@ -119,3 +119,14 @@ test('failed delivery, nonzero JSON and malformed replies never retry a mutation
  await assert.rejects(herdr.paneRun({session:'other',paneId:'w1:p7',command:'x'}));
  await assert.rejects(herdr.paneRun({session:'default',paneId:'not-an-id',command:'x'}));assert.equal(f.calls.length,0);
 });
+
+test('targeted capability proves a new pane with no inventory and refuses wrong or unstable identity',async()=>{
+ const f=fixture(),{herdr}=await createWorkflowHerdrPorts(f.ports);f.setPanes([]);
+ assert.equal(await herdr.supportsProcessIdentity({session:'default',paneId:'w1:p7'}),true);
+ assert.equal(f.calls.length,2);assert.ok(f.calls.every(x=>x.args[3]==='process-info'));
+ for(const request of [{session:'other',paneId:'w1:p7'},{session:'default',paneId:'invalid'},{session:'default',paneId:'w1:p8'}])assert.equal(await herdr.supportsProcessIdentity(request),false);
+ for(const processStartIdentity of [async()=>null,(()=>{let n=0;return async()=>String(++n);})()]){
+  const g=fixture({processStartIdentity}),h=await createWorkflowHerdrPorts(g.ports);g.setPanes([]);
+  assert.equal(await h.herdr.supportsProcessIdentity({session:'default',paneId:'w1:p7'}),false);
+ }
+});

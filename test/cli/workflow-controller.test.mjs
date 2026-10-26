@@ -51,7 +51,7 @@ test('controller callers share admission and uncertain delivery is never repeate
   assert.equal(f.calls.filter(x=>x[0]==='run').length,1);assert.ok(results.some(r=>r.code==='controller_busy'));
   await startWorkflowController(f.spec,f.ports);assert.equal(f.calls.filter(x=>x[0]==='run').length,1);
 });
-test('unsupported process schema refuses before any durable or native effect',async t=>{const f=await fixture(t,'');f.ports.herdr.supportsProcessIdentity=async()=>false;assert.equal((await startWorkflowController(f.spec,f.ports)).code,'unsupported');assert.deepEqual(f.calls,[]);assert.deepEqual(await readControllerLaunches(f.spec),[]);});
+test('unsupported process schema refuses before any durable or native effect',async t=>{const f=await fixture(t,'');delete f.ports.herdr.supportsProcessIdentity;assert.equal((await startWorkflowController(f.spec,f.ports)).code,'unsupported');assert.deepEqual(f.calls,[]);assert.deepEqual(await readControllerLaunches(f.spec),[]);});
 test('stale human revision refuses under the gate',async t=>{const f=await fixture(t,'');f.state.controlState='waiting_person';f.state.rev=58;f.spec.decision={decision:'approve',id:runId,rev:57};assert.equal((await startWorkflowController(f.spec,f.ports)).code,'stale_decision');assert.deepEqual(f.calls,[]);});
 test('proved controller exit is reconciled before a new launch generation is admitted',async t=>{
   const f=await fixture(t,'');assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
@@ -62,7 +62,7 @@ test('proved controller exit is reconciled before a new launch generation is adm
   f.ports.herdr.processInfo=original;
   const next=await startWorkflowController(f.spec,f.ports);assert.equal(next.state,'started');assert.equal(next.controller.generation,2);assert.equal(f.calls.filter(x=>x[0]==='run').length,2);
 });
-test('failed capability reads and unknown controller locks refuse without launch',async t=>{const f=await fixture(t,'');f.ports.herdr.supportsProcessIdentity=async()=>{throw Error('unavailable');};assert.equal((await startWorkflowController(f.spec,f.ports)).code,'unsupported');f.ports.herdr.supportsProcessIdentity=async()=>true;f.ports.inspectControllerLock=async()=> 'unknown';assert.equal((await startWorkflowController(f.spec,f.ports)).code,'controller_busy');assert.equal(f.calls.length,0);});
+test('failed capability reads and unknown controller locks refuse without launch',async t=>{const f=await fixture(t,'');f.ports.herdr.supportsProcessIdentity=async()=>{throw Error('unavailable');};assert.equal((await startWorkflowController(f.spec,f.ports)).code,'herdr_identity_unavailable');assert.equal(f.calls.filter(x=>x[0]==='run').length,0);const g=await fixture(t,'');g.ports.inspectControllerLock=async()=> 'unknown';assert.equal((await startWorkflowController(g.spec,g.ports)).code,'controller_busy');assert.equal(g.calls.length,0);});
 test('controller rejects all unsupported path characters before effects',async t=>{for(const node of ["/saved/path'quote/node",'/saved/back\\slash/node','/saved/line\n/node','/saved/\u0085/node','relative/node']){const f=await fixture(t,'');f.spec.runtime.node=node;assert.equal((await startWorkflowController(f.spec,f.ports)).code,'unsupported');assert.deepEqual(f.calls,[]);}});
 
 
@@ -169,4 +169,24 @@ test('saved selector changes invalidate launch history and never authorize anoth
   record.traceSelector='git';await fs.writeFile(path,JSON.stringify(record)+'\n');
   assert.equal((await startWorkflowController(f.spec,f.ports)).code,'launch_history_invalid');
   assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+});
+
+test('failed identity on the new pane refuses before command and never repeats pane creation or probing',async t=>{
+ for(const throws of [false,true]){
+  const f=await fixture(t,'');let probes=0;
+  f.ports.herdr.supportsProcessIdentity=async request=>{
+   probes++;assert.deepEqual(request,{session:'default',paneId:'w1:p1'});
+   assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'tab.created');
+   assert.equal(f.calls.filter(x=>x[0]==='tab').length,1);assert.equal(f.calls.filter(x=>x[0]==='run').length,0);
+   if(throws)throw Error('private OS failure');return false;
+  };
+  for(let i=0;i<2;i++){
+   const r=await startWorkflowController(f.spec,f.ports);
+   assert.equal(r.state,'refused');assert.equal(r.code,'herdr_identity_unavailable');
+   assert.equal(r.message,'Herdr process identity is unavailable for the new controller pane. No controller command was sent.');
+   assert.equal(r.controller.paneId,'w1:p1');
+  }
+  assert.equal(probes,1);assert.deepEqual(f.calls.map(x=>x[0]),['tab']);
+  assert.equal((await readControllerLaunches(f.spec)).at(-1).phase,'herdr.identity_unavailable');
+ }
 });
