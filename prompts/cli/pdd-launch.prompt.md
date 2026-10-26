@@ -14,6 +14,15 @@ Node, preserving cwd, argv, environment, stdio and exit/signal behavior.
 code/Node; never use PATH Node or import mutable current for recovery.
 A duplicate service invocation cannot exec a second Link for a live attempt.
 
+The managed `launcher/link-entry.mjs` resolves the requested retained runtime and
+invokes `runLink` from that runtime's `client/src/phone/link/main.mjs` with its
+linkDir and client packageRoot options. Main owns the production startup context,
+self-test and managed readiness composition; the entry must leave Main's default
+ports intact rather than inject a commit-only `startupReady` callback. Preserve
+the inherited `PDD_START_ATTEMPT` environment exactly, including absence, and
+propagate runLink's exit result. Runtime validation remains before Main import;
+this entry does not manufacture a startup attempt or commit readiness itself.
+
 Explicit setup creates launcher/support/shim directories at 0700 through the
 private-directory owner, including copied support directories. The stable
 support closure includes that public helper. Do not follow symlink targets or

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: 852a6bbb9f10c819c32b3cb7c4e986863ffd552843661191f7038abdf9dbdd1e).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: 7b07a734be0f15fca1a6457f5dd15f3374d9bd60fa8baf0f6b8eba97b4e90b09).
 // Release tooling only: the caller supplies already reviewed, immutable inputs.
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash, createPublicKey, verify } from 'node:crypto';
@@ -39,6 +39,7 @@ export async function buildBootstrap({ descriptor, destination, custody }) {
     } catch { throw new TypeError('Verified signed staging custody required'); }
   }
   const template = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
+  const migration = await readFile(new URL('./migrate-r-line.sh', import.meta.url), 'utf8');
   const cleanup = await readFile(new URL('./npm-cleanup.mjs', import.meta.url), 'utf8');
   const cleanupScript = cleanup + '\ntry { await cleanupLegacyNpm(); } catch { process.exitCode = 1; }\n';
   const quote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
@@ -46,6 +47,7 @@ export async function buildBootstrap({ descriptor, destination, custody }) {
     .replace("pdd_trust_descriptor='__PDD_TRUST_DESCRIPTOR__'", () => `pdd_trust_descriptor='${custodyDescriptor}'`)
     .replace("pdd_trust_signature='__PDD_TRUST_SIGNATURE__'", () => `pdd_trust_signature='${custodySignature}'`)
     .replace("pdd_trust_root='__PDD_TRUST_ROOT__'", () => `pdd_trust_root='${custodyRoot}'`)
+    .replace("pdd_r_line_move='__PDD_R_LINE_MOVE__'", () => `pdd_r_line_move=${quote(migration)}`)
     .replace("pdd_npm_cleanup='__PDD_NPM_CLEANUP__'", () => `pdd_npm_cleanup=${quote(cleanupScript)}`);
   await writeFile(destination, installer, { mode: 0o755, flag: 'wx' });
 }

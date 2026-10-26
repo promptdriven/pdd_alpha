@@ -135,6 +135,23 @@ files are not rewritten. A Link restart requires an actual service/runtime chang
 and the activation barrier. No browser or phone is needed for bootstrap itself.
 Closing the invoking SSH session cannot stop an already accepted detached update.
 Before detach acceptance, report failure honestly; do not leave an untracked job.
+Before either existing-install delegation or fresh runtime staging, detect possible
+old R-line installs read-only: pocket, old gateway/team-access/session-links
+service/app paths, and local pdd/pdw/pdd-v1 wrappers referring into pocket. An
+unrelated personal pdd is not an old install. Invoke the release-embedded,
+unchanged Mac-owned `launcher/migrate-r-line.sh` with stock `/bin/bash --dry-run`;
+the script owns exact identification and all migration effects. Exit2 continues
+without a prompt; exit1 or unexpected exit stops. Exit0 displays the plan and
+asks exactly "Move off the old PDD build? [Y]". Empty, y or yes consents;
+EOF/other answers stop with no apply. On consent call `--apply --backup-dir`
+with a UTC-named path under ~/.pdd/migrate; only exit0 permits continuation.
+An apply failure stops and prints that backup's log.txt path. Preserve script
+refusals, protected native sign-ins/Herdr and user tools; never override its
+refused-user setting, invoke undo automatically or bypass a failed migration.
+The verified installer embeds the script so existing installs need no download
+or old-runtime script selection. Temporary embedded-script files are private
+and removed after the call; migration backups remain for explicit recovery.
+
 After the managed runtime and stable launcher are available, retire only the
 identified legacy global npm Alpha through the [npm cleanup owner](npm-cleanup.prompt.md)
 before entering setup. Embed that same reviewed cleanup module in the generated
@@ -151,6 +168,9 @@ setup-owned.
 </details>
 
 ## Dependencies
+
+- [R-line migration](migrate-r-line.prompt.md): generation/runtime/testing;
+  package and invoke the unchanged Mac-owned script with its Bash contract.
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
 - [Packaging](packaging.prompt.md), [owned Node](owned-node.prompt.md),

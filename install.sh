@@ -1,5 +1,5 @@
 #!/bin/sh
-# Generated from prompts/cli/bootstrap.prompt.md (sha256: 852a6bbb9f10c819c32b3cb7c4e986863ffd552843661191f7038abdf9dbdd1e).
+# Generated from prompts/cli/bootstrap.prompt.md (sha256: 7b07a734be0f15fca1a6457f5dd15f3374d9bd60fa8baf0f6b8eba97b4e90b09).
 set -eu
 # This installer is a child process; never change the invoking shell's umask.
 umask 077
@@ -7,6 +7,7 @@ umask 077
 # checkout deliberately contains no production URL, key or fabricated artifact.
 pdd_release_table='__PDD_RELEASE_TABLE__'
 pdd_npm_cleanup='__PDD_NPM_CLEANUP__'
+pdd_r_line_move='__PDD_R_LINE_MOVE__'
 pdd_trust_descriptor='__PDD_TRUST_DESCRIPTOR__'
 pdd_trust_signature='__PDD_TRUST_SIGNATURE__'
 pdd_trust_root='__PDD_TRUST_ROOT__'
@@ -68,6 +69,50 @@ pdd_normalize_fresh_tree() {
     fi
   done
 ) || exit 1
+# Begin R-line migration: the embedded owner script decides exact targets.
+pdd_old_line=false
+for pdd_old_path in "$HOME/pocket" "$HOME/Applications/PDD Session Links.app" "$HOME/.config/fish/conf.d/pocket.fish"   "$HOME/Library/LaunchAgents/ai.promptdriven.pocket.gateway.plist" "$HOME/Library/LaunchAgents/ai.promptdriven.pocket.team-access.plist"   "$HOME/Library/LaunchAgents/ai.promptdriven.pdw.session-links.plist"   "$HOME/.config/systemd/user/pocket-gateway.service" "$HOME/.config/systemd/user/pocket-team-access.service" "$HOME/.config/systemd/user/pocket-team-access.timer"; do
+  if [ -e "$pdd_old_path" ] || [ -L "$pdd_old_path" ]; then pdd_old_line=true; fi
+done
+for pdd_old_name in pdd pdw pdd-v1; do
+  pdd_old_path="$HOME/.local/bin/$pdd_old_name"
+  if [ -L "$pdd_old_path" ]; then
+    pdd_old_target=$(/usr/bin/readlink "$pdd_old_path") || pdd_bootstrap_fail 'Old-build wrapper cannot be inspected.'
+    case "$pdd_old_target" in "$HOME/pocket"|"$HOME/pocket/"*|../../pocket|../../pocket/*) pdd_old_line=true ;; esac
+  elif [ "$pdd_old_name" = pdd-v1 ] && [ -f "$pdd_old_path" ]; then
+    if /usr/bin/grep -q 'pocket' "$pdd_old_path"; then pdd_old_line=true; fi
+  fi
+done
+if [ "$pdd_old_line" = true ]; then
+  (
+    [ -x /bin/bash ] || pdd_bootstrap_fail 'Old-build move requires /bin/bash.'
+    command -v rm >/dev/null 2>&1 || pdd_bootstrap_fail 'Old-build move requires rm.'
+    command -v date >/dev/null 2>&1 || pdd_bootstrap_fail 'Old-build move requires date.'
+    case "$pdd_r_line_move" in '__PDD_R_LINE_MOVE__') pdd_bootstrap_fail 'The old-build move is not ready yet.' ;; esac
+    pdd_move_tmp=$(mktemp -d) || pdd_bootstrap_fail 'Old-build move cannot create temporary storage.'
+    trap 'rm -rf "$pdd_move_tmp"' 0
+    trap 'exit 1' HUP INT TERM
+    printf '%s' "$pdd_r_line_move" > "$pdd_move_tmp/migrate-r-line.sh"
+    chmod 700 "$pdd_move_tmp/migrate-r-line.sh"
+    pdd_move_code=0
+    /bin/bash "$pdd_move_tmp/migrate-r-line.sh" --dry-run || pdd_move_code=$?
+    case "$pdd_move_code" in
+      2) exit 0 ;;
+      0) ;;
+      *) pdd_bootstrap_fail 'Old-build move refused; resolve the reported problem before setup.' ;;
+    esac
+    printf '%s ' 'Move off the old PDD build? [Y]'
+    pdd_move_answer=
+    IFS= read -r pdd_move_answer || pdd_bootstrap_fail 'Old-build move needs an explicit response before setup.'
+    case "$pdd_move_answer" in ''|y|Y|yes|Yes|YES) ;; *) pdd_bootstrap_fail 'Old-build move declined; installation stopped.' ;; esac
+    pdd_move_backup="$HOME/.pdd/migrate/$(date -u +%Y%m%dT%H%M%SZ)"
+    if ! /bin/bash "$pdd_move_tmp/migrate-r-line.sh" --apply --backup-dir "$pdd_move_backup"; then
+      printf '%s\n' "Old-build move failed. Log: $pdd_move_backup/log.txt" >&2
+      exit 1
+    fi
+  ) || exit 1
+fi
+# End R-line migration.
 if [ -e "$HOME/.pdd/current" ] || [ -L "$HOME/.pdd/current" ] || [ -e "$HOME/.pdd/install/record.json" ]; then
   if [ -x "$HOME/.pdd/launcher/pdd-launch" ]; then
     printf '%s\n' 'This installer did not install a new release. The existing PDD runtime is retained.' 'Continue with pdd setup to check that existing installation.'
