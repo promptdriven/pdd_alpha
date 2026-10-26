@@ -2,14 +2,14 @@ import test from 'node:test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm, mkdir, symlink, link } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, mkdir, symlink, link, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveWorkflowIssue, prepareWorkflowPr, publishWorkflowPr, reconcileWorkflowPr } from '../src/workflow-github.mjs';
 
 const headSha = 'a'.repeat(40), mergeSha = 'b'.repeat(40);
 async function fixture(t) {
-  const cwd = await mkdtemp(join(tmpdir(), 'pdd-github-'));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), 'pdd-github-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const bodyFile = join(cwd, 'body.md'), calls = [];
   const state = { origin: 'git@github.com:Acme/Project.git', pushOrigin: 'https://github.com/Acme/Project.git',

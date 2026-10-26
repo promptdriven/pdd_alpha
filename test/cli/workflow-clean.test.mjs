@@ -10,7 +10,7 @@ import {cleanWorkflowRuns} from '../../src/workflow-clean.mjs';
 import vectors from '../../vectors/cli/workflow-clean.json' with {type:'json'};
 const exec=promisify(execFile),DAY=86400000,now=Date.parse('2026-10-25T00:00:00Z');
 async function fixture(t,options={}) {
-  const tmp=await fs.mkdtemp(join(tmpdir(),'pdd-clean-')),cwd=join(tmp,'repo'),home=join(tmp,'home');await fs.mkdir(cwd);await fs.mkdir(home);
+  const tmp=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-clean-'))),cwd=join(tmp,'repo'),home=join(tmp,'home');await fs.mkdir(cwd);await fs.mkdir(home);
   t.after(()=>fs.rm(tmp,{recursive:true,force:true}));
   const git=async(root,...args)=>(await exec('git',args,{cwd:root})).stdout;
   await git(cwd,'init','-b','main');await git(cwd,'config','user.email','test@example.invalid');await git(cwd,'config','user.name','Test');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, linkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, linkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,7 @@ import { loadWorkflowDefinition, listWorkflowDefinitions } from '../src/workflow
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 function setup(t) {
-  const root = mkdtempSync(join(tmpdir(), 'pdd-definition-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'pdd-definition-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const cwd = join(root, 'project'), packageRoot = join(root, 'package');
   mkdirSync(cwd); mkdirSync(packageRoot);

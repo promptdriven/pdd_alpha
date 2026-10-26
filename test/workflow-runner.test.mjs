@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, symlinkSync, linkSync, unlinkSync, cpSync, readdirSync, openSync, closeSync, writeSync, readSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, symlinkSync, linkSync, unlinkSync, cpSync, readdirSync, openSync, closeSync, writeSync, readSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { constants as bufferConstants } from 'node:buffer';
 import { join, resolve } from 'node:path';
@@ -32,9 +32,9 @@ function journalRows(raw) {
 
 async function fixture(t, options = {}) {
   const activePackageRoot = options.packageRoot ?? packageRoot;
-  let cwd = mkdtempSync(join(tmpdir(), 'pdd-runner-'));
+  let cwd = realpathSync(mkdtempSync(join(tmpdir(), 'pdd-runner-')));
   const sourceCwd = cwd;
-  const indexHome = mkdtempSync(join(tmpdir(), 'pdd-runner-home-'));
+  const indexHome = realpathSync(mkdtempSync(join(tmpdir(), 'pdd-runner-home-')));
   t.after(() => rmSync(sourceCwd, { recursive: true, force: true }));
   t.after(() => rmSync(indexHome, { recursive: true, force: true }));
   // The resolver checks a real absolute file; transport replies stay synthetic.
@@ -389,7 +389,9 @@ test('a journal beyond the Node string limit resumes its latest optional stage w
   let bytes = original.length, rows = saved.seq;
   const fd = openSync(journal, 'a');
   try {
-    while (bytes <= bufferConstants.MAX_STRING_LENGTH + 64 * 1024 * 1024) {
+    // Cross the parser's actual string limit with only a small margin; the
+    // previous 64 MiB cushion made this fixture needlessly slow on macOS.
+    while (bytes <= bufferConstants.MAX_STRING_LENGTH + 64 * 1024) {
       saved.seq = ++rows;
       const row = Buffer.from(JSON.stringify({ seq: rows, event: 'retained.snapshot', state: saved }) + '\n');
       writeSync(fd, row); expectedHash.update(row); bytes += row.length;
@@ -633,7 +635,7 @@ test('changed recipe source or missing whole override cannot replace saved instr
   });
 });
 test('original guide edits retain the full frozen guide and require a current bound decision to progress', async t => {
-  const localPackage = mkdtempSync(join(tmpdir(), 'pdd-context-package-'));
+  const localPackage = realpathSync(mkdtempSync(join(tmpdir(), 'pdd-context-package-')));
   t.after(() => rmSync(localPackage, { recursive: true, force: true }));
   for (const directory of ['docs', 'skills', '.pdd']) cpSync(join(packageRoot, directory), join(localPackage, directory), { recursive: true });
   const f = await fixture(t, { packageRoot: localPackage }); const first = await f.run();

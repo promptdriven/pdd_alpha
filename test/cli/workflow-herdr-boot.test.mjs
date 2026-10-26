@@ -33,7 +33,7 @@ const downloadPath=args=>args[args.indexOf('--output')+1];
 const answer=()=>({stdout:JSON.stringify({result:{type:'workspace_list',workspaces:[]}}),code:0});
 const refused=()=>Object.assign(Error('PRIVATE connection failure token=DO-NOT-LOG'),{code:'ECONNREFUSED',stderr:'PRIVATE credential'});
 async function fixture(t){
-  const home=await fs.mkdtemp(join(tmpdir(),'pdd-herdr-boot-test-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+  const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-herdr-boot-test-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
   const bin=join(home,'bin');await fs.mkdir(bin,{mode:0o700});
   const binary=join(bin,'herdr');await fs.writeFile(binary,'#!/bin/sh\nexit 0\n',{mode:0o700});
   const calls=[],env=Object.freeze({PATH:bin,PDD_TRACE:'',HOME:home,KEEP:'exact',HERDR_INSTALL_DIR:'/must-not-win'});

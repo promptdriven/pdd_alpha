@@ -15,7 +15,7 @@ import {readProcessStartIdentity} from '../../src/workflow-herdr-client.mjs';
 const exec=promisify(execFile),packageRoot=resolve(import.meta.dirname,'../..');
 const launchId='123e4567-e89b-42d3-a456-426614174000';
 async function fixture(t){
-  const home=await fs.mkdtemp(join(tmpdir(),'pdd-keeper-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+  const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-keeper-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
   const cwd=join(home,'repo');await fs.mkdir(cwd);
   const git=async(...args)=>(await exec('git',args,{cwd})).stdout.trim();
   await git('init','-b','main');await git('config','user.name','Synthetic');await git('config','user.email','synthetic@example.invalid');

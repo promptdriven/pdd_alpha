@@ -12,7 +12,7 @@ import {withUpdateLock} from '../../src/update-lock.mjs';
 const methods=['workspace.list','workspace.create','tab.create','pane.list','pane.process_info','pane.send_text','pane.send_keys','pane.read','agent.get','agent.prompt','server.live_handoff'];
 const schema=()=>({schemas:{request:{oneOf:methods.map(method=>({properties:{method:{const:method}}}))}}});
 async function fixture(t){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-herdr-features-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-herdr-features-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const binary=join(home,"Herdr '$ tool");await fs.writeFile(binary,'#!/bin/sh\nexit 97\n',{mode:0o700});
  const calls=[],status={client:{version:'0.9.1',protocol:22,binary,session:'default'},server:{running:true,status:'running',version:'0.9.1',protocol:22,session:'default',compatible:true,endpoint_compatible:true,capabilities:{live_handoff:true}}};
  const body={schema:schema(),help:'Usage: herdr pane run <PANE_ID> <COMMAND>...\n',workspace:{result:{workspaces:[]}}};

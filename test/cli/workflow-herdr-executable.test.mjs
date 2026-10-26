@@ -11,7 +11,7 @@ import {readInstallRecord} from '../../src/install-record.mjs';
 import {runPdd} from '../../src/pdd-cli.mjs';
 const capture=()=>({text:'',write(text){this.text+=text;}});
 async function fixture(t){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-absolute-herdr-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-absolute-herdr-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const dir=join(home,'tool with spaces');await fs.mkdir(dir);const executable=join(dir,'herdr');
  await fs.writeFile(executable,`#!${process.execPath}\nprocess.stdout.write(JSON.stringify({result:{workspaces:[{workspace_id:'w7',cwd:'/assigned'}]}}));\n`,{mode:0o700});
  return {home,executable};

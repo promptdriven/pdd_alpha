@@ -9,7 +9,7 @@ import {ensureDefaultHerdr} from '../../src/workflow-herdr-boot.mjs';
 const unit='pdd-herdr-default.service',label='ai.promptdriven.pdd-herdr-default';
 const reply=()=>({stdout:JSON.stringify({result:{workspaces:[]}}),code:0});
 async function fixture(t,platform='linux'){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-c19-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-c19-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const binary=join(home,'Herdr % $ " & tool');await fs.writeFile(binary,'#!/bin/sh\nexit 0\n',{mode:0o700});
  const calls=[],runtime={herdr:binary},state={enabled:true,active:false,linger:true,loaded:false,disabled:false};
  const ports={home,runtime,platform,env:{PATH:'',HOME:home,PDD_TRACE:''},herdrStartupTimeoutMs:500,herdrWait:async()=>{},execFile:async(file,args,options)=>{
