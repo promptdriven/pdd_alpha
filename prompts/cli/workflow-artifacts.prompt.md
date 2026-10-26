@@ -92,6 +92,9 @@ Node promises-filesystem interface for local test injection.
 
 ## Dependencies
 
+- [Story](../../story/cli/WORKFLOW-ARTIFACTS.md) and [cases](../../vectors/cli/workflow-artifacts.json):
+  verification inputs with independent expected outcomes.
+
 Node built-ins only: filesystem promises/constants for real files, crypto for
 SHA256, path for containment, child_process for ordinary local execution. No
 Runtime, solver, server, GitHub, managed session, private account or journal.

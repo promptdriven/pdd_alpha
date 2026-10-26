@@ -1,5 +1,7 @@
 # Editable local workflow definitions
 
+Preservation is behavioral refinement of the declared selection, immutable snapshot and validation results; private loading machinery is free.
+
 `src/workflow-definition-loader.mjs` owns selection, validation and immutable content snapshots of user-editable local workflow recipes. A user can add a safe workflow directory or change its stages and Markdown without editing a PDD module. The loader performs no Git, native-session or publication effects. The runner owns saved-run identity, approval, artifacts, test execution and advancement.
 
 Export synchronous module functions `loadWorkflowDefinition({name,cwd,packageRoot}) -> {name,version,root,stages,files,digest}` and `listWorkflowDefinitions({cwd,packageRoot}) -> [{name,source}]`. `root` is the canonical selected recipe directory. `source` is project or bundled. Names and stage IDs contain 1–64 characters, start with a lowercase letter and contain lowercase letters, digits and single separating hyphens. Discovery is sorted, includes arbitrary valid names, and uses the same validator rather than a second catalog schema. Invalid discovered definitions refuse discovery with a useful error.
@@ -26,18 +28,21 @@ workflow.json has exactly `{version:1,name,overview,stages}`; its name must equa
 
 | Kind | Additional fields and meaning |
 | --- | --- |
-| agent | Required `protocol`: report, proposal, work or verify. Optional unique `requiredRoles` from prompt/story/cases/implementation/tests/evidence/notes. Proposal alone requires `approval`: human or next-advance and a nonempty role set. Proposal and verify cannot be optional. |
+| agent | Required `protocol`: report, proposal, work or verify. Optional unique `requiredRoles` from prompt/story/cases/implementation/tests/evidence/notes. Proposal alone requires `approval`: human or next-advance and a role set including prompt, story and cases. Proposal and verify cannot be optional. |
 | human | Accepts the preceding single proposal with approval human; cannot precede it or accept it twice. |
 | pr | Required `publication`: proposal or verified; the former requires an accepted proposal, the latter a prior mandatory verify. |
 | merge | Required `prStage` naming one preceding PR; each PR can have at most one matching merge. |
 
-Agent work and verify require a prior accepted proposal. Exactly one proposal may exist; it supplies the independent cases/contract and concrete native argv plan. For next-advance approval, the runner pauses before the next effect for a current explicit advance without inventing a human stage. For human approval, a mandatory human stage must occur before work/verify/PR. A verify stage uses the accepted plan, never a model PASS. Reports alone may omit project files; work/proposal/verify must supply actual files. Required artifact roles express the contract without reserving particular stage IDs.
+Agent work and verify require a prior accepted proposal. Exactly one proposal may exist; it supplies completed Story, prompt and independent cases plus the concrete native test argv plan before any implementation work. A proposal omitting any of those required roles is invalid. For next-advance approval, the runner pauses before the next effect for a current explicit advance without inventing a human stage. For human approval, a mandatory human stage must occur before work/verify/PR. A verify stage uses the accepted plan, never a model PASS. Reports alone may omit project files; work/proposal/verify must supply actual files. Required artifact roles express the contract without reserving particular stage IDs.
 
 Optional `requiresMerge` on agent work or PR names a preceding merge. A skipped optional PR permits its matching merge/dependent transition to skip that merge requirement; an executed PR requires its actual recorded merge revision and unchanged pinned artifacts. Apply this field independently of stage names, including build or prompt-merge. It does not authorize checkout, reset, merge or native effects.
 
 Reject meaningless field combinations, missing/forward/wrong-kind references, duplicate merge references, any PR before proposal acceptance, and verified publication without a mandatory verify after the latest work stage. Every work stage invalidates prior graph verification; a later verify restores it. This ordering check supplements the runner's exact output binding and never certifies changed source by itself. File/graph errors must identify the definition or stage. Definition validation never executes a command from JSON; actual test argv comes from the independently accepted stage handoff under the runner's existing protocol.
 
 ## Dependencies
+
+- [Story](../../story/cli/WORKFLOW-DEFINITION-LOADER.md) and [cases](../../vectors/cli/workflow-definition-loader.json):
+  verification inputs with independent expected outcomes.
 
 - Node built-ins are the only required implementation dependencies. [Runner](workflow-runner.prompt.md) is navigation to the runtime consumer, not a required input back into this loader; it owns saved snapshots, handoffs and effects.
 - Bundled `.pdd/workflows/*/workflow.json` and their declared Markdown are runtime inputs; project overrides follow the same schema.

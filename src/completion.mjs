@@ -1,4 +1,4 @@
-// Generated from prompts/cli/completion.prompt.md (sha256: 511589c533b6eac84678e7582113b0960102d51307880a804291952d9578ed6a).
+// Generated from prompts/cli/completion.prompt.md (sha256: 2edaec13f98525ee93f121ebbff2fb1a3f57babbd533bf22149baaccb61f16a1).
 import { PUBLIC_COMMAND_ROUTES } from './command-catalog.mjs';
 
 function add(map, key, value) {
@@ -46,7 +46,7 @@ export function renderCompletion(shell) {
   if (shell !== 'bash' && shell !== 'zsh') throw new TypeError('Choose bash or zsh.');
   const maps = candidateMaps();
   const valueChoices = new Map();
-  for(const route of PUBLIC_COMMAND_ROUTES) for(const option of route.options) if(option.choices) valueChoices.set(option.name,option.choices);
+  for(const route of PUBLIC_COMMAND_ROUTES) for(const option of route.options) if(option.choices && option.name!=='--decision') valueChoices.set(option.name,option.choices);
   const bashValues = [...valueChoices].map(([name,values])=>`    ${name}) COMPREPLY=( $(compgen -W '${quoteWords(values)}' -- "$current") ); return ;;`).join('\n');
   const zshValues = [...valueChoices].map(([name,values])=>`    ${name}) choices=(${quoteWords(values)}); _describe "PDD option" choices; return ;;`).join('\n');
   const secondCases = [...maps.second].map(([key, values]) => `      ${key}) choices='${quoteWords(values)}' ;;`).join('\n');
@@ -57,7 +57,8 @@ export function renderCompletion(shell) {
       '# Bash completion for pdd',
       '_pdd_complete() {',
       '  local current="${COMP_WORDS[COMP_CWORD]}" choices',
-      '  case "${COMP_WORDS[COMP_CWORD-1]}" in', bashValues, '  esac',
+      '  case "${COMP_WORDS[COMP_CWORD-1]}" in',
+      `    --decision) if [[ \${COMP_WORDS[1]} == workflow ]]; then choices='approve skip'; else choices='continue wait'; fi; COMPREPLY=( $(compgen -W "$choices" -- "$current") ); return ;;`, bashValues, '  esac',
       '  if [[ $COMP_CWORD == 3 && ${COMP_WORDS[1]} == workflow && ${COMP_WORDS[2]} == run ]]; then',
       `    choices="$(${definitionNames})"`,
       '    COMPREPLY=( $(compgen -W "$choices" -- "$current") ); return',
@@ -67,7 +68,7 @@ export function renderCompletion(shell) {
       '    2) case "${COMP_WORDS[1]}" in', secondCases, '      *) choices="" ;;', '    esac ;;',
       '    3) case "${COMP_WORDS[1]}:${COMP_WORDS[2]}" in', thirdCases, '      *) choices="" ;;', '    esac ;;',
       '    4) case "${COMP_WORDS[1]}:${COMP_WORDS[2]}:${COMP_WORDS[3]}" in', fourthCases, '      *) choices="" ;;', '    esac ;;',
-      '    *) choices="" ;;',
+      '    *) case "${COMP_WORDS[1]}:${COMP_WORDS[2]}" in', thirdCases, '      *) case "${COMP_WORDS[1]}" in', secondCases, '        *) choices="" ;;', '      esac ;;', '    esac ;;',
       '  esac',
       '  COMPREPLY=( $(compgen -W "$choices" -- "$current") )',
       '}',
@@ -82,7 +83,8 @@ export function renderCompletion(shell) {
     '#compdef pdd',
     '_pdd() {',
     '  local -a choices',
-    '  case "${words[CURRENT-1]}" in', zshValues, '  esac',
+    '  case "${words[CURRENT-1]}" in',
+    '    --decision) if [[ $words[2] == workflow ]]; then choices=(approve skip); else choices=(continue wait); fi; _describe "PDD option" choices; return ;;', zshValues, '  esac',
     '  if [[ $CURRENT == 4 && $words[2] == workflow && $words[3] == run ]]; then',
     `    local names="$(${definitionNames})"`,
     '    choices=(${=names}); _describe "PDD workflow" choices; return',
@@ -92,7 +94,7 @@ export function renderCompletion(shell) {
     '    3) case $words[2] in', secondZshCases, '      *) choices=() ;;', '    esac ;;',
     '    4) case "$words[2]:$words[3]" in', thirdZshCases, '      *) choices=() ;;', '    esac ;;',
     '    5) case "$words[2]:$words[3]:$words[4]" in', fourthZshCases, '      *) choices=() ;;', '    esac ;;',
-    '    *) choices=() ;;',
+    '    *) case "$words[2]:$words[3]" in', thirdZshCases, '      *) case $words[2] in', secondZshCases, '        *) choices=() ;;', '      esac ;;', '    esac ;;',
     '  esac',
     '  _describe "PDD command" choices',
     '}',

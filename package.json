@@ -1,26 +1,40 @@
 {
-  "name": "pdd",
+  "name": "@promptdriven/pdd",
   "version": "0.0.311",
   "description": "PDD Alpha: local Prompting guide, skills and recipes for your coding agent",
   "type": "module",
   "bin": {
-    "pdd": "bin/pdd.mjs"
+    "pdd": "bin/pdd.mjs",
+    "pdd-claim": "bin/pdd-claim.mjs"
   },
   "files": [
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
     "AGENTS.md",
-    "bin/",
-    "src/",
+    "bin/pdd.mjs",
+    "bin/pdd-claim.mjs",
+    "bin/pdd-flock",
+    "src/workflow-flock.c",
+    "src/*.mjs",
+    "launcher/",
+    "install.sh",
     "prompts/cli/",
-    "docs/",
-    "skills/",
+    "story/cli/",
+    "vectors/cli/",
+    "docs/index.md",
+    "docs/checks.md",
+    "docs/cli.md",
+    "docs/prompting-guide.md",
+    "docs/workflows.md",
+    "docs/prompt-sessions.md",
+    "docs/setup.md",
+    "skills/pdd/",
     ".pdd/workflows/",
     "examples/"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs examples/ticket-status/test/*.test.mjs"
+    "test": "node --test 'test/**/*.test.mjs' 'examples/ticket-status/test/*.test.mjs'"
   },
   "engines": {
     "node": ">=22.16.0"

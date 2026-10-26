@@ -1,0 +1,406 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-models.prompt.md",
+  "story": "../../story/cli/WORKFLOW-MODELS.md",
+  "note": "Synthetic independent expectations; no implementation or live-service result.",
+  "cases": [
+    {
+      "id": "hidden-filter-and-per-model-efforts",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "machineId": "m1",
+        "nativeCatalog": {
+          "models": [
+            {
+              "id": "a",
+              "hidden": false,
+              "efforts": [
+                "low",
+                "high"
+              ]
+            },
+            {
+              "id": "b",
+              "hidden": false,
+              "efforts": [
+                "low",
+                "high",
+                "ultra"
+              ]
+            },
+            {
+              "id": "secret",
+              "hidden": true,
+              "efforts": [
+                "high"
+              ]
+            }
+          ]
+        }
+      },
+      "when": {
+        "operation": "listWorkflowModels"
+      },
+      "expected": {
+        "visibleIds": [
+          "a",
+          "b"
+        ],
+        "efforts": {
+          "a": [
+            "low",
+            "high"
+          ],
+          "b": [
+            "low",
+            "high",
+            "ultra"
+          ]
+        }
+      }
+    },
+    {
+      "id": "claude-plan-unverified",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "agent": "claude",
+        "modelNames": [
+          "native-model"
+        ],
+        "acceptedEffortsEvidence": null
+      },
+      "when": {
+        "operation": "listWorkflowModels"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "catalog_unavailable",
+        "effortsInvented": false,
+        "paidTurnSent": false,
+        "signInStarted": false
+      }
+    },
+    {
+      "id": "settings-defaults",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "agent": "codex",
+        "settings": {
+          "model": "a",
+          "effort": "high"
+        },
+        "supported": {
+          "a": [
+            "low",
+            "high"
+          ]
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "selected",
+        "model": "a",
+        "effort": "high",
+        "source": "defaults"
+      }
+    },
+    {
+      "id": "native-defaults",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "settings": null,
+        "nativeDefaults": {
+          "model": "a",
+          "effort": "low"
+        },
+        "supported": {
+          "a": [
+            "low",
+            "high"
+          ]
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "selected",
+        "model": "a",
+        "effort": "low",
+        "source": "defaults"
+      }
+    },
+    {
+      "id": "valid-start-override",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "settings": {
+          "model": "a",
+          "effort": "low"
+        },
+        "selection": {
+          "model": "b",
+          "effort": "high"
+        },
+        "supported": {
+          "b": [
+            "low",
+            "high"
+          ]
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "selected",
+        "model": "b",
+        "effort": "high",
+        "source": "override",
+        "settingsChanged": false
+      }
+    },
+    {
+      "id": "effort-unsupported",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "selection": {
+          "model": "a",
+          "effort": "ultra"
+        },
+        "supported": {
+          "a": [
+            "low",
+            "high"
+          ]
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "bad_args",
+        "effortDowngraded": false,
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "hidden-explicit-refused",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "selection": {
+          "model": "secret"
+        },
+        "nativeModels": [
+          {
+            "id": "secret",
+            "hidden": true
+          }
+        ]
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "bad_args",
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "override-uses-model-default",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "settings": {
+          "model": "a",
+          "effort": "ultra"
+        },
+        "selection": {
+          "model": "b"
+        },
+        "modelB": {
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "defaultEffort": "high"
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "selected",
+        "model": "b",
+        "effort": "high",
+        "source": "override"
+      }
+    },
+    {
+      "id": "no-effort-control",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "settings": {
+          "model": "a",
+          "effort": "high"
+        },
+        "selection": {
+          "model": "b"
+        },
+        "modelB": {
+          "efforts": [],
+          "defaultEffort": null
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "selected",
+        "model": "b",
+        "effort": null
+      }
+    },
+    {
+      "id": "frozen-run-ignores-later-default",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "savedSelection": {
+          "model": "a",
+          "effort": "high"
+        },
+        "settingsNow": {
+          "model": "b",
+          "effort": "low"
+        },
+        "savedPairStillSupported": true
+      },
+      "when": {
+        "operation": "recovery-consumer"
+      },
+      "expected": {
+        "effectivePair": {
+          "model": "a",
+          "effort": "high"
+        },
+        "globalNativeConfigWritten": false
+      }
+    },
+    {
+      "id": "wrong-machine-catalog",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "requestedMachineId": "m2",
+        "catalogMachineId": "m1"
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "catalog_unavailable",
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "catalog-unavailable",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "nativeCatalog": "throws",
+        "settings": {
+          "model": "a",
+          "effort": "high"
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "catalog_unavailable",
+        "staticFallbackUsed": false,
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "defaults-invalid",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "settings": {
+          "model": "missing",
+          "effort": "high"
+        },
+        "supported": {
+          "a": [
+            "low"
+          ]
+        }
+      },
+      "when": {
+        "operation": "resolveWorkflowModel"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "catalog_unavailable",
+        "silentFallbackUsed": false
+      }
+    },
+    {
+      "id": "cross-tool-successor",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "permittedCrossTool": true,
+        "originalPair": {
+          "model": "codex-a",
+          "effort": "ultra"
+        },
+        "targetToolDefaults": {
+          "model": "claude-b",
+          "effort": "high"
+        },
+        "targetPairValidated": true
+      },
+      "when": {
+        "operation": "handoff-consumer"
+      },
+      "expected": {
+        "successorPair": {
+          "model": "claude-b",
+          "effort": "high"
+        },
+        "originalToolPairRelabeled": false
+      }
+    }
+  ]
+}

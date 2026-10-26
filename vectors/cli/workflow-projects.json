@@ -1,0 +1,383 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-projects.prompt.md",
+  "story": "../../story/cli/WORKFLOW-PROJECTS.md",
+  "note": "Synthetic independent expectations; no implementation or live-service result.",
+  "cases": [
+    {
+      "id": "all-sources-visible",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "sourceResults": {
+          "codexHistory": [
+            "Calendar"
+          ],
+          "claudeHistory": [
+            "Garden"
+          ],
+          "herdr": [
+            "Journal"
+          ],
+          "runs": [
+            "Tools"
+          ],
+          "usualPlaces": [
+            "Notes"
+          ],
+          "github": [
+            "Website"
+          ]
+        }
+      },
+      "when": {
+        "operation": "listWorkflowProjects"
+      },
+      "expected": {
+        "names": [
+          "Calendar",
+          "Garden",
+          "Journal",
+          "Notes",
+          "Tools",
+          "Website"
+        ],
+        "nativeStarted": false,
+        "cloned": false,
+        "signInStarted": false,
+        "conversationBodiesRead": false
+      }
+    },
+    {
+      "id": "merge-canonical-root",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "entries": [
+          {
+            "id": "a",
+            "name": "App",
+            "root": "/work/app",
+            "source": "runs"
+          },
+          {
+            "id": "a",
+            "name": "App",
+            "root": "/work/app",
+            "source": "herdr"
+          }
+        ]
+      },
+      "when": {
+        "operation": "listWorkflowProjects"
+      },
+      "expected": {
+        "projectCount": 1,
+        "sources": [
+          "herdr",
+          "runs"
+        ]
+      }
+    },
+    {
+      "id": "duplicate-name-preserved",
+      "criteria": [
+        "AC2",
+        "AC5"
+      ],
+      "given": {
+        "query": "App",
+        "entries": [
+          {
+            "id": "a",
+            "name": "App",
+            "root": "/one/app",
+            "repository": "one/app"
+          },
+          {
+            "id": "b",
+            "name": "App",
+            "root": "/two/app",
+            "repository": "two/app"
+          }
+        ]
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "ambiguous",
+        "candidateIds": [
+          "a",
+          "b"
+        ],
+        "contextLabels": [
+          "one/app",
+          "two/app"
+        ],
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "sort-deterministic",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "entries": [
+          {
+            "id": "b",
+            "name": "beta",
+            "lastUsedAt": null
+          },
+          {
+            "id": "a",
+            "name": "Alpha",
+            "lastUsedAt": 20
+          },
+          {
+            "id": "c",
+            "name": "alpha",
+            "lastUsedAt": 20
+          }
+        ]
+      },
+      "when": {
+        "operation": "listWorkflowProjects"
+      },
+      "expected": {
+        "ids": [
+          "a",
+          "c",
+          "b"
+        ]
+      }
+    },
+    {
+      "id": "one-source-unavailable",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "codexHistory": "unavailable",
+        "runs": [
+          {
+            "id": "a",
+            "name": "Calendar",
+            "root": "/work/cal"
+          }
+        ]
+      },
+      "when": {
+        "operation": "listWorkflowProjects"
+      },
+      "expected": {
+        "ids": [
+          "a"
+        ],
+        "warningsContainSource": "codexHistory",
+        "signInStarted": false
+      }
+    },
+    {
+      "id": "exact-name-precedes-partial",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "query": " CAL ",
+        "entries": [
+          {
+            "id": "a",
+            "name": "Cal",
+            "availability": "local",
+            "root": "/work/cal"
+          },
+          {
+            "id": "b",
+            "name": "Calendar",
+            "availability": "local",
+            "root": "/work/calendar"
+          }
+        ],
+        "checkLocal": true
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "selected",
+        "projectId": "a",
+        "cwd": "/work/cal"
+      }
+    },
+    {
+      "id": "part-name-unique",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "query": "lendar",
+        "entries": [
+          {
+            "id": "a",
+            "name": "Calendar",
+            "availability": "local",
+            "root": "/work/cal"
+          }
+        ],
+        "checkLocal": true
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "selected",
+        "projectId": "a",
+        "cwd": "/work/cal"
+      }
+    },
+    {
+      "id": "path-query-refused",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "query": "~/work/app"
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "bad_args",
+        "nativeStarted": false,
+        "folderTextRequested": false
+      }
+    },
+    {
+      "id": "empty-query-refused",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "query": "  "
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "bad_args",
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "no-match",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "query": "missing",
+        "entries": []
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "not_found",
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "github-needs-explicit-clone",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "query": "Website",
+        "entries": [
+          {
+            "id": "g",
+            "name": "Website",
+            "root": null,
+            "availability": "not_cloned",
+            "repository": "example/Website"
+          }
+        ]
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "needs_clone",
+        "cloned": false,
+        "nativeStarted": false,
+        "cloneDestinationDefault": "~/pdd/Website"
+      }
+    },
+    {
+      "id": "removed-root",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "query": "Calendar",
+        "entries": [
+          {
+            "id": "a",
+            "name": "Calendar",
+            "root": "/work/cal",
+            "availability": "local"
+          }
+        ],
+        "checkLocal": false
+      },
+      "when": {
+        "operation": "resolveWorkflowProject"
+      },
+      "expected": {
+        "state": "unavailable",
+        "nativeStarted": false
+      }
+    },
+    {
+      "id": "last-project-preselected",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "lastAcceptedProjectId": "a",
+        "availableIds": [
+          "a",
+          "b"
+        ]
+      },
+      "when": {
+        "operation": "catalog-consumer"
+      },
+      "expected": {
+        "newAgentPreselectedId": "a",
+        "folderTextRequested": false
+      }
+    },
+    {
+      "id": "clone-collision-preserves-files",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "explicitCloneProject": "g",
+        "settingsBase": "/work/projects",
+        "destinationExists": true
+      },
+      "when": {
+        "operation": "projects-action-consumer"
+      },
+      "expected": {
+        "existingFilesChanged": false,
+        "asksForAlternative": true
+      }
+    }
+  ]
+}

@@ -7,20 +7,40 @@ import { join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile as callbackExec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { runWorkflow, resumeWorkflow, attachWorkflow, WORKFLOW_STAGES } from '../src/workflow-runner.mjs';
+import { runWorkflow, resumeWorkflow, attachWorkflow, prepareWorkflow, driveWorkflow, adoptWorkflow, readWorkflowJournal, WORKFLOW_STAGES } from '../src/workflow-runner.mjs';
 import { loadGuidance as actualGuidance } from '../src/guidance.mjs';
-import { runHerdrStage, inspectHerdrStage, closeHerdrStage } from '../src/workflow-stage-herdr.mjs';
+import { runHerdrStage, inspectHerdrStage, closeHerdrStage, attachHerdrStage } from '../src/workflow-stage-herdr.mjs';
+import {readHerdrTrace} from '../src/herdr-trace.mjs';
+import {encodeWorkflowJournalRecord,replayWorkflowJournalRecord} from '../src/workflow-journal.mjs';
 
+import {withWorkflowLock,inspectWorkflowLock} from './cli/workflow-test-lock.mjs';
 const exec = promisify(callbackExec);
 const packageRoot = resolve(import.meta.dirname, '..');
 const sha = value => createHash('sha256').update(value).digest('hex');
 const issueUrl = 'https://github.com/example/project/issues/17';
 const output = { write() {} };
+// Tests inspect logical state through the public storage codec. Intentional
+// corruption fixtures serialize those logical rows as legacy snapshots.
+function journalRows(raw) {
+  let state;
+  return raw.trimEnd().split('\n').filter(line=>line.trim()).map(line=>{
+    const {delta,baseSeq,...row}=JSON.parse(line);
+    state=replayWorkflowJournalRecord(state,JSON.parse(line));
+    return {...row,state};
+  });
+}
+
 async function fixture(t, options = {}) {
   const activePackageRoot = options.packageRoot ?? packageRoot;
   let cwd = mkdtempSync(join(tmpdir(), 'pdd-runner-'));
   const sourceCwd = cwd;
+  const indexHome = mkdtempSync(join(tmpdir(), 'pdd-runner-home-'));
   t.after(() => rmSync(sourceCwd, { recursive: true, force: true }));
+  t.after(() => rmSync(indexHome, { recursive: true, force: true }));
+  // The resolver checks a real absolute file; transport replies stay synthetic.
+  // Any missed transport interception exits126 instead of reaching live Herdr.
+  const herdrExecutable = join(indexHome, 'herdr');
+  writeFileSync(herdrExecutable, '#!/bin/sh\nexit 126\n', {mode:0o700});
   const git = async (...args) => (await exec('git', args, { cwd })).stdout.trim();
   await git('init', '-b', 'main'); await git('config', 'user.email', 'test@example.invalid');
   await git('config', 'user.name', 'Runner Test'); await git('remote', 'add', 'origin', 'https://github.com/example/project.git');
@@ -30,15 +50,16 @@ async function fixture(t, options = {}) {
   const initial = await git('rev-parse', 'HEAD');
   await git('update-ref', 'refs/remotes/origin/main', initial);
   const calls = [], native = [], contexts = [];
-  const f = { cwd, sourceCwd, gitDir: join(cwd, '.git'), git, calls, native, contexts, initial, pr: null, merged: false, options, closes: 0 };
+  const f = { cwd, sourceCwd, herdrExecutable, gitDir: join(cwd, '.git'), git, calls, native, contexts, initial, pr: null, merged: false, options, closes: 0 };
   const plan = [[process.execPath, 'check.mjs']];
   async function execFile(file, args, opts) {
     calls.push({ file, args: [...args] });
+    if(file==='git'&&args[0]==='fetch'){const head=(await exec('git',['rev-parse',`refs/remotes/origin/${args[2]}`],opts)).stdout.trim();const path=(await exec('git',['rev-parse','--git-path','FETCH_HEAD'],opts)).stdout.trim();writeFileSync(resolve(opts.cwd,path),head+'\n');return {stdout:''};}
     if (file === 'git' && args[0] === 'push') {
       assert.equal(f.saved(native.at(-1).input.runId).pending.kind, 'pr', 'PR intent must be durable BEFORE push');
       if (options.preAuthPushFailure && !f.authFixed) throw Object.assign(Error('Username prompt timed out'), { code: 'ETIMEDOUT' });
       if (options.preAuthPushFailure) {
-        const events = readFileSync(join(f.gitDir, 'pdd/workflows', native.at(-1).input.runId, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        const events = journalRows(readFileSync(join(f.gitDir, 'pdd/workflows', native.at(-1).input.runId, 'journal.jsonl'),'utf8'));
         assert.equal(events.at(-1).event, 'pr.unpublished_retry_intent', 'explicit retry intent durable BEFORE recovered push');
       }
       return { stdout: '', stderr: '' };
@@ -68,7 +89,7 @@ async function fixture(t, options = {}) {
     }
     throw Error(`Unexpected fake GitHub command: ${args.join(' ')}`);
   }
-  const ports = { execFile, stdout: output, stderr: output,
+  const ports = { herdrExecutable,execFile,withWorkflowLock,inspectWorkflowLock,resolveWorkflowModel:async({agent,machineId})=>({state:'selected',selection:{machineId:machineId??null,agent,model:'observed-test-model',effort:null,cliVersion:'test',catalogRevision:'test',source:'defaults'}}), stdout: output, stderr: output,
     async loadGuidance(value) { contexts.push(value); return actualGuidance(value); },
     async launchNativeSession(value) {
       const input = JSON.parse(value.request.split('PDD_STAGE_INPUT_JSON\n')[1].split('\nPDD_STAGE_INPUT_END')[0]);
@@ -100,10 +121,12 @@ async function fixture(t, options = {}) {
         if (options.mutatingHandoff) contents = `import {readFileSync,writeFileSync} from 'node:fs'; const path=${JSON.stringify(input.handoffPath)}; const h=JSON.parse(readFileSync(path)); h.summary='changed during checks'; writeFileSync(path,JSON.stringify(h));\n`;
         add('check.mjs', contents, 'tests');
       }
-      if (files.length) {
-        await git('add', '.');
+      if (files.length && !(options.leaveScopeUncommitted && input.protocol !== 'work')) {
+        await git('add', ...(options.leaveScopeUncommitted ? ['--', ...files.map(file => file.path)] : ['.']));
         if (await git('status', '--porcelain')) await git('commit', '-m', input.stageId);
       }
+      if (options.unrelatedPublicationFile && input.protocol === 'verify')
+        writeFileSync(join(cwd, 'unrelated draft.txt'), 'preserve this unrelated work\n');
       const h = { version: 1, runId: input.runId, stageId: input.stageId, issueUrl,
         inputRevision: options.staleHandoff ? initial.replace(/^./, initial[0] === 'a' ? 'b' : 'a') : input.inputRevision,
         summary: `Completed current ${input.stageId}; observable expectations remain independent.`, files };
@@ -112,6 +135,8 @@ async function fixture(t, options = {}) {
       if (input.stageId === 'change' && options.emptyWork) h.files = [];
       writeFileSync(input.handoffPath, JSON.stringify(h)); return 0;
     } };
+  // Keep derived run records inside this disposable fixture; production defaults remain the user's home.
+  ports.home = indexHome;
   f.ports = ports;
   const assignments = new Map();
   if (!options.defaultWorktree) {
@@ -168,14 +193,14 @@ async function fixture(t, options = {}) {
       return ports.runHerdrStage(value, ...rest);
     } };
   f.run = (name = 'small-change', agent = 'claude') => runWorkflow({ name, issue: '17', agent, cwd, packageRoot: activePackageRoot }, executionPorts());
-  f.resume = (runId, decision) => resumeWorkflow({ runId, decision, cwd: options.defaultWorktree ? sourceCwd : cwd, packageRoot: activePackageRoot }, executionPorts());
-  f.saved = runId => readFileSync(join(f.gitDir, 'pdd', 'workflows', runId, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).at(-1).state;
+  f.resume = (runId, decision, binding = {}) => resumeWorkflow({ runId, decision, ...binding, cwd: options.defaultWorktree ? sourceCwd : cwd, packageRoot: activePackageRoot }, executionPorts());
+  f.saved = runId => journalRows(readFileSync(join(f.gitDir, 'pdd', 'workflows', runId, 'journal.jsonl'),'utf8')).at(-1).state;
   return f;
 }
 function projectWorkflow(f, marker = 'OWNED_RECIPE_A__') {
   const directory = join(f.sourceCwd, '.pdd', 'workflows', 'snapshot-check'); mkdirSync(directory, { recursive: true });
   const definition = { version: 1, name: 'snapshot-check', overview: 'WORKFLOW.md', stages: [
-    { id: 'agree', kind: 'agent', protocol: 'proposal', approval: 'next-advance', requiredRoles: ['cases'], file: 'plan.md' },
+    { id: 'agree', kind: 'agent', protocol: 'proposal', approval: 'next-advance', requiredRoles: ['prompt', 'story', 'cases'], file: 'plan.md' },
     { id: 'implement', kind: 'agent', protocol: 'work', requiredRoles: ['implementation'], file: 'work.md' },
     { id: 'prove', kind: 'agent', protocol: 'verify', file: 'check.md' },
     { id: 'publish', kind: 'pr', publication: 'verified', file: 'pr.md' },
@@ -184,6 +209,12 @@ function projectWorkflow(f, marker = 'OWNED_RECIPE_A__') {
   writeFileSync(join(directory, 'workflow.json'), JSON.stringify(definition));
   for (const file of ['WORKFLOW.md', 'plan.md', 'work.md', 'check.md', 'pr.md', 'merge.md']) writeFileSync(join(directory, file), `# ${marker}\nUse only this workflow's current stage.\n`);
   return directory;
+}
+
+function decisionBinding(f, runId) {
+  const saved = f.saved(runId);
+  return { decisionId: randomUUID(), expect: { stage: saved.definitions[saved.index].id, seq: saved.seq },
+    ...(saved.waitingPerson ? { expectedRev: saved.waitingPerson.rev } : {}) };
 }
 
 test('listed workflow totals distinguish native stages from human, optional and PR steps', () => {
@@ -201,7 +232,7 @@ test('small change pins scope, inspection launches nothing, native checks execut
   assert.equal(progressed.state, 'waiting', progressed.message); assert.equal(progressed.stage, 'wait-merge');
   assert.deepEqual(f.native.map(v => v.input.stageId), ['scope', 'change', 'verify']);
   assert.ok(f.native.every(v => v.agent === 'claude' && v.cwd === f.cwd && v.context.startsWith('# PDD Alpha conversation guidance')));
-  assert.ok(f.contexts.length >= 3); assert.ok(f.contexts.every(v => v.workflows === false));
+  assert.equal(f.contexts.length, 1); assert.ok(f.contexts.every(v => v.workflows === false));
   const saved = f.saved(started.runId); assert.equal(saved.completed.find(s => s.id === 'verify').handoff.checks[0].exitCode, 0);
   assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 1);
   f.merged = true; const done = await f.resume(started.runId);
@@ -219,7 +250,7 @@ test('whitespace changes in a space-bearing filename remain in the input fingerp
   assert.equal(next.state, 'failed'); assert.equal(f.native.length, 1);
 });
 
-for (const [label, options] of [['missing', { missingHandoff: true }], ['stale', { staleHandoff: true }]]) {
+for (const [label, options] of [['stale', { staleHandoff: true }]]) {
   test(`native zero with ${label} handoff does not complete its stage or automatically relaunch`, async t => {
     const f = await fixture(t, options); const first = await f.run(); assert.equal(first.state, 'failed');
     assert.equal(f.saved(first.runId).index, 0); const again = await f.resume(first.runId, 'approve');
@@ -377,7 +408,10 @@ test('a journal beyond the Node string limit resumes its latest optional stage w
     }
     const end = statSync(journal).size, tail = Buffer.alloc(Math.min(end, 512 * 1024));
     readSync(input, tail, 0, tail.length, end - tail.length);
-    const last = JSON.parse(tail.toString('utf8').trimEnd().split('\n').at(-1));
+    const complete=tail.toString('utf8').trimEnd().split('\n').slice(1);
+    const snapshot=complete.findIndex(line=>Object.hasOwn(JSON.parse(line),'state'));
+    assert.ok(snapshot>=0,'tail contains a retained legacy snapshot before the new deltas');
+    const last=journalRows(complete.slice(snapshot).join('\n')).at(-1);
     assert.ok(last.seq > rows); assert.equal(last.state.context, context);
     assert.equal(last.state.index, 1); assert.equal(last.state.completed[0].id, 'first');
     assert.equal(last.state.completed[0].skipped, true);
@@ -391,7 +425,7 @@ test('streamed journal validates earlier history and refuses malformed or partia
     await t.test(variant, async t => {
       const f = await fixture(t); const first = await f.run();
       const path = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
-      const rows = readFileSync(path, 'utf8').trimEnd().split('\n').map(JSON.parse);
+      const rows = journalRows(readFileSync(path,'utf8'));
       if (variant === 'sequence') { rows[0].seq = 10; rows[0].state.seq = 10; }
       if (variant === 'run') rows[0].state.runId = randomUUID();
       let raw = rows.map(JSON.stringify).join('\n') + '\n';
@@ -408,7 +442,7 @@ test('streamed journal validates earlier history and refuses malformed or partia
 test('streamed journal handles split UTF8 records and trailing whitespace without losing saved identity', async t => {
   const f = await fixture(t); const first = await f.run();
   const path = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
-  const rows = readFileSync(path, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  const rows = journalRows(readFileSync(path,'utf8'));
   rows[0].event = 'checkpoint 🎯 中文 '.repeat(20000);
   writeFileSync(path, rows.map(JSON.stringify).join('\n') + '\n \t\n');
   const before = f.native.length, response = await f.resume(first.runId);
@@ -444,7 +478,7 @@ test('separate prompt PR waits for real merge and refuses code work without its 
 test('saved run identity cannot be substituted under a different journal directory', async t => {
   const f = await fixture(t); const first = await f.run();
   const path = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
-  const rows = readFileSync(path, 'utf8').trim().split('\n').map(JSON.parse);
+  const rows = journalRows(readFileSync(path,'utf8'));
   for (const row of rows) row.state.runId = '00000000-0000-4000-8000-000000000000';
   writeFileSync(path, rows.map(JSON.stringify).join('\n') + '\n');
   const refused = await f.resume(first.runId, 'approve'); assert.equal(refused.state, 'failed'); assert.equal(f.native.length, 1);
@@ -534,7 +568,7 @@ test('saved optional skip survives interruption before skipped completion and ca
   f.ports.runHerdrStage = async () => { throw Error('synthetic next-stage stop before native'); };
   await f.resume(state.runId, 'skip');
   const journal = join(f.gitDir, 'pdd/workflows', state.runId, 'journal.jsonl');
-  const rows = readFileSync(journal, 'utf8').trim().split('\n').map(JSON.parse);
+  const rows = journalRows(readFileSync(journal,'utf8'));
   const boundary = rows.findIndex(row => row.event === 'optional.decision' && row.state.optional?.['prompt-pr']?.decision === 'skip');
   assert.ok(boundary >= 0); writeFileSync(journal, rows.slice(0, boundary + 1).map(JSON.stringify).join('\n') + '\n');
   const before = f.native.length; await f.resume(state.runId, 'approve');
@@ -553,6 +587,9 @@ test('editable renamed workflow snapshots full bytes BEFORE allocation and leave
   const before = (await exec('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: f.sourceCwd })).stdout;
   const state = await f.run('snapshot-check');
   assert.equal(state.state, 'waiting', state.message); assert.equal(state.stage, 'implement');
+  const saved = f.saved(state.runId);
+  assert.deepEqual(saved.proposal.files.map(file => file.role).sort(), ['cases', 'prompt', 'story']);
+  for (const file of saved.proposal.files) assert.equal(file.sha256, sha(readFileSync(join(f.cwd, file.path))));
   assert.ok(captured.baseContext.includes('Preservation sets the boundary'));
   assert.ok(captured.definition.files.some(file => file.content.includes('OWNED_RECIPE_A__')));
   assert.notEqual(f.cwd, f.sourceCwd); assert.equal(f.native[0].cwd, f.cwd);
@@ -560,30 +597,73 @@ test('editable renamed workflow snapshots full bytes BEFORE allocation and leave
   assert.ok(f.native[0].context.includes('OWNED_RECIPE_A__'));
   assert.equal(existsSync(join(f.sourceCwd, 'cases.json')), false);
   assert.equal((await exec('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: f.sourceCwd })).stdout, before);
-  const progressed = await f.resume(state.runId, 'approve');
+  const inspected = await f.resume(state.runId);
+  assert.equal(inspected.state, 'waiting', inspected.message); assert.equal(f.native.length, 1);
+  assert.equal(f.calls.filter(call => call.file === 'git' && call.args[0] === 'push' || call.file === 'gh' && call.args[1] === 'create').length, 0);
+  const progressed = await f.resume(state.runId, 'approve', decisionBinding(f, state.runId));
   assert.equal(progressed.stage, 'merged', progressed.message);
   assert.deepEqual(f.native.map(stage => stage.input.stageId), ['agree', 'implement', 'prove']);
   assert.equal(f.saved(state.runId).completed.find(stage => stage.id === 'prove').handoff.checks[0].exitCode, 0);
   assert.equal(f.native[1].backend.phase, 'closed', 'next stage donates only prior closed backend');
   assert.notEqual(f.native[1].attemptId, f.native[0].attemptId);
+  assert.deepEqual(f.saved(state.runId).assignment, saved.assignment);
 });
 test('changed recipe source or missing whole override cannot replace saved instructions on resume', async t => {
-  const f = await fixture(t); const directory = projectWorkflow(f); const first = await f.run('snapshot-check');
-  writeFileSync(join(directory, 'work.md'), '# OWNED_RECIPE_B__\nDifferent instructions.');
-  const refused = await f.resume(first.runId, 'approve');
-  assert.equal(refused.state, 'failed'); assert.match(refused.message, /definition or Markdown source changed/);
-  assert.equal(f.native.length, 1); assert.ok(f.saved(first.runId).context.includes('OWNED_RECIPE_A__'));
+  for (const mutation of ['edit', 'remove']) await t.test(mutation, async t => {
+    const f = await fixture(t); const directory = projectWorkflow(f); const first = await f.run('snapshot-check');
+    assert.equal(first.state, 'waiting', first.message); assert.equal(first.stage, 'implement');
+    const saved = f.saved(first.runId), binding = decisionBinding(f, first.runId);
+    const inputPath = join(f.sourceCwd, '.git/pdd/workflow-inputs', first.runId, 'input.jsonl');
+    const frozenBytes = readFileSync(inputPath);
+    if (mutation === 'edit') writeFileSync(join(directory, 'work.md'), '# OWNED_RECIPE_B__\nDifferent instructions.');
+    else rmSync(directory, { recursive: true });
+    const inspected = await f.resume(first.runId);
+    assert.equal(inspected.state, 'waiting', inspected.message); assert.equal(f.native.length, 1);
+    const stale = await f.resume(first.runId, 'approve', { ...binding, expect: { ...binding.expect, seq: binding.expect.seq - 1 } });
+    assert.equal(stale.state, 'waiting', stale.message); assert.equal(stale.code, 'stale_decision');
+    assert.equal(f.native.length, 1); assert.equal(f.closes, 1);
+    assert.equal(f.calls.filter(call => call.file === 'git' && call.args[0] === 'push' || call.file === 'gh' && call.args[1] === 'create').length, 0);
+    const progressed = await f.resume(first.runId, 'approve', binding);
+    assert.equal(progressed.state, 'waiting', progressed.message); assert.equal(progressed.stage, 'merged');
+    assert.deepEqual(f.native.map(stage => stage.input.stageId), ['agree', 'implement', 'prove']);
+    assert.ok(f.native.every(stage => stage.context === saved.context && !stage.context.includes('OWNED_RECIPE_B__')));
+    const after = f.saved(first.runId);
+    assert.equal(after.context, saved.context); assert.deepEqual(after.definition, saved.definition);
+    assert.deepEqual(after.assignment, saved.assignment); assert.deepEqual(readFileSync(inputPath), frozenBytes);
+  });
 });
-test('full canonical guide/skill context is bound separately from the recipe digest', async t => {
+test('original guide edits retain the full frozen guide and require a current bound decision to progress', async t => {
   const localPackage = mkdtempSync(join(tmpdir(), 'pdd-context-package-'));
   t.after(() => rmSync(localPackage, { recursive: true, force: true }));
   for (const directory of ['docs', 'skills', '.pdd']) cpSync(join(packageRoot, directory), join(localPackage, directory), { recursive: true });
   const f = await fixture(t, { packageRoot: localPackage }); const first = await f.run();
+  assert.equal(first.state, 'waiting', first.message); assert.equal(first.stage, 'change');
+  const saved = f.saved(first.runId), binding = decisionBinding(f, first.runId);
+  const inputPath = join(f.sourceCwd, '.git/pdd/workflow-inputs', first.runId, 'input.jsonl');
+  const frozenBytes = readFileSync(inputPath);
+  const journalPath = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
+  const journalBytes = readFileSync(journalPath);
   const guide = join(localPackage, 'docs', 'prompting-guide.md');
-  writeFileSync(guide, readFileSync(guide, 'utf8') + '\nChanged canonical guide after acceptance.\n');
-  const refused = await f.resume(first.runId, 'approve');
-  assert.equal(refused.state, 'failed'); assert.match(refused.message, /Canonical guide\/skill\/context changed/);
-  assert.equal(f.native.length, 1);
+  const originalGuide = readFileSync(guide, 'utf8'), marker = 'CHANGED_ORIGINAL_GUIDE_AFTER_ACCEPTANCE__';
+  assert.ok(saved.context.includes(originalGuide));
+  assert.ok(JSON.parse(frozenBytes).baseContext.includes(originalGuide));
+  writeFileSync(guide, originalGuide + `\n${marker}\n`);
+  const inspected = await f.resume(first.runId);
+  assert.equal(inspected.state, 'waiting', inspected.message); assert.equal(inspected.stage, 'change');
+  const stale = await f.resume(first.runId, 'approve', { ...binding, expect: { ...binding.expect, seq: binding.expect.seq - 1 } });
+  assert.equal(stale.state, 'waiting', stale.message); assert.equal(stale.code, 'stale_decision');
+  assert.equal(f.native.length, 1); assert.equal(f.closes, 1);
+  assert.deepEqual(readFileSync(journalPath), journalBytes);
+  assert.equal(f.calls.filter(call => call.file === 'git' && call.args[0] === 'push' || call.file === 'gh' && call.args[1] === 'create').length, 0);
+  const progressed = await f.resume(first.runId, 'approve', binding);
+  assert.equal(progressed.state, 'waiting', progressed.message); assert.equal(progressed.stage, 'wait-merge');
+  assert.deepEqual(f.native.map(stage => stage.input.stageId), ['scope', 'change', 'verify']);
+  assert.ok(f.native.every(stage => stage.context === saved.context && stage.context.includes(originalGuide) && !stage.context.includes(marker)));
+  const after = f.saved(first.runId);
+  assert.equal(after.context, saved.context); assert.equal(after.contextDigest, saved.contextDigest);
+  assert.deepEqual(after.definition, saved.definition); assert.deepEqual(after.assignment, saved.assignment);
+  assert.deepEqual(readFileSync(inputPath), frozenBytes); assert.equal(f.contexts.length, 1);
+  assert.equal(after.completed.find(stage => stage.id === 'verify').handoff.checks[0].exitCode, 0);
 });
 test('same-name workflows in separate projects retain distinct accepted content and assigned contexts', async t => {
   const a = await fixture(t), c = await fixture(t); projectWorkflow(a); projectWorkflow(c, 'OWNED_RECIPE_C__');
@@ -592,6 +672,14 @@ test('same-name workflows in separate projects retain distinct accepted content 
   assert.ok(a.native[0].context.includes('OWNED_RECIPE_A__')); assert.ok(!a.native[0].context.includes('OWNED_RECIPE_C__'));
   assert.ok(c.native[0].context.includes('OWNED_RECIPE_C__')); assert.ok(!c.native[0].context.includes(a.sourceCwd));
   assert.notEqual(a.saved(sa.runId).definition.digest, c.saved(sc.runId).definition.digest);
+  assert.notEqual(sa.runId, sc.runId);
+  for (const [f, state] of [[a, sa], [c, sc]]) {
+    const saved = f.saved(state.runId);
+    assert.equal(saved.assignment.runId, state.runId); assert.equal(saved.assignment.sourceRoot, f.sourceCwd);
+    assert.equal(saved.assignment.worktreePath, f.cwd); assert.equal(saved.assignment.gitDir, f.gitDir);
+    assert.equal(saved.definition.root, join(f.sourceCwd, '.pdd/workflows/snapshot-check'));
+    assert.ok(f.native[0].context.includes(`Current assigned project: ${f.cwd}`));
+  }
 });
 for (const variant of ['torn', 'tampered', 'symlink', 'hardlink']) {
   test(`saved preallocation input ${variant} refuses without reconstructing current context`, async t => {
@@ -685,8 +773,9 @@ test('cross-process attachment excludes acceptance and invalidates the earlier c
   const runId = f.native[0].input.runId, assignment = f.saved(runId).assignment;
   const script = `import {attachWorkflow} from ${JSON.stringify(new URL('../src/workflow-runner.mjs', import.meta.url).href)};
     import {loadGuidance} from ${JSON.stringify(new URL('../src/guidance.mjs', import.meta.url).href)};
+    const {withWorkflowLock,inspectWorkflowLock}=await import(${JSON.stringify(new URL('./cli/workflow-test-lock.mjs', import.meta.url).href)});
     const result=await attachWorkflow({runId:${JSON.stringify(runId)},cwd:${JSON.stringify(f.sourceCwd)},packageRoot:${JSON.stringify(packageRoot)}}, {
-      loadGuidance,lookupIssueWorktree:async()=>({state:'ready',assignment:${JSON.stringify(assignment)}}), allocateIssueWorktree:async()=>{throw Error('no allocation')},
+      loadGuidance,withWorkflowLock,inspectWorkflowLock,lookupIssueWorktree:async()=>({state:'ready',assignment:${JSON.stringify(assignment)}}), allocateIssueWorktree:async()=>{throw Error('no allocation')},
       attachHerdrStage:async()=>{process.stdout.write('ATTACHED\\n');await new Promise(resolve=>process.stdin.once('data',resolve));return 0;}});
     process.stdout.write(JSON.stringify(result)+'\\n');`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: f.sourceCwd, stdio: ['pipe','pipe','pipe'] });
@@ -705,78 +794,54 @@ test('cross-process attachment excludes acceptance and invalidates the earlier c
   assert.equal(f.native.length, 1); assert.equal(f.closes, 1);
 });
 
-test('fresh-process resume refuses edited source before any replacement stage delivery', async t => {
+test('fresh-process resume preserves frozen recipe and refuses a stale decision before any replacement stage delivery', async t => {
   const f = await fixture(t); const directory = projectWorkflow(f); const first = await f.run('snapshot-check');
+  assert.equal(first.state, 'waiting', first.message);
   const assignment = f.saved(first.runId).assignment;
+  const binding = decisionBinding(f, first.runId);
+  binding.expect.seq--;
+  const journalPath = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
+  const journalBytes = readFileSync(journalPath);
   writeFileSync(join(directory, 'work.md'), '# OWNED_RECIPE_B__\nChanged after accepted A.\n');
   const script = `import {resumeWorkflow} from ${JSON.stringify(new URL('../src/workflow-runner.mjs', import.meta.url).href)};
     import {loadGuidance} from ${JSON.stringify(new URL('../src/guidance.mjs', import.meta.url).href)};
     import {execFile as callback} from 'node:child_process';import {promisify} from 'node:util';const exec=promisify(callback);
-    const result=await resumeWorkflow(${JSON.stringify({runId:first.runId,cwd:f.sourceCwd,packageRoot,decision:'approve'})},{loadGuidance,
-      lookupIssueWorktree:async()=>({state:'ready',assignment:${JSON.stringify(assignment)}}),allocateIssueWorktree:async()=>{throw Error('no allocation')},
-      runHerdrStage:async()=>{throw Error('UNEXPECTED_STAGE_DELIVERY');},
-      execFile:async(file,args,options)=>file==='gh'?{stdout:JSON.stringify(args[0]==='repo'?{nameWithOwner:'example/project',defaultBranchRef:{name:'main'},url:'https://github.com/example/project'}:{number:17,html_url:${JSON.stringify(issueUrl)},title:'Use two',body:'Two',isPullRequest:false})}:exec(file,args,options)});
-    process.stdout.write(JSON.stringify(result));`;
+    const {withWorkflowLock,inspectWorkflowLock}=await import(${JSON.stringify(new URL('./cli/workflow-test-lock.mjs', import.meta.url).href)});
+    const effects=[];
+    const result=await resumeWorkflow(${JSON.stringify({runId:first.runId,cwd:f.sourceCwd,packageRoot,decision:'approve',...binding})},{loadGuidance,withWorkflowLock,inspectWorkflowLock,
+      lookupIssueWorktree:async()=>({state:'ready',assignment:${JSON.stringify(assignment)}}),allocateIssueWorktree:async()=>{effects.push('allocation');throw Error('no allocation')},
+      runHerdrStage:async()=>{effects.push('stage');throw Error('UNEXPECTED_STAGE_DELIVERY');},
+      execFile:async(file,args,options)=>{
+        if(file==='git'&&args[0]==='push'||file==='gh'&&args[1]==='create'){effects.push('publication');throw Error('UNEXPECTED_PUBLICATION');}
+        return file==='gh'?{stdout:JSON.stringify(args[0]==='repo'?{nameWithOwner:'example/project',defaultBranchRef:{name:'main'},url:'https://github.com/example/project'}:{number:17,html_url:${JSON.stringify(issueUrl)},title:'Use two',body:'Two',isPullRequest:false})}:exec(file,args,options);}});
+    process.stdout.write(JSON.stringify({result,effects}));`;
   const child = await exec(process.execPath, ['--input-type=module', '-e', script], { cwd: f.sourceCwd });
-  const refused = JSON.parse(child.stdout);
-  assert.equal(refused.state, 'failed'); assert.match(refused.message, /definition or Markdown source changed/);
+  const {result: refused, effects} = JSON.parse(child.stdout);
+  assert.equal(refused.state, 'waiting', refused.message); assert.equal(refused.code, 'stale_decision');
+  assert.deepEqual(effects, []); assert.deepEqual(readFileSync(journalPath), journalBytes);
   assert.equal(f.native.length, 1); assert.equal(f.saved(first.runId).index, 1);
+  assert.ok(f.saved(first.runId).context.includes('OWNED_RECIPE_A__'));
+  assert.ok(!f.saved(first.runId).context.includes('OWNED_RECIPE_B__'));
 });
 
-test('main joins frozen native adapter through same-agent first dispatch, accepted cleanup and next-stage server donation', async t => {
-  const f = await fixture(t, { defaultWorktree: true }); const foreground = f.ports.launchNativeSession;
-  const sessions = new Map(), calls = [];
-  function transport(base) {
-    return {...base, pollMs: 1, startupMs: 100, activityMs: 100, timeoutMs: 1000,
-      sleep: async () => {},
-      spawnServer: async (session, cwd) => { assert.equal(cwd,f.cwd); sessions.set(session,{seed:'seed',active:null}); calls.push('server'); },
-      execFile: async (file, argv, options) => {
-        assert.equal(file,'herdr'); assert.equal(options.cwd,f.cwd); assert.equal(options.shell,false);
-        const session=argv[1], a=argv.slice(2), server=sessions.get(session);
-        const reply=value=>({stdout:JSON.stringify(value),stderr:''});
-        if(a[0]==='status') return reply({running:Boolean(server),session,compatible:true,endpoint_compatible:true,protocol:22,version:'0.9.1',socket:`/owned/${session}`});
-        if(a[0]==='workspace'&&a[1]==='list') return reply({id:'cli:workspace:list',result:{type:'workspace_list',workspaces:[{workspace_id:'seed'},...(server.active?[{workspace_id:server.active.workspace_id}]:[])]}});
-        if(a[0]==='workspace'&&a[1]==='create') {
-          assert.equal(server.active,null);const id=`stage-${calls.filter(x=>x==='create').length}`;calls.push('create');
-          server.active={workspace_id:id,tab_id:`${id}:tab`,pane_id:`${id}:pane`,terminal_id:`${id}:terminal`,cwd:f.cwd,agent_status:'idle',state_change_seq:10,interactive_ready:true,launch_pending:false};
-          return reply({result:{workspace:{workspace_id:id},tab:{tab_id:server.active.tab_id},root_pane:{pane_id:server.active.pane_id,terminal_id:server.active.terminal_id}}});
-        }
-        const native=server.active;
-        if(a[0]==='agent'&&a[1]==='start') {calls.push('start');native.name=a[2];native.agent=a[a.indexOf('--kind')+1];if(calls.filter(x=>x==='start').length===1){native.agent_status='blocked';native.interactive_ready=false;}return reply({result:{agent:native}});}
-        if(a[0]==='agent'&&a[1]==='get') return reply({result:{agent:native}});
-        if(a[0]==='agent'&&a[1]==='prompt') {
-          calls.push('prompt');assert.equal(native.state_change_seq,10);
-          const marker='\n\n# Current workflow stage\n', index=a[3].lastIndexOf(marker);
-          await foreground({agent:native.agent,cwd:f.cwd,context:a[3].slice(0,index),request:a[3].slice(index+marker.length)});
-          native.agent_status='working';native.interactive_ready=false;native.state_change_seq=11;
-          const acknowledgement=structuredClone(native);
-          queueMicrotask(()=>{native.agent_status='done';native.interactive_ready=true;native.state_change_seq=12;});
-          return reply({result:{agent:acknowledgement}});
-        }
-        if(a[0]==='workspace'&&a[1]==='close') {calls.push('close');assert.equal(a[2],native.workspace_id);server.active=null;return reply({id:'cli:workspace:close',result:{type:'ok'}});}
-        assert.fail('Unexpected stand-in Herdr operation '+JSON.stringify(a));
-      }};
-  }
-  f.ports.runHerdrStage=(input,ports)=>runHerdrStage(input,transport(ports));
-  f.ports.inspectHerdrStage=(input,ports)=>inspectHerdrStage(input,transport(ports));
-  f.ports.closeHerdrStage=(input,ports)=>closeHerdrStage(input,transport(ports));
-  const first=await f.run();assert.equal(first.state,'waiting',first.message);assert.equal(first.stage,'scope');
-  const original=f.saved(first.runId).pending;assert.equal(original.backend.phase,'start_intent');
-  assert.equal(calls.filter(x=>x==='prompt').length,0);assert.equal(calls.filter(x=>x==='start').length,1);
-  const inspection=await f.resume(first.runId);assert.equal(inspection.state,'waiting',inspection.message);
-  assert.equal(calls.filter(x=>x==='prompt').length,0);assert.equal(calls.filter(x=>x==='start').length,1);
-  const live=[...sessions.values()][0].active;live.agent_status='idle';live.interactive_ready=true;
-  const continued=await f.resume(first.runId,'approve');assert.equal(continued.stage,'change',continued.message);
-  const accepted=f.saved(first.runId).completed[0];
-  assert.equal(accepted.backend.attemptId,original.attemptId);assert.equal(accepted.backend.terminalId,original.backend.terminalId);
-  assert.equal(calls.filter(x=>x==='start').length,1);assert.equal(calls.filter(x=>x==='create').length,1);
-  assert.equal(calls.filter(x=>x==='prompt').length,1);
-  const progressed=await f.resume(first.runId,'approve');assert.equal(progressed.stage,'wait-merge',progressed.message);
-  assert.equal(calls.filter(x=>x==='server').length,1);assert.equal(calls.filter(x=>x==='prompt').length,3);assert.equal(calls.filter(x=>x==='close').length,3);
-  const saved=f.saved(first.runId), stages=saved.completed.filter(stage=>stage.backend);
-  assert.equal(new Set(stages.map(stage=>stage.backend.terminalId)).size,3);
-  for(const stage of stages) {assert.equal(stage.backend.phase,'closed');assert.match(stage.acceptance.evidenceDigest,/^[a-f0-9]{64}$/);}
-  assert.equal([...sessions.values()][0].active,null);
+test('main transports real handoffs through process-proved stage panes and preserves the controller tab',async t=>{
+  const f=await fixture(t,{defaultWorktree:true}),foreground=f.ports.launchNativeSession,calls=[];let active=null,paneCount=0;
+  f.ports.controller={herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'controller'};
+  const transport=base=>({...base,validateLaunchSelection:async()=>true,nativeArgs:({selection,...input})=>[...(input.agent==='codex'?['--dangerously-bypass-approvals-and-sandbox']:['--dangerously-skip-permissions']),...(selection?['--model',selection.model]:[])],pollMs:1,observeMs:100,processStartIdentity:async()=> 'process-start',claimWorkflowSession:async()=>({state:'owned',release:async()=>{}}),promoteWorkflowClaim:async({claim})=>claim,
+    execFile:async(file,argv,opts)=>{assert.equal(file,f.herdrExecutable);assert.equal(argv[1],'default');const a=argv.slice(2);calls.push(a);const encode=x=>({stdout:JSON.stringify(x)});
+      const agent=()=>({workspace_id:'w1',tab_id:'w1:t1',pane_id:active.pane,terminal_id:active.terminal,name:active.name,agent:'claude',cwd:f.cwd,agent_status:active.prompted?'done':'idle',interactive_ready:true,launch_pending:false,state_change_seq:active.prompted?3:1,agent_session:{kind:'id',agent:'claude',value:active.native}});
+      if(a[0]==='pane'&&a[1]==='split'){active={pane:'stage-'+ ++paneCount,terminal:'terminal-'+paneCount,native:randomUUID()};return encode({result:{pane:{workspace_id:'w1',tab_id:'w1:t1',pane_id:active.pane,terminal_id:active.terminal}}});}
+      if(a[0]==='pane'&&a[1]==='process-info')return encode({result:{process_info:{pane_id:active.pane,foreground_processes:[{pid:123,name:'claude',cwd:f.cwd,argv:['claude']}]}}});
+      if(a[0]==='agent'&&a[1]==='start'){active.name=a[2];return encode({result:{agent:agent()}});}
+      if(a[0]==='agent'&&a[1]==='get')return encode({result:{agent:agent()}});
+      if(a[0]==='agent'&&a[1]==='prompt'){await foreground({agent:'claude',cwd:f.cwd,context:a[3],request:a[3]});active.prompted=true;return encode({result:{agent:{...agent(),agent_status:'working',state_change_seq:2}}});}
+      if(a[0]==='pane'&&a[1]==='close'){assert.equal(a[2],active.pane);active=null;return encode({id:'cli:pane:close',result:{type:'ok'}});}
+      if(a[0]==='pane'&&a[1]==='list')return encode({result:{type:'pane_list',panes:[{pane_id:'controller'},{pane_id:'person'}]}});
+      assert.fail(JSON.stringify(a));
+    }});
+  f.ports.runHerdrStage=(input,ports)=>runHerdrStage(input,transport(ports));f.ports.inspectHerdrStage=(input,ports)=>inspectHerdrStage(input,transport(ports));f.ports.closeHerdrStage=(input,ports)=>closeHerdrStage(input,transport(ports));
+  const first=await f.run();assert.equal(first.state,'waiting',first.message);const next=await f.resume(first.runId,'approve');assert.equal(next.stage,'wait-merge',next.message);
+  assert.equal(calls.filter(a=>a[0]==='agent'&&a[1]==='prompt').length,3);assert.equal(calls.filter(a=>a[0]==='pane'&&a[1]==='close').length,3);assert.ok(!calls.some(a=>['server','workspace','tab'].includes(a[0])));
 });
 
 test('resume owns the controller lock before reading the journal and cannot advance a stale optional snapshot', async t => {
@@ -798,8 +863,8 @@ test('resume owns the controller lock before reading the journal and cannot adva
     const {resumeWorkflow}=await import(${JSON.stringify(new URL('../src/workflow-runner.mjs',import.meta.url).href)});
     const {loadGuidance}=await import(${JSON.stringify(new URL('../src/guidance.mjs',import.meta.url).href)});
     const {execFile:callback}=await import('node:child_process');const {promisify}=await import('node:util');const exec=promisify(callback);
-    const result=await resumeWorkflow(${JSON.stringify({runId:first.runId,cwd:f.sourceCwd,packageRoot,decision:'approve'})},{loadGuidance,
-      allocateIssueWorktree:async()=>{throw Error('No allocation');},lookupIssueWorktree:async()=>({state:'ready',assignment:${JSON.stringify(saved.assignment)}}),
+    const {withWorkflowLock,inspectWorkflowLock}=await import(${JSON.stringify(new URL('./cli/workflow-test-lock.mjs', import.meta.url).href)});const result=await resumeWorkflow(${JSON.stringify({runId:first.runId,cwd:f.sourceCwd,packageRoot,decision:'approve'})},{loadGuidance,withWorkflowLock,inspectWorkflowLock,
+      resolveWorkflowModel:async()=>({state:'selected',selection:${JSON.stringify(saved.launchSelection)}}),allocateIssueWorktree:async()=>{throw Error('No allocation');},lookupIssueWorktree:async()=>({state:'ready',assignment:${JSON.stringify(saved.assignment)}}),
       execFile:async(file,args,options)=>file==='gh'?{stdout:JSON.stringify(args[0]==='repo'?{nameWithOwner:'example/project',defaultBranchRef:{name:'main'},url:'https://github.com/example/project'}:{number:17,html_url:${JSON.stringify(issueUrl)},title:'Report',body:'Report only',isPullRequest:false})}:exec(file,args,options),
       runHerdrStage:async(input)=>{const data=JSON.parse(input.instructions.split('PDD_STAGE_INPUT_JSON\\n')[1].split('\\nPDD_STAGE_INPUT_END')[0]);
         fs.writeFileSync(data.handoffPath,JSON.stringify({version:1,runId:input.runId,stageId:input.stageId,issueUrl:${JSON.stringify(issueUrl)},inputRevision:data.inputRevision,summary:'Substantive report for this stage only.',files:[]}));
@@ -817,7 +882,7 @@ test('resume owns the controller lock before reading the journal and cannot adva
     competing=await f.resume(first.runId,'skip');
   }finally{writeFileSync(releasePath,'release');}
   assert.equal(await closed,0,output+errors);
-  const rows=readFileSync(journal,'utf8').trim().split('\n').map(JSON.parse);
+  const rows=journalRows(readFileSync(journal,'utf8'));
   t.diagnostic(`Competing controller: ${competing?.state}; duplicate sequences: ${new Set(rows.map(row=>row.seq)).size!==rows.length}`);
   assert.equal(competing.state,'failed',competing.message);assert.match(competing.message,/Another workflow command/);
   assert.equal(new Set(rows.map(row=>row.seq)).size,rows.length);
@@ -841,7 +906,9 @@ test('verified publication refuses source changed by a later report despite earl
     }
     return result;
   };
-  const first=await f.run('snapshot-check'), refused=await f.resume(first.runId,'approve');
+  const first=await f.run('snapshot-check');
+  assert.equal(first.state,'waiting',first.message);assert.equal(first.stage,'implement');
+  const refused=await f.resume(first.runId,'approve',decisionBinding(f,first.runId));
   assert.equal(refused.state,'failed',refused.message);assert.match(refused.message,/checks for this exact current source/);
   const verified=f.saved(first.runId).completed.find(stage=>stage.id==='prove');assert.equal(verified.handoff.checks[0].exitCode,0);
   assert.notEqual(verified.verification.output.head,await f.git('rev-parse','HEAD'));
@@ -917,7 +984,7 @@ async function unsentFirstDispatch(t, phase) {
   const first = await f.run(); assert.equal(first.state, 'waiting', first.message); assert.equal(f.native.length, 0);
   const journal = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
   return { f, first, calls, observations, rewrite(change) {
-    const rows = readFileSync(journal, 'utf8').trim().split('\n').map(JSON.parse);
+    const rows = journalRows(readFileSync(journal,'utf8'));
     change(rows.at(-1).state); writeFileSync(journal, rows.map(JSON.stringify).join('\n') + '\n');
   } };
 }
@@ -960,4 +1027,650 @@ test('first-dispatch continuation refuses changed original request or worktree b
   writeFileSync(join(f.cwd, 'value.mjs'), 'export const value = 9;\n');
   const changed = await f.resume(first.runId, 'approve');
   assert.equal(changed.state, 'failed'); assert.match(changed.message, /HEAD or worktree changed/); assert.equal(calls.length, 1);
+});
+
+// Expectations below are the P1 contract vectors; test adapters supply observations,
+// never a model, live GitHub account, or an implementation-derived expected answer.
+const p1Vectors=JSON.parse(readFileSync(join(packageRoot,'vectors/cli/workflow-runner-p1.json'),'utf8'));
+const p1Case=id=>p1Vectors.cases.find(c=>c.id===id).expected;
+async function p1Fixture(t,options={}) {
+  const f=await fixture(t,options),frozen=new Map();
+  const runtime={v:1,releaseId:'synthetic-release',versionRoot:packageRoot,packageRoot,node:process.execPath,herdr:f.herdrExecutable,bin:join(packageRoot,'bin','pdd.mjs'),pddVersion:'0.1.0',alphaDigest:'a'.repeat(64),clientDigest:null,nodeVersion:process.version,credentialHelper:null};
+  f.ports.runtime=runtime;
+  f.ports.freezeWorkflowInputs=async input=>{
+    const directory=join(input.runDir,'frozen');mkdirSync(directory);const bytes=JSON.stringify(input);writeFileSync(join(directory,'inputs.json'),bytes);frozen.set(input.runDir,sha(bytes));return {runtime};
+  };
+  f.ports.checkWorkflowRuntime=async ({runDir})=>({ok:existsSync(join(runDir,'frozen','inputs.json'))&&sha(readFileSync(join(runDir,'frozen','inputs.json')))===frozen.get(runDir)});
+  f.ports.controller={herdrSession:'default',workspaceId:'workspace',tabId:'run-tab',paneId:'controller'};
+  f.ports.processStartIdentity=async()=> 'controller-process-start';
+  const command=f.ports.execFile;
+  f.ports.execFile=async(file,args,opts)=>file===f.herdrExecutable?{stdout:JSON.stringify({result:{process_info:{pane_id:'controller',foreground_processes:[{pid:process.pid,argv:[process.execPath,runtime.bin,'workflow','drive',f.activeId,...(f.activeDrive?.launchId?['--launch-id',f.activeDrive.launchId]:[]),...(f.activeDrive?.decision?['--decision',f.activeDrive.decision,'--id',f.activeDrive.decisionId,'--rev',String(f.activeDrive.expectedRev)]:[]),...(f.activeDrive?.expect?['--expect-stage',f.activeDrive.expect.stage,'--expect-seq',String(f.activeDrive.expect.seq)]:[])]}]}}})}:command(file,args,opts);
+  f.prepare=async (extra={})=>{
+    const value=await prepareWorkflow({name:'small-change',issue:'17',agent:'claude',cwd:f.sourceCwd,packageRoot,...extra},f.ports);f.activeId=value.runId;return value;
+  };
+  f.drive=(extra={})=>{f.activeDrive=extra;return driveWorkflow({runId:f.activeId,cwd:f.sourceCwd,packageRoot,...extra},f.ports);};
+  f.rewrite=change=>{const path=join(f.gitDir,'pdd/workflows',f.activeId,'journal.jsonl'),rows=journalRows(readFileSync(path,'utf8'));change(rows.at(-1).state);writeFileSync(path,rows.map(JSON.stringify).join('\n')+'\n');};
+  return f;
+}
+
+test('P1 prepare-no-agent and display-index-failure-recovery: freeze and registry precede effects',async t=>{
+  const f=await p1Fixture(t);f.ports.appendRunIndex=async()=>{throw Error('display index offline');};
+  const prepared=await f.prepare();assert.equal(prepared.state,p1Case('prepare-no-agent').state,prepared.message);assert.equal(f.native.length,p1Case('prepare-no-agent').stagePrompts);
+  const locator=JSON.parse(readFileSync(join(f.ports.home,'.pdd/runs/registry',prepared.runId+'.json')));assert.equal(locator.runDir,prepared.runDir);assert.equal(locator.commonDir,join(f.sourceCwd,'.git'));
+  assert.ok(existsSync(join(prepared.runDir,'frozen/inputs.json')));const j=await readWorkflowJournal({runDir:prepared.runDir});assert.equal(j.seq,j.state.seq);assert.equal(j.state.runtime.releaseId,'synthetic-release');assert.equal(j.state.pending,null);
+  const driven=await f.drive();assert.equal(driven.exitCode,p1Case('human-exit').exitCode,driven.message);const saved=f.saved(prepared.runId);assert.equal(saved.controlState,p1Case('human-exit').controlState);assert.equal(saved.controller.started,true);
+  assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
+});
+
+test('P1 frozen-resume, stale-rev and duplicate binding retain the original selection and request',async t=>{
+  const f=await p1Fixture(t);const prepared=await f.prepare();await f.drive();const waiting=f.saved(prepared.runId),rev=waiting.rev,id=randomUUID(),before=f.native.length;
+  const stale=await f.drive({decision:'approve',decisionId:id,expectedRev:rev-1});assert.equal(stale.code,p1Case('stale-rev').code);assert.equal(f.native.length,before);
+  f.ports.loadGuidance=async()=>{throw Error('mutable guidance is unavailable');};
+  f.ports.resolveWorkflowModel=async ({agent,machineId,selection})=>({state:'selected',selection:{...waiting.launchSelection,agent,machineId,...selection,source:'override'}});
+  const progressed=await f.drive({decision:'approve',decisionId:id,expectedRev:rev});assert.equal(progressed.state,'waiting',progressed.message);assert.equal(progressed.stage,'wait-merge');assert.equal(f.native.at(-1).context,waiting.context);
+  const sends=f.native.length,pushes=f.calls.filter(c=>c.file==='git'&&c.args[0]==='push').length;
+  assert.equal((await f.drive({decision:'approve',decisionId:id,expectedRev:rev})).state,'waiting');assert.equal(f.native.length,sends);assert.equal(f.calls.filter(c=>c.file==='git'&&c.args[0]==='push').length,pushes);
+  assert.equal((await f.drive({decision:'skip',decisionId:id,expectedRev:rev})).code,'bad_args');
+});
+
+test('P1 changed-accepted-file and changed frozen bytes start no native process',async t=>{
+  const f=await p1Fixture(t),prepared=await f.prepare();await f.drive();const s=f.saved(prepared.runId),n=f.native.length;
+  writeFileSync(join(f.cwd,'cases.json'),'[{"expected":9}]\n');assert.equal((await f.drive({decision:'approve',decisionId:randomUUID(),expectedRev:s.rev})).state,'failed');assert.equal(f.native.length,n);
+  writeFileSync(join(prepared.runDir,'frozen/inputs.json'),'changed frozen inputs');assert.equal((await f.drive()).state,'failed');assert.equal(f.native.length,n);
+});
+
+test('P1 preallocated target id reconciles only the complete immutable original request',async t=>{
+  const f=await p1Fixture(t),runId=randomUUID();f.ports.startRequestBinding={targetMachineId:'target',startId:runId,kind:'workflow',agent:'claude',repository:{url:'ssh://git@github.com/example/project.git',ref:f.initial},workflow:{name:'small-change',issue:'17'}};
+  const options={runId,machineId:'target'},prepared=await f.prepare(options);assert.equal(prepared.state,'prepared',prepared.message);assert.equal(prepared.runId,runId);assert.equal(f.native.length,0);
+  assert.deepEqual(await f.prepare(options),prepared);
+  f.ports.startRequestBinding={...f.ports.startRequestBinding,repository:{...f.ports.startRequestBinding.repository,ref:'f'.repeat(40)}};
+  assert.equal((await f.prepare(options)).state,'recovery_required');assert.equal(f.native.length,0);
+});
+
+test('P1 explicit adoption archives the exact prior journal without approval or launch; missing runtime stays unadopted',async t=>{
+  const f=await p1Fixture(t),first=await f.run();f.activeId=first.runId;const path=join(f.gitDir,'pdd/workflows',first.runId,'journal.jsonl'),original=readFileSync(path),n=f.native.length;
+  const adopted=await adoptWorkflow({runId:first.runId,cwd:f.sourceCwd,packageRoot},f.ports);assert.equal(adopted.state,'waiting',adopted.message);const s=f.saved(first.runId);assert.deepEqual(readFileSync(join(s.adopted.archive,'journal.jsonl')),original);assert.equal(f.native.length,n);assert.equal(s.accepted,undefined);assert.equal(s.controller,undefined);
+  assert.equal((await adoptWorkflow({runId:first.runId,cwd:f.sourceCwd,packageRoot},f.ports)).state,'waiting');
+  const other=await p1Fixture(t),legacy=await other.run();delete other.ports.runtime;other.activeId=legacy.runId;other.rewrite(s=>{delete s.runtime;});
+  assert.equal((await adoptWorkflow({runId:legacy.runId,cwd:other.sourceCwd,packageRoot},other.ports)).state,p1Case('adopt-incomplete').state);assert.equal(other.saved(legacy.runId).adopted,undefined);
+});
+
+test('P1 unknown control state and activation drain refuse without journal or agent effects',async t=>{
+  const f=await p1Fixture(t),prepared=await f.prepare(),path=join(prepared.runDir,'journal.jsonl');f.rewrite(s=>{s.controlState='future_state';s.future={keep:true};});const bytes=readFileSync(path);
+  assert.equal((await f.drive()).state,'recovery_required');assert.deepEqual(readFileSync(path),bytes);assert.equal(f.native.length,0);
+  f.ports.withWorkflowAdmission=async()=>{throw Error('draining');};assert.equal((await f.drive()).state,'waiting');assert.equal(f.native.length,0);
+});
+
+test('P1 unsupported frozen model blocks without substituting the new defaults',async t=>{
+  const f=await p1Fixture(t);await f.prepare();f.ports.resolveWorkflowModel=async()=>({state:'refused'});const r=await f.drive();assert.equal(r.state,'waiting',r.message);assert.match(r.message,/unsupported/);assert.equal(f.native.length,0);
+});
+
+test('P1 advisory publication finding is redacted and does not bypass real checks or block authorized publication',async t=>{
+  const f=await fixture(t);f.ports.scanWorkflowPublication=async()=>({verified:true,findings:[{secret:'never-print-this-synthetic-value'}]});const first=await f.run();assert.equal((await f.resume(first.runId,'approve')).stage,'wait-merge');assert.match(f.pr.body,/redacted/);assert.ok(!f.pr.body.includes('never-print'));assert.equal(f.saved(first.runId).publicationAdvisory.needsYou,true);assert.equal(f.saved(first.runId).completed.find(s=>s.id==='verify').handoff.checks[0].exitCode,0);
+});
+
+async function p1Active(t) {
+  const f=await p1Fixture(t);f.requests=[];
+  f.ports.runHerdrStage=async input=>{f.requests.push(input);const backend={version:2,runId:input.runId,stageId:input.stageId,attemptId:input.attemptId,agent:input.agent,cwd:input.cwd,session:'default',workspaceId:'workspace',tabId:'run-tab',paneId:'stage',terminalId:'terminal',backendGen:1,launchSelection:input.launchSelection,nativeSession:{kind:'id',value:randomUUID()},phase:'submitted',promptDigest:sha(`${input.context}\n\n# Current workflow stage\n${input.instructions}`),evidence:{readySeq:1,workingSeq:2}};await input.checkpoint(backend);return {state:'active',backend,evidence:backend.evidence};};
+  f.ports.inspectHerdrStage=async ({backend})=>({state:'active',backend,evidence:backend.evidence});await f.prepare();return f;
+}
+
+test('P1 live original stage and idle stall alarm preserve generation and never resend or kill',async t=>{
+  const f=await p1Active(t);let now=0;f.ports.now=()=>now;f.ports.observeWorkflowActivity=async()=>({observable:true,idle:true,rolloutBytes:42,sleeping:false,dialog:false});await f.drive();const first=f.saved(f.activeId),attempt=first.pending.attemptId;
+  now=30*60000;f.rewrite(s=>{s.stall.lastAt=now-60000;});const alarm=await f.drive();assert.equal(alarm.state,'waiting');assert.match(alarm.message,/30 minutes/);assert.equal(f.saved(f.activeId).stall.alarmed,true);assert.equal(f.requests.length,1);assert.equal(f.closes,0);assert.equal(f.saved(f.activeId).pending.attemptId,attempt);assert.equal(f.saved(f.activeId).pending.backend.backendGen,1);
+  const path=join(f.gitDir,'pdd/workflows',f.activeId,'journal.jsonl');assert.equal(readFileSync(path,'utf8').split('\n').filter(l=>l&&JSON.parse(l).event==='stall.alarm').length,1);now+=1000;await f.drive();assert.equal(readFileSync(path,'utf8').split('\n').filter(l=>l&&JSON.parse(l).event==='stall.alarm').length,1);
+  f.ports.observeWorkflowActivity=async()=>({observable:true,idle:true,rolloutBytes:43});await f.drive();assert.equal(f.saved(f.activeId).stall.alarmed,false);
+});
+
+test('P1 sleep, dialogs and guarded intervals never contribute to stall time',async t=>{
+  const f=await p1Active(t);let now=0,sample={observable:true,idle:true,rolloutBytes:1};f.ports.now=()=>now;f.ports.observeWorkflowActivity=async()=>sample;await f.drive();
+  for(const changed of [{sleeping:true},{dialog:true},{observable:false}]){now+=60*60000;sample={observable:true,idle:true,rolloutBytes:1,...changed};await f.drive();assert.equal(f.saved(f.activeId).stall,null);assert.equal(f.closes,0);}
+  assert.equal(f.requests.length,1);
+});
+
+test('P1 proved stopped native resumes saved history once and fences an uncertain continuation across retries',async t=>{
+  const f=await p1Active(t);await f.drive();const original=f.saved(f.activeId).pending.backend;let resumes=0,sends=0;
+  f.ports.proveWorkflowRecovery=async()=>({stopped:{complete:true,pid:123,startIdentity:'old'},promptInHistory:true,turnKey:'recovered-turn'});f.ports.reconcileWorkflowEffects=async()=>true;
+  f.ports.resumeHerdrStage=async ({backend,resumeIntent,checkpoint})=>{resumes++;assert.equal(resumeIntent.newGeneration,2);const s=f.saved(f.activeId);assert.equal(s.pending.resumeIntent.nativeSession.value,original.nativeSession.value);const next={...backend,backendGen:2,phase:'history_resumed',evidence:{readySeq:4}};await checkpoint(next);return {state:'active',backend:next};};
+  f.ports.sendWorkflowRecoveryContinuation=async ({key})=>{sends++;assert.deepEqual(f.saved(f.activeId).pending.recoveryContinuation.key,key);};f.ports.inspectWorkflowRecoveryContinuation=async()=> 'absent';
+  assert.equal((await f.drive()).state,'waiting');assert.equal(f.saved(f.activeId).backendGen,2);assert.equal(f.saved(f.activeId).pending.backend.nativeSession.value,original.nativeSession.value);await f.drive();assert.equal(resumes,1);assert.equal(sends,1);assert.equal(f.requests.length,1);
+});
+
+test('P1 unproved native history and lost dialog preserve all work and send no saved key',async t=>{
+  const f=await p1Active(t);await f.drive();let effects=0;f.ports.resumeHerdrStage=async()=>{effects++;};f.ports.reconcileWorkflowEffects=async()=>true;f.ports.proveWorkflowRecovery=async()=>({stopped:{complete:true},promptInHistory:false,turnKey:'t'});
+  assert.equal((await f.drive()).state,'waiting');assert.equal(effects,0);f.ports.proveWorkflowRecovery=async()=>({questionLost:true});await f.drive();assert.equal(f.saved(f.activeId).controlState,p1Case('lost-dialog').controlState);assert.equal(effects,0);assert.equal(f.requests.length,1);
+});
+
+test('P1 quota answers admit only the current quota question and send nothing at admission',async t=>{
+  const f=await p1Active(t),events=[];f.ports.readMachineToolPolicy=async()=>({machineId:null,tool:'claude',revision:4,mode:'auto',targetAccountId:'shared-target'});f.ports.quotaPorts={};
+  f.ports.advanceQuota=async (event,state,ports)=>{events.push(event);const next={runId:event.runId,machineId:event.machineId,attempt:event.attempt,turnKey:event.turnKey,tool:event.tool,state:'waiting_person',questionId:'current-question',rev:await ports.waitRevision(),kind:'cross_tool'};await ports.append(next);return {state:next,action:{kind:'waiting_person'}};};
+  f.ports.inspectHerdrStage=async ({backend})=>({state:'blocked',backend,evidence:backend.evidence,quota:{type:'limit',turnKey:'quota-turn'}});
+  await f.drive();await f.drive();const saved=f.saved(f.activeId),count=events.length;assert.equal(saved.waitingPerson.origin,'quota');assert.equal(saved.rev,saved.waitingPerson.rev);
+  const id=randomUUID();assert.equal((await f.drive({decision:'continue',questionId:'old-question',decisionId:id,expectedRev:saved.rev})).code,'bad_args');assert.equal(events.length,count);
+  const admitted=await f.drive({decision:'continue',questionId:'current-question',decisionId:id,expectedRev:saved.rev});assert.equal(admitted.state,'waiting');assert.equal(events.length,count,'admission does not call account continuation');assert.equal(f.saved(f.activeId).quotaAdmission.decision,'continue');assert.equal(f.requests.length,1);
+  assert.ok(events[0].handoffInput.context.includes('# Prompting guide'));assert.equal(events[0].mode,'auto');assert.equal(events[0].handoffInput.instructions,f.saved(f.activeId).pending.instructions);
+});
+
+test('P1 missing account ports preserve a quota-limited native stage without reset or replacement',async t=>{
+  const f=await p1Active(t);await f.drive();f.ports.inspectHerdrStage=async ({backend})=>({state:'blocked',backend,evidence:backend.evidence,quota:{type:'limit',turnKey:'t'}});const r=await f.drive();assert.equal(r.state,'waiting');assert.match(r.message,/account recovery is unavailable/);assert.equal(f.requests.length,1);assert.equal(f.closes,0);
+});
+
+test('P1 derived status/index writer failures preserve the same resume decisions and publication evidence',async t=>{
+  const f=await fixture(t);f.ports.writeRunStatus=async()=>{throw Error('display failed');};f.ports.appendRunIndex=async()=>{throw Error('index failed');};const first=await f.run();const next=await f.resume(first.runId,'approve');assert.equal(next.stage,'wait-merge',next.message);assert.deepEqual(f.native.map(x=>x.input.protocol),['proposal','work','verify']);assert.equal(f.saved(first.runId).completed.find(x=>x.id==='verify').handoff.checks[0].exitCode,0);
+});
+
+test('P1 public resume is prepare/reconcile-only until pane controller ownership, including a bound decision',async t=>{
+  const f=await p1Fixture(t),prepared=await f.prepare(),path=join(prepared.runDir,'journal.jsonl'),bytes=readFileSync(path);
+  const reconciled=await resumeWorkflow({runId:prepared.runId,cwd:f.sourceCwd,packageRoot},f.ports);assert.equal(reconciled.state,'prepared');assert.equal(reconciled.runId,prepared.runId);assert.deepEqual(readFileSync(path),bytes);assert.equal(f.native.length,0);
+  await f.drive();const waiting=f.saved(f.activeId),before=readFileSync(path),n=f.native.length;
+  assert.equal((await resumeWorkflow({runId:f.activeId,cwd:f.sourceCwd,packageRoot},f.ports)).state,'waiting');
+  const id=randomUUID(),ready=await resumeWorkflow({runId:f.activeId,cwd:f.sourceCwd,packageRoot,decision:'approve',decisionId:id,expectedRev:waiting.rev},f.ports);assert.equal(ready.state,p1Case('managed-resume-controller-only').state,ready.message);assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,n);assert.equal(f.saved(f.activeId).decisions.length,0);
+  assert.equal((await f.drive({decision:'approve',decisionId:id,expectedRev:waiting.rev})).stage,'wait-merge');assert.equal(f.saved(f.activeId).decisions.length,1);
+});
+
+test('P1 missing runtime refuses preparation before creating any issue assignment or input snapshot',async t=>{
+  const f=await p1Fixture(t);delete f.ports.runtime;const result=await f.prepare();assert.equal(result.state,'failed');assert.match(result.message,/runtime/);assert.equal(existsSync(join(f.sourceCwd,'.git/pdd')),false);assert.equal(f.native.length,0);
+});
+
+// Optional exact public owner composition for the same offline attachment cases.
+const attachmentClaims=process.env.PDD_TEST_CLAIMS_MODULE?await import(process.env.PDD_TEST_CLAIMS_MODULE):null;
+async function publicAttachment(t,{known=true}={}) {
+  const f=await fixture(t),h={f,known,mode:null,attachments:0,claims:0,promotions:0,starts:0,agentReads:0,handles:[],adapterPorts:null};
+  const native={kind:'id',value:randomUUID(),agent:'codex'};h.native=native;
+  if(attachmentClaims){f.ports.withWorkflowLock=attachmentClaims.withWorkflowLock;f.ports.inspectWorkflowLock=attachmentClaims.inspectWorkflowLock;f.ports.flockHelper=process.env.PDD_TEST_FLOCK_HELPER;}
+  f.ports.runHerdrStage=async(input,p)=>{
+    h.starts++;
+    const backend={version:2,runId:input.runId,stageId:input.stageId,attemptId:input.attemptId,agent:input.agent,cwd:input.cwd,phase:'submitted',
+      promptDigest:sha(input.context+'\n\n# Current workflow stage\n'+input.instructions),nativeSession:known?native:null,session:'default',workspaceId:'w',tabId:'tab',paneId:'stage',terminalId:'terminal',agentName:'stage-agent',backendGen:1,launchSelection:input.launchSelection,lastSeq:2,evidence:{readySeq:1,workingSeq:2},
+      processProof:{pid:123,startIdentity:'stage-start',paneId:'stage',terminalId:'terminal',backendGen:1}};
+    await p.checkpoint(backend);return {state:'active',backend,evidence:backend.evidence};
+  };
+  const originalExec=f.ports.execFile;
+  f.ports.execFile=async(file,args,options)=>{
+    if(file!==f.herdrExecutable)return originalExec(file,args,options);
+    assert.equal(args[1],'default');assert.equal(options.cwd,f.cwd);const b=f.saved(h.runId).pending.backend;
+    if(args[2]==='agent'&&args[3]==='get'){
+      h.agentReads++;if(h.mode==='checkpoint-fails')linkSync(h.journal,h.journal+'.linked');
+      return {stdout:JSON.stringify({result:{agent:{workspace_id:b.workspaceId,tab_id:b.tabId,pane_id:b.paneId,terminal_id:b.terminalId,name:b.agentName,agent:b.agent,cwd:b.cwd,state_change_seq:2,agent_status:'working',agent_session:native}}})};
+    }
+    assert.deepEqual(args.slice(2),['pane','process-info','--pane','stage']);
+    return {stdout:JSON.stringify({result:{process_info:{pane_id:'stage',foreground_processes:[{pid:123,name:'codex',cwd:b.cwd,argv:['codex']}]}}})};
+  };
+  f.ports.processStartIdentity=async({pid,paneId})=>{assert.equal(pid,123);assert.equal(paneId,'stage');return h.mode==='wrong-process'?'replacement':'stage-start';};
+  // These caller writers/authority must be replaced by the actual runner owner.
+  f.ports.validateOwner=async()=>assert.fail('unbound caller authority');f.ports.bindClaim=async()=>assert.fail('unbound caller binding');f.ports.checkpoint=async()=>assert.fail('unbound caller checkpoint');
+  f.ports.claimWorkflowSession=async(spec,p)=>{
+    h.claims++;assert.equal((await p.validateOwner(spec)).state,'current');
+    if(h.mode==='wrong-generation')spec={...spec,owner:{...spec.owner,backendGen:spec.owner.backendGen+1}};
+    if(h.mode==='wrong-attempt')spec={...spec,owner:{...spec.owner,attemptId:randomUUID()}};
+    if(h.mode?.startsWith('claim-'))return h.mode==='claim-unacknowledged'?{}:{state:h.mode.slice(6)};
+    const handle=attachmentClaims?await attachmentClaims.claimWorkflowSession(spec,p):(await p.validateOwner(spec)).state==='current'?{state:'owned',kind:spec.kind,owner:spec.owner,nativeSessionId:null,release:async()=>{}}:{state:'retired'};
+    h.handles.push(handle);return handle;
+  };
+  f.ports.promoteWorkflowClaim=async(spec,p)=>{
+    h.promotions++;assert.equal(f.saved(h.runId).pending.backend.nativeSession.value,spec.nativeSessionId,'discovery durable before promotion');
+    if(h.mode?.startsWith('promote-'))return {state:h.mode.slice(8)};
+    if(attachmentClaims)return attachmentClaims.promoteWorkflowClaim(spec,p);
+    if(spec.claim.nativeSessionId===spec.nativeSessionId)return spec.claim;
+    assert.deepEqual(await p.bindClaim({owner:spec.claim.owner,kind:spec.kind,nativeSessionId:spec.nativeSessionId}),{ok:true});spec.claim.nativeSessionId=spec.nativeSessionId;return spec.claim;
+  };
+  f.ports.spawnAttach=async(session,name,cwd)=>{
+    assert.equal(session,'default');assert.equal(name,'stage-agent');assert.equal(cwd,f.cwd);h.attachments++;
+    assert.equal(f.saved(h.runId).pending.backend.nativeSession.value,native.value);
+    assert.ok(readFileSync(h.journal,'utf8').split('\n').some(line=>line&&JSON.parse(line).event==='native.claim.bound'));
+    await h.onAttach?.();return 0;
+  };
+  f.ports.attachHerdrStage=async(input,p)=>{h.adapterPorts=p;return attachHerdrStage(input,p);};
+  const started=await f.run('small-change','codex');assert.equal(started.state,'waiting',started.message);h.runId=started.runId;
+  h.directory=join(f.gitDir,'pdd/workflows',h.runId);h.journal=join(h.directory,'journal.jsonl');
+  h.attach=()=>attachWorkflow({runId:h.runId,cwd:f.sourceCwd,packageRoot},f.ports);
+  h.holdController=async action=>{
+    let enter,release;const entered=new Promise(r=>{enter=r;}),done=new Promise(r=>{release=r;});
+    const holding=f.ports.withWorkflowLock({path:join(h.directory,'controller.lock')},async()=>{enter();await done;},f.ports);
+    await entered;try{return await action();}finally{release();await holding;}
+  };
+  t.after(async()=>{for(const handle of h.handles)await handle.release?.();});return h;
+}
+for(const known of [true,false])test(`public attachment actual stage forwards durable owner/transport ports (${known?'saved':'new'} native ID)`,async t=>{
+  const h=await publicAttachment(t,{known}),before=h.f.saved(h.runId),result=await h.attach();
+  assert.equal(result.state,'waiting',result.message);assert.equal(h.attachments,1);assert.equal(h.claims,1);assert.equal(h.promotions,1);assert.equal(h.starts,1);
+  const after=h.f.saved(h.runId);assert.equal(after.pending.attemptId,before.pending.attemptId);assert.equal(after.pending.backend.backendGen,1);assert.equal(after.pending.backend.phase,'submitted');assert.equal(after.index,before.index);assert.deepEqual(after.completed,before.completed);
+  const rows=journalRows(readFileSync(h.journal,'utf8'));assert.equal(new Set(rows.map(row=>row.seq)).size,rows.length);
+});
+for(const mode of ['claim-busy','claim-uncertain','claim-unacknowledged','promote-busy','promote-uncertain','wrong-generation','wrong-attempt','checkpoint-fails','wrong-process'])test(`public attachment actual stage refuses ${mode} without attachment or replacement`,async t=>{
+  const h=await publicAttachment(t,{known:false});h.mode=mode;const result=await h.attach();
+  assert.equal(result.state,'recovery_required',result.message);assert.equal(h.attachments,0);assert.equal(h.starts,1);
+  if(mode==='checkpoint-fails'){assert.equal(h.claims,0);assert.equal(h.promotions,0);unlinkSync(h.journal+'.linked');}
+  if(mode.startsWith('promote-'))assert.equal(h.f.saved(h.runId).pending.backend.nativeSession.value,h.native.value);
+});
+test('public attachment live controller reuses same owned claim read-only and polling stays guarded',async t=>{
+  const h=await publicAttachment(t);assert.equal((await h.attach()).state,'waiting');
+  const before=readFileSync(h.journal,'utf8'),claimCalls=h.claims,epoch=()=>readFileSync(join(h.f.saved(h.runId).assignment.commonDir,'pdd/workflow-stage-guards',h.runId,'attachments.jsonl'),'utf8').trim().split('\n').length;
+  let enter,release;const entered=new Promise(r=>{enter=r;}),detached=new Promise(r=>{release=r;});h.onAttach=async()=>{enter();await detached;};
+  await h.holdController(async()=>{
+    const attaching=h.attach();await entered;
+    try{
+      const reads=h.agentReads,seen=await inspectHerdrStage({backend:h.f.saved(h.runId).pending.backend},h.adapterPorts);
+      assert.equal(seen.state,'active');assert.equal(seen.reason,'stage_temporarily_guarded');assert.equal(h.agentReads,reads);
+      assert.equal(readFileSync(h.journal,'utf8'),before);assert.equal(epoch(),2);
+    }finally{release();}
+    assert.equal((await attaching).state,'waiting');
+  });
+  assert.equal(h.attachments,2);assert.equal(h.claims,claimCalls);assert.equal(readFileSync(h.journal,'utf8'),before);
+});
+for(const known of [true,false])test(`public attachment live controller refuses ${known?'unbound saved claim':'new identity checkpoint'} without journal mutation`,async t=>{
+  const h=await publicAttachment(t,{known}),before=readFileSync(h.journal,'utf8');
+  await h.holdController(async()=>{assert.equal((await h.attach()).state,'recovery_required');assert.equal(readFileSync(h.journal,'utf8'),before);});
+  assert.equal(h.attachments,0);assert.equal(h.claims,0);assert.equal(h.promotions,0);assert.equal(h.starts,1);
+});
+test('public attachment rival native claim refuses then same owner reconciles without a replacement',async t=>{
+  const h=await publicAttachment(t,{known:false});let rival;
+  if(attachmentClaims){
+    rival=await attachmentClaims.claimWorkflowSession({kind:'codex',nativeSessionId:h.native.value,owner:{runId:randomUUID(),attemptId:randomUUID(),backendGen:1}},{...h.f.ports,validateOwner:async()=>({state:'current'})});
+    assert.equal(rival.state,'owned');t.after(()=>rival.release());
+  }else h.mode='promote-busy';
+  assert.equal((await h.attach()).state,'recovery_required');assert.equal(h.attachments,0);assert.equal(h.f.saved(h.runId).pending.backend.nativeSession.value,h.native.value);
+  await rival?.release();h.mode=null;assert.equal((await h.attach()).state,'waiting');assert.equal(h.claims,1);assert.equal(h.attachments,1);assert.equal(h.starts,1);
+});
+test('public attachment durable callbacks cannot write after their journal ownership ends',async t=>{
+  const h=await publicAttachment(t);assert.equal((await h.attach()).state,'waiting');const before=readFileSync(h.journal,'utf8'),b=h.f.saved(h.runId).pending.backend,p=h.adapterPorts;
+  await p.withStageGuard(b,async()=>{
+    await assert.rejects(p.checkpoint(b),/controller owns native identity/);
+    await assert.rejects(p.bindClaim({kind:b.agent,nativeSessionId:b.nativeSession.value,owner:{runId:b.runId,attemptId:b.attemptId,backendGen:b.backendGen}}),/controller owns native identity/);
+  });
+  assert.equal(readFileSync(h.journal,'utf8'),before);assert.equal(h.attachments,1);
+});
+
+for(const settings of [null,{model:'settings-model',effort:'high'}])test(`rule10 actual runner freezes ${settings?'Settings pair':'native defaults'} before assignment and admits after defaults change`,async t=>{
+  const f=await p1Fixture(t);delete f.ports.resolveWorkflowModel;
+  f.ports.nativeCatalog={read:async()=>{throw Error('unavailable');}};
+  f.ports.toolDefaults={read:async()=>settings};
+  const prepared=await f.prepare({machineId:'local'});assert.equal(prepared.state,'prepared',prepared.message);
+  const saved=f.saved(prepared.runId).launchSelection;
+  assert.equal(saved.model,settings?.model??null);assert.equal(saved.effort,settings?.effort??null);
+  assert.equal(saved.source,settings?'settings-fallback':'native-defaults');assert.equal(f.native.length,0);
+  f.ports.toolDefaults.read=async()=>({model:'changed-default',effort:'low'});
+  const driven=await f.drive();assert.equal(driven.state,'waiting',driven.message);
+  assert.ok(f.native.length>0);assert.deepEqual(f.saved(prepared.runId).launchSelection,saved);
+});
+
+
+test('P1 enabled trace observes actual controller process request without replacing journal proof',async t=>{
+  const f=await p1Fixture(t);f.ports.env={PDD_TRACE:'herdr'};
+  const prepared=await f.prepare();assert.equal(prepared.state,'prepared',prepared.message);
+  assert.deepEqual(readHerdrTrace(f.ports),[]);
+  const request=f.ports.execFile,observed=[];
+  f.ports.execFile=async(file,args,options)=>{if(file===f.herdrExecutable)observed.push({args:[...args],options:{...options}});return request(file,args,options);};
+  const result=await f.drive();assert.equal(result.state,'waiting',result.message);
+  assert.deepEqual(observed,[{args:['--session','default','pane','process-info','--pane','controller'],options:{cwd:prepared.root,env:f.ports.env}}]);
+  const saved=f.saved(prepared.runId);assert.equal(saved.controller.started,true);assert.equal(saved.controller.generation,1);assert.equal(saved.controller.startIdentity,'controller-process-start');
+  const encoded=JSON.stringify(readHerdrTrace(f.ports));assert.ok(encoded.includes('pane.process_info'));assert.ok(!encoded.includes(prepared.root));assert.ok(!encoded.includes('controller-process-start'));
+});
+
+test('C3 one hour of unchanged backend checkpoints at 4Hz stays below 5 MB and recovers exact work',async t=>{
+  const f=await fixture(t);let checkpoints=0,original,dir,stableSeq,now=Date.now();
+  // Keep the real guide intact; synthetic padding makes the stress size independent of checkout paths.
+  const loadGuidance=f.ports.loadGuidance;
+  f.ports.loadGuidance=async input=>{const guidance=await loadGuidance(input);return guidance+'\n# Synthetic C3 size fixture\n'+'x'.repeat(Math.max(0,60_000-Buffer.byteLength(guidance)));};
+  f.ports.now=()=>now;
+  f.ports.observeWorkflowActivity=async()=>({observable:true,idle:true,rolloutBytes:100});
+  f.ports.runHerdrStage=async(input,ports)=>{
+    dir=join(f.gitDir,'pdd/workflows',input.runId);
+    const backend={version:2,runId:input.runId,stageId:input.stageId,attemptId:input.attemptId,agent:input.agent,cwd:input.cwd,
+      session:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p3',terminalId:'term',agentName:'owned',backendGen:1,
+      phase:'submitted',promptDigest:sha(`${input.context}\n\n# Current workflow stage\n${input.instructions}`),evidence:{readySeq:1,workingSeq:2},nativeSession:{kind:'id',agent:input.agent,value:'original-history'}};
+    original=structuredClone(backend);await ports.checkpoint(backend);checkpoints++;
+    const started=now,path=join(dir,'journal.jsonl');
+    for(let tick=0;tick<4*60*60;tick++){
+      now=started+tick*250;
+      await ports.onStageObservation({backend,status:'working'});
+      const before=statSync(path).size;
+      await ports.checkpoint(structuredClone(backend));checkpoints++;
+      assert.equal(statSync(path).size,before,'identical checkpoints do not append even while stall sampling remains durable');
+    }
+    now=started+60*60*1000;await ports.onStageObservation({backend,status:'working'});
+    stableSeq=f.saved(input.runId).seq;
+    await assert.rejects(ports.checkpoint({...backend,paneId:'other-pane'}),/identity changed/);
+    assert.equal(f.saved(input.runId).seq,stableSeq,'identity guards still refuse before suppression or append');
+    // A genuine evidence change must remain durable before the callback resolves.
+    backend.lastSeq=3;backend.evidence.workingSeq=3;await ports.checkpoint(backend);checkpoints++;
+    return {state:'active',backend,evidence:backend.evidence};
+  };
+  const first=await f.run();assert.ok(['waiting','recovery_required'].includes(first.state),first.message);assert.equal(checkpoints,14402);
+  const bytes=readFileSync(join(dir,'journal.jsonl')),physical=bytes.toString('utf8').trimEnd().split('\n').map(JSON.parse);
+  assert.ok(bytes.length<5_000_000,`${bytes.length} journal bytes`);
+  assert.ok(physical.filter(row=>row.event==='agent.backend').length===2,'only changed backend observations are journaled');
+  assert.equal(physical.filter(row=>row.event==='stall.alarm').length,1,'one thirty-minute alarm across the full idle hour');
+  assert.ok(physical.filter(row=>row.event==='stall.sample').length>=59,'size includes durable periodic activity observations');
+  assert.ok(physical.filter(row=>row.delta).length>0,'ordinary events store deltas');
+  assert.ok(!physical.filter(row=>row.event==='agent.backend').some(row=>row.state),'backend records do not copy full state');
+  const {state,seq}=await readWorkflowJournal({runDir:dir});assert.equal(seq,state.seq);assert.equal(state.pending.backend.nativeSession.value,original.nativeSession.value);
+  assert.equal(state.pending.backend.evidence.workingSeq,3);assert.ok(Buffer.byteLength(state.context)>57_000,'full bundled context is represented');
+  const displayed=await (await import('../src/workflow-run-records.mjs')).readJournalLast(dir);assert.deepEqual(displayed.value.state,state);
+  const before=Buffer.from(bytes),effects=f.native.length;const inspected=await f.resume(first.runId);assert.equal(inspected.runId,first.runId);
+  assert.deepEqual(readFileSync(join(dir,'journal.jsonl')),before);assert.equal(f.native.length,effects,'recovery observation cannot resend work');
+  t.diagnostic(`3600000 virtual milliseconds, 14400 unchanged polls, ${bytes.length} journal bytes, ${physical.length} committed records, one stall alarm, ${Buffer.byteLength(state.context)} context bytes.`);
+});
+
+test('C3 mixed legacy and delta history materializes callbacks and resumes without another delivery',async t=>{
+  const f=await fixture(t),first=await f.run(),dir=join(f.gitDir,'pdd/workflows',first.runId),path=join(dir,'journal.jsonl');
+  const logical=journalRows(readFileSync(path,'utf8')),rows=[];let previous;
+  for(const row of logical){
+    const {v,runId,state,...metadata}=row;
+    rows.push(previous?encodeWorkflowJournalRecord(previous,state,metadata):{...metadata,state});previous=state;
+  }
+  assert.ok(rows.some(row=>row.delta));assert.equal(Object.hasOwn(rows[0],'v'),false);
+  writeFileSync(path,rows.map(JSON.stringify).join('\n')+'\n');
+  const callbacks=[],saved=await readWorkflowJournal({runDir:dir},{onRecord:row=>callbacks.push(row)});
+  assert.deepEqual(saved.state,logical.at(-1).state);
+  assert.deepEqual(callbacks.map(row=>row.state),logical.map(row=>row.state),'every callback receives the complete state at its sequence');
+  const before=readFileSync(path),effects=f.native.length;
+  assert.equal((await f.resume(first.runId)).runId,first.runId);
+  assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,effects);
+});
+
+test('C3 authoritative recovery rejects damaged history before a valid later periodic snapshot',async t=>{
+  const f=await fixture(t),first=await f.run(),dir=join(f.gitDir,'pdd/workflows',first.runId),path=join(dir,'journal.jsonl');
+  const original=readFileSync(path,'utf8'),start=(await readWorkflowJournal({runDir:dir})).state;
+  let previous=start;const rows=[];
+  for(let seq=start.seq+1;seq<=128;seq++){
+    const state={...previous,seq,observation:{counter:seq}};
+    rows.push(encodeWorkflowJournalRecord(previous,state,{event:'agent.backend'}));previous=state;
+  }
+  assert.ok(rows.at(-1).state);assert.ok(rows[0].delta);
+  rows[0].baseSeq--;
+  writeFileSync(path,original+rows.map(JSON.stringify).join('\n')+'\n');
+  const displayed=await (await import('../src/workflow-run-records.mjs')).readJournalLast(dir);
+  assert.equal(displayed.value.state.seq,128,'display tail is explicitly not full-history authority');
+  await assert.rejects(readWorkflowJournal({runDir:dir}),/journal/);
+  const before=readFileSync(path),effects=f.native.length,refused=await f.resume(first.runId,'approve');
+  assert.ok(['failed','recovery_required'].includes(refused.state));assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,effects);
+});
+
+for(const field of ['assignment','definition','launchSelection','root','inputDigest'])test(`C3 delta changing frozen ${field} refuses before effects despite a later restoring snapshot`,async t=>{
+  const f=await fixture(t),first=await f.run(),dir=join(f.gitDir,'pdd/workflows',first.runId),path=join(dir,'journal.jsonl');
+  const original=readFileSync(path,'utf8'),saved=(await readWorkflowJournal({runDir:dir})).state;
+  const row={v:1,runId:saved.runId,seq:saved.seq+1,baseSeq:saved.seq,event:'agent.backend',delta:[{path:[field],value:field==='root'?saved.root+'-other':field==='inputDigest'?'0'.repeat(64):{changed:true}}]};
+  const restoring={v:1,runId:saved.runId,seq:saved.seq+2,event:'agent.backend',state:{...saved,seq:saved.seq+2}};
+  writeFileSync(path,original+JSON.stringify(row)+'\n'+JSON.stringify(restoring)+'\n');
+  await assert.rejects(readWorkflowJournal({runDir:dir}),/journal/);
+  const before=readFileSync(path),effects=f.native.length,refused=await f.resume(first.runId,'approve');
+  assert.ok(['failed','recovery_required'].includes(refused.state));assert.deepEqual(readFileSync(path),before);assert.equal(f.native.length,effects);
+});
+
+test('C8 composition commits accepted scope artifacts after agent code commit and opens the exact verified PR', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true });
+  const first = await f.run();
+  assert.equal(first.state, 'waiting', first.message);
+  assert.equal(await f.git('rev-parse', 'HEAD'), f.initial);
+  assert.match(await f.git('status', '--porcelain'), /cases.json/);
+  const beforeInspection = await f.git('rev-parse', 'HEAD');
+  await f.resume(first.runId);
+  assert.equal(await f.git('rev-parse', 'HEAD'), beforeInspection, 'inspection never commits');
+  const opened = await f.resume(first.runId, 'approve');
+  assert.equal(opened.stage, 'wait-merge', opened.message);
+  assert.equal(opened.state, 'waiting', opened.message);
+  assert.equal(await f.git('status', '--porcelain'), '');
+  const saved = f.saved(first.runId), checked = saved.completed.find(step => step.id === 'verify');
+  const transition = saved.artifactCommits.at(-1);
+  assert.deepEqual(transition.previous, checked.verification.output, 'original tested fingerprint is retained');
+  assert.deepEqual(transition.current, saved.expected);
+  assert.notEqual(transition.previous.head, transition.current.head);
+  assert.deepEqual((await f.git('diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD')).split('\n').sort(),
+    ['STORY.md', 'cases.json', 'module.prompt.md']);
+  assert.equal(await f.git('show', 'HEAD:value.mjs'), 'export const value = 2;');
+  assert.equal(f.pr.headRefOid, saved.expected.head);
+  for (const file of saved.accepted.files)
+    assert.equal(sha((await exec('git', ['show', `HEAD:${file.path}`], {cwd:f.cwd})).stdout), file.sha256);
+  assert.equal(f.calls.filter(c => c.file === 'git' && c.args[0] === 'push').length, 1);
+  assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 1);
+  const history = readFileSync(join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert(history.findIndex(row => row.event === 'publication.artifacts.intent') < history.findIndex(row => row.event === 'publication.artifacts.committed'));
+  assert(history.findIndex(row => row.event === 'publication.artifacts.committed') < history.findIndex(row => row.event === 'pr.intent'));
+  const head = saved.expected.head;
+  await f.resume(first.runId);
+  assert.equal(await f.git('rev-parse', 'HEAD'), head, 'read-only PR recovery never repeats checkpoint');
+});
+
+test('C8 unrelated dirty files are listed without committing scope or publishing', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true, unrelatedPublicationFile: true });
+  const first = await f.run(), stopped = await f.resume(first.runId, 'approve');
+  assert.match(stopped.message, /unrelated draft.txt/);
+  assert.match(stopped.message, /commit or move/i);
+  assert.equal(f.pr, null);
+  assert.equal(await f.git('log', '-1', '--format=%s'), 'change');
+  assert.equal(readFileSync(join(f.cwd, 'unrelated draft.txt'), 'utf8'), 'preserve this unrelated work\n');
+  assert.equal(await f.git('diff', '--cached', '--name-only'), '');
+});
+
+test('C8 lost local commit reply preserves saved-input drift refusal and never repeats the commit', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true });
+  const first = await f.run(), original = f.ports.execFile;
+  let commits = 0;
+  f.ports.execFile = async (file, args, options) => {
+    const answer = await original(file, args, options);
+    if (file === 'git' && args.includes('commit')) {
+      commits++; throw Error('synthetic lost local commit response');
+    }
+    return answer;
+  };
+  const stopped = await f.resume(first.runId, 'approve');
+  assert.notEqual(stopped.state, 'completed');
+  assert.equal(commits, 1);
+  assert.equal(f.pr, null);
+  const head = await f.git('rev-parse', 'HEAD');
+  const inspected = await f.resume(first.runId);
+  assert.match(inspected.message, /HEAD or worktree changed/);
+  const retry = await f.resume(first.runId, 'approve');
+  assert.match(retry.message, /HEAD or worktree changed/);
+  assert.equal(await f.git('rev-parse', 'HEAD'), head);
+  assert.equal(commits, 1); assert.equal(f.pr, null);
+});
+
+test('C3 public journal callbacks compose with codec replay as complete snapshot records', async t => {
+  const f = await fixture(t), first = await f.run();
+  assert.equal(first.state, 'waiting', first.message);
+  const runDir = join(f.gitDir, 'pdd/workflows', first.runId), path = join(runDir, 'journal.jsonl');
+  const before = readFileSync(path), physical = before.toString('utf8').trimEnd().split('\n').map(JSON.parse);
+  assert.ok(physical.some(row => Object.hasOwn(row, 'delta')), 'exercise actual compact storage');
+  const callbacks = [];
+  let replayed;
+  const journal = await readWorkflowJournal({runDir}, {onRecord: row => {
+    replayed = replayWorkflowJournalRecord(replayed, row);
+    assert.equal(Object.hasOwn(row, 'delta'), false);
+    assert.equal(Object.hasOwn(row, 'baseSeq'), false);
+    callbacks.push(row);
+  }});
+  assert.deepEqual(replayed, journal.state);
+  assert.deepEqual(callbacks.map(({seq, event, decisionId, v, runId}) => ({seq, event, decisionId, v, runId})),
+    physical.map(({seq, event, decisionId, v, runId}) => ({seq, event, decisionId, v, runId})), 'record metadata survives projection');
+  assert.equal(journal.seq, physical.at(-1).seq);
+  const deliveries = f.native.length;
+  assert.equal((await f.resume(first.runId)).state, 'waiting');
+  assert.deepEqual(readFileSync(path), before, 'inspection preserves the authoritative compact journal');
+  assert.equal(f.native.length, deliveries, 'callback replay and inspection cannot redeliver work');
+});
+
+test('C3 journal observers cannot mutate authoritative replay or later observations', async t => {
+  const f = await fixture(t), first = await f.run();
+  assert.equal(first.state, 'waiting', first.message);
+  const progressed = await f.resume(first.runId, 'approve', decisionBinding(f, first.runId));
+  assert.equal(progressed.state, 'waiting', progressed.message);
+  const runDir = join(f.gitDir, 'pdd/workflows', first.runId), path = join(runDir, 'journal.jsonl');
+  const before = readFileSync(path), expectedRows = [], deliveries = f.native.length;
+  assert.ok(before.toString('utf8').split('\n').filter(Boolean).map(JSON.parse)
+    .some(row => Object.hasOwn(row, 'delta')), 'exercise compact history');
+  const expected = await readWorkflowJournal({runDir}, {onRecord: row => expectedRows.push(row)});
+  assert.ok(expected.decisions.length > 0, 'include real saved decision bindings');
+  let count = 0;
+  const observed = await readWorkflowJournal({runDir}, {onRecord: row => {
+    assert.deepEqual(row, expectedRows[count++], 'earlier observers cannot change this snapshot');
+    row.state.seq = 0;
+    row.state.assignment.runId = 'observer-only';
+    row.state.definition.name = 'observer-only';
+    row.state.completed.length = 0;
+    for (const decision of row.state.decisions ?? []) decision.decisionId = 'observer-only';
+    row.event = 'observer-only';
+  }});
+  assert.equal(count, expectedRows.length);
+  assert.deepEqual(observed, expected, 'returned state, sequence and decisions remain authoritative');
+  assert.deepEqual(await readWorkflowJournal({runDir}), expected, 'future reads retain the same state');
+  assert.deepEqual(readFileSync(path), before, 'observation never changes durable history');
+  await f.resume(first.runId);
+  assert.deepEqual(readFileSync(path), before, 'read-only recovery preserves history');
+  assert.equal(f.native.length, deliveries, 'observation and recovery never redeliver work');
+});
+
+
+test('C12 composition publishes the issue and accepted change/check results after the internal artifact checkpoint', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true });
+  const first = await f.run(), opened = await f.resume(first.runId, 'approve');
+  assert.equal(opened.stage, 'wait-merge', opened.message);
+  assert.match(await f.git('log', '-1', '--format=%s'), /^pdd: record accepted artifacts for /);
+  assert.equal(f.pr.title, 'Use value two');
+  assert.match(f.pr.body, /^Closes #17\n/m);
+  assert.match(f.pr.body, /Completed current change; observable expectations remain independent\./);
+  assert.doesNotMatch(f.pr.body, /pdd: record accepted artifacts|Completed current verify/);
+  const saved = f.saved(first.runId), checked = saved.completed.find(step => step.id === 'verify');
+  for (const check of checked.handoff.checks) {
+    assert.equal(check.exitCode, 0);
+    assert.ok(f.pr.body.includes('PASS (exit 0): ' + JSON.stringify(check.argv)));
+  }
+  const marker = '<!-- pdd-workflow:' + first.runId + ':open-pr -->';
+  assert.equal(f.pr.body.split(marker).length - 1, 1);
+  assert.equal(f.pr.headRefOid, saved.expected.head);
+  const before = {head: saved.expected.head, body:f.pr.body, title:f.pr.title};
+  await f.resume(first.runId);
+  assert.equal(await f.git('rev-parse', 'HEAD'), before.head);
+  assert.equal(f.pr.body, before.body); assert.equal(f.pr.title, before.title);
+  assert.equal(f.calls.filter(c => c.file === 'git' && c.args[0] === 'push').length, 1);
+  assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 1);
+});
+
+test('C12 proposal PR describes accepted scope without claiming unexecuted verification', async t => {
+  const f = await fixture(t); let state = await f.run('feature');
+  state = await f.resume(state.runId, 'skip'); state = await f.resume(state.runId, 'skip');
+  state = await f.resume(state.runId, 'approve'); state = await f.resume(state.runId, 'approve');
+  assert.equal(state.stage, 'prompt-merge', state.message);
+  assert.equal(f.pr.title, 'Use value two');
+  assert.match(f.pr.body, /^Closes #17\n/m);
+  assert.match(f.pr.body, /Completed current prompt-story/);
+  assert.match(f.pr.body, /Not run for this publication\./);
+  assert.doesNotMatch(f.pr.body, /PASS/);
+});
+
+
+test('C13 settled missing handoff waits with a plain message and read-only resume never redelivers',async t=>{
+  const f=await fixture(t,{missingHandoff:true});
+  f.ports.readSettledHerdrStageError=async()=>({code:'unknown'});
+  const first=await f.run();assert.equal(first.state,'waiting',first.message);assert.match(first.message,/ended without a handoff/);assert.doesNotMatch(first.message,/ENOENT/);
+  const before=f.saved(first.runId);const again=await f.resume(first.runId);
+  assert.equal(again.state,'waiting');assert.equal(f.native.length,1);assert.equal(f.closes,0);assert.equal(f.saved(first.runId).pending.attemptId,before.pending.attemptId);
+});
+test('C13 busy retry waits until due and fences an uncertain continuation across resume',async t=>{
+  const f=await fixture(t,{missingHandoff:true});let clock=1000,retries=0;
+  f.ports.now=()=>clock;f.ports.readSettledHerdrStageError=async()=>({code:'busy_429'});
+  f.ports.retrySettledHerdrStage=async({backend,settledSeq})=>{retries++;assert.equal(settledSeq,3);assert.equal(f.saved(backend.runId).pending.handoffWait.sent,true);throw Error('lost reply');};
+  const first=await f.run('small-change','codex');assert.equal(first.state,'waiting');assert.match(first.message,/Codex is busy \(429\); PDD retries/);
+  const original=f.saved(first.runId).pending;await f.resume(first.runId,'approve');assert.equal(retries,0);
+  clock=61000;const retry=await f.resume(first.runId,'approve');assert.equal(retry.state,'waiting');assert.equal(retries,1);
+  await f.resume(first.runId,'approve');assert.equal(retries,1);assert.equal(f.native.length,1);
+  const saved=f.saved(first.runId);assert.deepEqual(saved.pending.input,original.input);assert.equal(saved.pending.instructions,original.instructions);assert.equal(saved.pending.attemptId,original.attemptId);
+});
+test('C13 a late valid handoff is accepted without a retry and missing artifact remains invalid',async t=>{
+  const f=await fixture(t,{missingHandoff:true});f.ports.readSettledHerdrStageError=async()=>({code:'busy_429'});let retries=0;f.ports.retrySettledHerdrStage=async()=>{retries++;throw Error();};
+  const first=await f.run();f.options.missingHandoff=false;
+  await f.ports.launchNativeSession(f.native[0]);
+  const accepted=await f.resume(first.runId,'approve');assert.equal(accepted.state,'waiting',accepted.message);assert.equal(retries,0);assert.ok(f.saved(first.runId).completed.some(x=>x.id==='scope'));
+  const g=await fixture(t,{missingHandoff:true});g.ports.readSettledHerdrStageError=async()=>({code:'unknown'});const pending=await g.run();g.options.missingHandoff=false;await g.ports.launchNativeSession(g.native[0]);
+  unlinkSync(join(g.cwd,'cases.json'));const invalid=await g.resume(pending.runId,'approve');assert.equal(invalid.state,'failed');assert.equal(g.saved(pending.runId).index,0);
+});
+test('C13 changed partial work fences continuation and preserves the original files',async t=>{
+  const f=await fixture(t,{missingHandoff:true});f.ports.readSettledHerdrStageError=async()=>({code:'unknown'});let retries=0;f.ports.retrySettledHerdrStage=async()=>{retries++;throw Error();};
+  const first=await f.run();writeFileSync(join(f.cwd,'partial.txt'),'preserve');const next=await f.resume(first.runId,'approve');
+  assert.equal(next.state,'recovery_required',next.message);assert.equal(retries,0);assert.equal(readFileSync(join(f.cwd,'partial.txt'),'utf8'),'preserve');
+});
+
+
+for(const diagnosis of ['busy_429','unknown','lost_reply'])test(`C13 live drive keeps its controller lock through ${diagnosis} retry and observes the same continuation`,async t=>{
+  const f=await p1Fixture(t,{missingHandoff:true});let clock=0,retries=0,sleeps=0,continued=false,workingObserved=false;
+  f.ports.now=()=>clock;f.ports.readSettledHerdrStageError=async()=>({code:diagnosis==='lost_reply'?'busy_429':diagnosis});
+  f.ports.sleep=async ms=>{clock+=ms;sleeps++;assert.ok(sleeps<65);assert.equal(await inspectWorkflowLock({path:join(f.gitDir,'pdd/workflows',f.activeId,'controller.lock')}),'held');};
+  const inspect=f.ports.inspectHerdrStage;
+  f.ports.retrySettledHerdrStage=async({backend},ports)=>{
+    retries++;assert.equal(clock,60000);const b={...backend,phase:diagnosis==='lost_reply'?'prompt_intent':'submitted',handoffRetry:{settledSeq:3},evidence:diagnosis==='lost_reply'?{readySeq:3}:{readySeq:3,workingSeq:4}};await ports.checkpoint(b);continued=true;
+    return {state:diagnosis==='lost_reply'?'recovery_required':'active',backend:b,evidence:b.evidence};
+  };
+  f.ports.inspectHerdrStage=async(input,ports)=>{
+    if(!continued)return inspect(input,ports);
+    if(diagnosis==='lost_reply'&&!workingObserved){workingObserved=true;const b={...input.backend,evidence:{readySeq:3,workingSeq:4}};return {state:'active',backend:b,evidence:b.evidence};}
+    if(diagnosis==='lost_reply')assert.equal(input.backend.evidence.workingSeq,4,'working observation survived to the next poll');
+    f.options.missingHandoff=false;await f.ports.launchNativeSession(f.native[0]);continued=false;
+    const b={...input.backend,phase:'candidate',evidence:{readySeq:3,workingSeq:4,settledSeq:5}};await ports.checkpoint(b);
+    return {state:'settled',backend:b,evidence:b.evidence};
+  };
+  const prepared=await f.prepare();const result=await f.drive();assert.equal(result.state,'waiting',result.message);assert.equal(result.stage,'change');assert.equal(retries,1);assert.equal(sleeps,diagnosis==='lost_reply'?62:61);assert.equal(f.saved(prepared.runId).completed[0].id,'scope');assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
+});
+
+import {claimWorkflowSession as realC13Claim} from '../src/workflow-claims.mjs';
+test('C13 blocked observation exits scheduled drive without another poll',async t=>{
+ const f=await p1Fixture(t,{missingHandoff:true});let clock=0,sleeps=0,diagnosed=false,name,delivered=false,blocked=false;const handles=[];const transportCalls=[];
+ t.after(async()=>{for(const h of handles)await h.release?.();});
+ f.ports.runHerdrStage=runHerdrStage;f.ports.inspectHerdrStage=inspectHerdrStage;f.ports.closeHerdrStage=closeHerdrStage;
+ f.ports.now=()=>clock;f.ports.pollMs=1;f.ports.observeMs=10;f.ports.processStartIdentity=async()=> 'same-start';
+ f.ports.claimWorkflowSession=async(...args)=>{const h=await realC13Claim(...args);handles.push(h);return h;};
+ f.ports.sleep=async ms=>{clock+=ms;if(diagnosed){sleeps++;blocked=true;if(sleeps>1)throw Error('bounded-probe-stop: scheduler polled after blocked');}};
+ const edge=f.ports.execFile;f.ports.execFile=async(file,args,opts)=>{
+  if(file!==f.herdrExecutable||(args[2]==='pane'&&args[3]==='process-info'&&args.at(-1)==='controller'))return edge(file,args,opts);
+  const a=args.slice(2);transportCalls.push(a.slice(0,3));const encode=x=>({stdout:JSON.stringify(x)});
+  const agent=(status=blocked?'blocked':delivered?'done':'idle',seq=blocked?4:delivered?3:1)=>({workspace_id:'workspace',tab_id:'run-tab',pane_id:'stage',terminal_id:'stage-terminal',name,agent:'claude',cwd:f.cwd,agent_status:status,interactive_ready:['done','idle'].includes(status),launch_pending:false,state_change_seq:seq,agent_session:null});
+  if(a[0]==='pane'&&a[1]==='split')return encode({result:{pane:{workspace_id:'workspace',tab_id:'run-tab',pane_id:'stage',terminal_id:'stage-terminal'}}});
+  if(a[0]==='pane'&&a[1]==='process-info')return encode({result:{process_info:{pane_id:'stage',foreground_processes:[{pid:123,name:'claude',cwd:f.cwd,argv:['claude']}]}}});
+  if(a[0]==='agent'&&a[1]==='start'){name=a[2];return encode({result:{agent:agent()}});}
+  if(a[0]==='agent'&&a[1]==='get')return encode({result:{agent:agent()}});
+  if(a[0]==='agent'&&a[1]==='prompt'){assert.equal(delivered,false,'no continuation before due');delivered=true;return encode({result:{agent:agent('working',2)}});}
+  if(a[0]==='pane'&&a[1]==='read'){diagnosed=true;return encode({result:{read:{pane_id:'stage',text:'429 Too Many Requests'}}});}
+  assert.fail(JSON.stringify(a));
+ };
+ const prepared=await f.prepare();assert.equal(prepared.state,'prepared',prepared.message);const result=await f.drive();
+ assert.equal(sleeps,1,'stop at the first blocked observation; do not poll again');assert.equal(result.state,'waiting');assert.match(result.message,/person|blocked/);
+ assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
+ assert.equal(transportCalls.filter(a=>a[0]==='agent'&&a[1]==='prompt').length,1,'only the original prompt is delivered');
+ const pending=f.saved(prepared.runId).pending;assert.equal(pending.kind,'agent');assert.equal(pending.backend.paneId,'stage');assert.equal(pending.handoffWait.code,'busy_429');assert.notEqual(pending.handoffWait.sent,true);
+});
+
+test('native zero with missing handoff does not complete its stage or automatically relaunch', async t => {
+  const f = await fixture(t, { missingHandoff: true });
+  let clock = 1000, retries = 0;
+  f.ports.now = () => clock;
+  f.ports.readSettledHerdrStageError = async () => ({ code: 'busy_429' });
+  f.ports.retrySettledHerdrStage = async () => { retries++; assert.fail('no continuation before the retry deadline'); };
+  const first = await f.run('small-change', 'codex');
+  assert.equal(first.state, 'waiting', first.message);
+  assert.match(first.message, /Codex is busy \(429\); PDD retries/);
+  assert.doesNotMatch(first.message, /ENOENT/);
+  const before = f.saved(first.runId);
+  assert.equal(before.index, 0);
+  assert.deepEqual(before.completed, []);
+  assert.equal(before.pending.kind, 'agent');
+  assert.equal(before.pending.handoffWait.retryAt, 61000);
+  const journal = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
+  const bytes = readFileSync(journal);
+  const inspected = await f.resume(first.runId);
+  assert.equal(inspected.state, 'waiting', inspected.message);
+  assert.deepEqual(readFileSync(journal), bytes, 'read-only resume leaves durable history unchanged');
+  clock = 60999;
+  const approved = await f.resume(first.runId, 'approve');
+  assert.equal(approved.state, 'waiting', approved.message);
+  const after = f.saved(first.runId);
+  assert.equal(after.index, 0);
+  assert.deepEqual(after.completed, []);
+  assert.equal(after.pending.attemptId, before.pending.attemptId);
+  assert.deepEqual(after.pending.input, before.pending.input);
+  assert.deepEqual(after.pending.backend, before.pending.backend);
+  assert.equal(after.pending.instructions, before.pending.instructions);
+  assert.notEqual(after.pending.handoffWait.sent, true);
+  assert.equal(retries, 0);
+  assert.equal(f.native.length, 1);
+  assert.equal(f.closes, 0);
 });

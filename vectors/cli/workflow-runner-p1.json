@@ -1,0 +1,1037 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-runner.prompt.md",
+  "story": "../../story/cli/WORKFLOW-RUNNER-P1.md",
+  "note": "Independent synthetic expectations. Each given names conditions, not observed program output. Case notation is not a runtime schema.",
+  "cases": [
+    {
+      "id": "prepare-no-agent",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "newRun": true
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "assignmentAndFreezeDurable": true,
+        "stagePrompts": 0,
+        "state": "prepared"
+      }
+    },
+    {
+      "id": "frozen-resume",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "waitingRev": 57,
+        "guideChanged": true,
+        "decisionRev": 57,
+        "acceptedFiles": "unchanged"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "usesRecordedRuntime": true,
+        "usesFrozenGuide": true,
+        "decisionMayProceed": true
+      }
+    },
+    {
+      "id": "stale-rev",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "waitingRev": 58,
+        "decisionRev": 57
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "code": "stale_decision",
+        "effects": 0
+      }
+    },
+    {
+      "id": "changed-accepted-file",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "decisionRev": 57,
+        "waitingRev": 57,
+        "artifactHash": "changed"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "accepted": false,
+        "effects": 0
+      }
+    },
+    {
+      "id": "human-exit",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "nextStage": "human"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "controlState": "waiting_person",
+        "controllerLockHeld": false,
+        "exitCode": 2
+      }
+    },
+    {
+      "id": "stall-alarm-only",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "idleMinutes": 30,
+        "rolloutGrowth": false,
+        "observable": true
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "needsYou": true,
+        "failed": false,
+        "killed": false,
+        "resent": false
+      }
+    },
+    {
+      "id": "sleep-not-stall",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "sleepMinutes": 60
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "stageFailed": false,
+        "alarmFromSleep": false
+      }
+    },
+    {
+      "id": "controller-resume-live",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "savedStage": "same live process",
+        "savedPrompt": "delivered"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "reattach": true,
+        "newStagePromptCount": 0,
+        "backendGenChange": 0
+      }
+    },
+    {
+      "id": "new-process-generation",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "savedNativeId": "proved resumable",
+        "claim": "free",
+        "oldProcess": "proved stopped"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "backendGenChange": 1,
+        "sameAttempt": true,
+        "firstPromptRepeated": false
+      }
+    },
+    {
+      "id": "lost-dialog",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "nativeRestore": "history without old question"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "controlState": "question_lost",
+        "savedKeysSent": 0
+      }
+    },
+    {
+      "id": "cross-tool-contract",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "quota": "exhausted",
+        "permission": true,
+        "targetTool": "other"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "newChat": true,
+        "sameAttempt": true,
+        "includes": [
+          "full frozen guide",
+          "stage instructions",
+          "accepted files",
+          "handoff schema",
+          "completed effects",
+          "uncertain effects",
+          "changes from stage input"
+        ],
+        "blindEffectRepeat": false
+      }
+    },
+    {
+      "id": "uncertain-send",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "journal": "continuation_sent",
+        "logHasKey": false
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "needsYou": true,
+        "resends": 0
+      }
+    },
+    {
+      "id": "adopt-only",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "legacyRun": true,
+        "evidence": "complete"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "adoptionRecorded": true,
+        "journalBytesPreserved": true,
+        "prompts": 0,
+        "controllerStarts": 0,
+        "approvalInvented": false
+      }
+    },
+    {
+      "id": "adopt-incomplete",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "legacyRun": true,
+        "runtimeEvidence": "missing"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "newAttempt": false
+      }
+    },
+    {
+      "id": "cleanup-stage-pane",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "acceptedStage": true,
+        "runTabContains": [
+          "controller",
+          "stage",
+          "person"
+        ]
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "closed": [
+          "stage pane"
+        ],
+        "workspaceClosed": false,
+        "runTabClosed": false
+      }
+    },
+    {
+      "id": "fetch-before-allocation",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "newAllocation": true,
+        "fetch": "fails"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "worktreeAdds": 0,
+        "staleLocalBaseUsed": false
+      }
+    },
+    {
+      "id": "publication-advisory",
+      "criteria": [
+        "AC17"
+      ],
+      "given": {
+        "publicationAuthorized": true,
+        "secretScan": "finding"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "warningInPR": "redacted",
+        "needsYou": true,
+        "publicationBlockedByScan": false
+      }
+    },
+    {
+      "id": "remote-preallocated-id",
+      "criteria": [
+        "AC18"
+      ],
+      "given": {
+        "sourceStartId": "saved UUID",
+        "target": "machine-b"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "sourceWorktreeCreated": false,
+        "targetRunId": "same saved UUID",
+        "targetPrepareRunId": "same saved UUID"
+      }
+    },
+    {
+      "id": "display-index-failure-recovery",
+      "criteria": [
+        "AC19"
+      ],
+      "given": {
+        "displayIndexAppend": "failed",
+        "recoveryRegistry": "durable",
+        "journal": "valid"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "runFailureFromIndex": false,
+        "keeperFindsRun": true
+      }
+    },
+    {
+      "id": "native-history-resume-no-first-prompt",
+      "criteria": [
+        "AC20"
+      ],
+      "given": {
+        "nativeProcess": "proved stopped",
+        "nativeHistory": "original request proved",
+        "effects": "reconciled"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "historyOnlyResume": true,
+        "newGeneration": true,
+        "originalRequestResent": false
+      }
+    },
+    {
+      "id": "native-history-unproved",
+      "criteria": [
+        "AC21"
+      ],
+      "given": {
+        "nativeProcess": "proved stopped",
+        "originalPromptDelivery": "unknown"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "newFirstPrompt": false,
+        "recoveryContinuation": false,
+        "needsYou": true
+      }
+    },
+    {
+      "id": "wait-locked-retry-intervals",
+      "criteria": [
+        "AC22"
+      ],
+      "given": {
+        "quotaState": "WAIT",
+        "renewalPassed": true,
+        "observations": [
+          "failed",
+          "stale",
+          "inconclusive",
+          "failed"
+        ]
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "retryDelaysMinutes": [
+          5,
+          15,
+          60,
+          60
+        ],
+        "continuations": 0
+      }
+    },
+    {
+      "id": "wait-renewal-unknown",
+      "criteria": [
+        "AC23"
+      ],
+      "given": {
+        "quotaState": "WAIT",
+        "renewalAt": null
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "display": "renewal time unknown",
+        "continuationSentWithoutRoomProof": false
+      }
+    },
+    {
+      "id": "codex-rollout-usage-optional",
+      "criteria": [
+        "AC24"
+      ],
+      "given": {
+        "keeperUsage": "usable authoritative observation",
+        "rolloutRateLimits": null
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "selectionMayProceed": true,
+        "requiresRolloutUsage": false
+      }
+    },
+    {
+      "id": "machine-policy-pending-safe-boundary",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "actualAccount": "a",
+        "machinePolicy": {
+          "revision": 8,
+          "mode": "auto",
+          "targetAccountId": "b"
+        },
+        "step": "working"
+      },
+      "when": {
+        "operation": "workflow-runner-p1"
+      },
+      "expected": {
+        "actualAccount": "a",
+        "accountTransition": {
+          "revision": 8,
+          "targetAccountId": "b",
+          "state": "pending"
+        },
+        "midStepCredentialChange": false
+      }
+    },
+    {
+      "id": "quota-decision-admission-only",
+      "criteria": [
+        "AC26"
+      ],
+      "given": {
+        "controlState": "waiting_person",
+        "origin": "quota",
+        "questionId": "question-a",
+        "rev": 57,
+        "decision": "continue",
+        "expectedRev": 57
+      },
+      "when": {
+        "record": "decision.received"
+      },
+      "expected": {
+        "admitted": true,
+        "continuationSent": false,
+        "chatStarted": false,
+        "accountChanged": false
+      }
+    },
+    {
+      "id": "quota-wait-admission",
+      "criteria": [
+        "AC27"
+      ],
+      "given": {
+        "controlState": "waiting_person",
+        "origin": "quota",
+        "questionId": "question-a",
+        "rev": 57,
+        "decision": "wait",
+        "expectedRev": 57
+      },
+      "when": {
+        "record": "decision.received"
+      },
+      "expected": {
+        "admitted": true,
+        "continuationSent": false,
+        "quotaFlowOwnsWaitTransition": true
+      }
+    },
+    {
+      "id": "quota-answer-not-approval",
+      "criteria": [
+        "AC28"
+      ],
+      "given": {
+        "controlState": "waiting_person",
+        "origin": "workflow",
+        "decision": "continue",
+        "rev": 57,
+        "expectedRev": 57
+      },
+      "when": {
+        "record": "decision.received"
+      },
+      "expected": {
+        "refused": true,
+        "decisionRecorded": false,
+        "stageAdvanced": false
+      }
+    },
+    {
+      "id": "quota-question-stale",
+      "criteria": [
+        "AC29"
+      ],
+      "given": {
+        "origin": "quota",
+        "questionId": "question-b",
+        "requestedQuestionId": "question-a",
+        "rev": 58,
+        "expectedRev": 57
+      },
+      "when": {
+        "record": "decision.received"
+      },
+      "expected": {
+        "refused": true,
+        "decisionRecorded": false,
+        "continuationSent": false
+      }
+    },
+    {
+      "id": "handoff-target-key",
+      "criteria": [
+        "AC30"
+      ],
+      "given": {
+        "attemptId": "attempt-a",
+        "turnKey": "turn-a",
+        "targetTool": "claude",
+        "backendGen": 4
+      },
+      "when": {
+        "persist": "handoff_intent"
+      },
+      "expected": {
+        "key": [
+          "attempt-a",
+          "turn-a",
+          "claude"
+        ],
+        "backendGen": 4,
+        "firstPromptBlindlyResent": false
+      }
+    },
+    {
+      "id": "shared-auto-target",
+      "criteria": [
+        "AC31"
+      ],
+      "given": {
+        "machinePolicy": {
+          "tool": "codex",
+          "revision": 8,
+          "mode": "auto",
+          "targetAccountId": "b"
+        },
+        "agents": [
+          {
+            "id": "one",
+            "actualAccount": "a",
+            "stepEnded": true
+          },
+          {
+            "id": "two",
+            "actualAccount": "a",
+            "stepEnded": false
+          }
+        ],
+        "duplicateQuotaObservation": true
+      },
+      "when": {
+        "operation": "account-boundary"
+      },
+      "expected": {
+        "targets": [
+          "b",
+          "b"
+        ],
+        "actualAccounts": {
+          "one": "b",
+          "two": "a"
+        },
+        "secondRotation": false,
+        "midStepCredentialChange": false
+      }
+    },
+    {
+      "id": "fixed-account-choices",
+      "criteria": [
+        "AC32"
+      ],
+      "given": {
+        "machinePolicy": {
+          "revision": 4,
+          "mode": "fixed",
+          "accountId": "a"
+        },
+        "accountExhausted": true
+      },
+      "when": {
+        "operation": "quota"
+      },
+      "expected": {
+        "controlState": "waiting_person",
+        "choices": [
+          "Use Auto",
+          "Pick another account",
+          "Wait until renewal"
+        ],
+        "continuationSent": false
+      }
+    },
+    {
+      "id": "fixed-switch-affects-machine",
+      "criteria": [
+        "AC32"
+      ],
+      "given": {
+        "questionRev": 57,
+        "expectedRev": 57,
+        "machinePolicyRevision": 4,
+        "expectedPolicyRevision": 4,
+        "choice": "Pick another account",
+        "selectedAccount": "b",
+        "managedAgents": [
+          "one",
+          "two"
+        ]
+      },
+      "when": {
+        "operation": "quota-settings-action"
+      },
+      "expected": {
+        "settingTarget": {
+          "scope": "machine-tool",
+          "accountId": "b"
+        },
+        "affectedAgents": [
+          "one",
+          "two"
+        ],
+        "perRunPreferenceSaved": false
+      }
+    },
+    {
+      "id": "fixed-stale-policy",
+      "criteria": [
+        "AC32"
+      ],
+      "given": {
+        "questionRev": 57,
+        "expectedRev": 57,
+        "machinePolicyRevision": 5,
+        "expectedPolicyRevision": 4,
+        "choice": "Use Auto"
+      },
+      "when": {
+        "operation": "quota-settings-action"
+      },
+      "expected": {
+        "policyChanged": false,
+        "continuationSent": false,
+        "needsRefresh": true
+      }
+    },
+    {
+      "id": "fixed-wait-keeps-policy",
+      "criteria": [
+        "AC32"
+      ],
+      "given": {
+        "policy": {
+          "mode": "fixed",
+          "accountId": "a"
+        },
+        "choice": "Wait until renewal",
+        "renewal": null
+      },
+      "when": {
+        "operation": "quota-settings-action"
+      },
+      "expected": {
+        "policy": {
+          "mode": "fixed",
+          "accountId": "a"
+        },
+        "controlState": "WAIT",
+        "display": "renewal time unknown",
+        "continuationSent": false
+      }
+    },
+    {
+      "id": "shared-account-not-extra-capacity",
+      "criteria": [
+        "AC33"
+      ],
+      "given": {
+        "machines": [
+          "one",
+          "two"
+        ],
+        "bothAccount": "a",
+        "providerUsageRemaining": 0
+      },
+      "when": {
+        "operation": "quota"
+      },
+      "expected": {
+        "roomByMachine": {
+          "one": 0,
+          "two": 0
+        },
+        "independentQuotaInvented": false
+      }
+    },
+    {
+      "id": "auto-does-not-permit-other-tool",
+      "criteria": [
+        "AC33"
+      ],
+      "given": {
+        "machinePolicy": {
+          "mode": "auto",
+          "tool": "codex"
+        },
+        "codexAccountsOut": true,
+        "claudeAvailable": true,
+        "crossToolSetting": null
+      },
+      "when": {
+        "operation": "quota"
+      },
+      "expected": {
+        "permission": "ask",
+        "claudeStarted": false
+      }
+    },
+    {
+      "id": "frozen-model-default-change",
+      "criteria": [
+        "AC34"
+      ],
+      "given": {
+        "savedSelection": {
+          "model": "a",
+          "effort": "high"
+        },
+        "newDefaults": {
+          "model": "b",
+          "effort": "low"
+        },
+        "aStillSupported": true
+      },
+      "when": {
+        "operation": "resume"
+      },
+      "expected": {
+        "effectiveSelection": {
+          "model": "a",
+          "effort": "high"
+        },
+        "defaultAppliedToExistingRun": false
+      }
+    },
+    {
+      "id": "saved-model-unsupported",
+      "criteria": [
+        "AC34"
+      ],
+      "given": {
+        "savedSelection": {
+          "model": "a",
+          "effort": "ultra"
+        },
+        "targetCatalog": {
+          "a": [
+            "low",
+            "high"
+          ]
+        }
+      },
+      "when": {
+        "operation": "resume"
+      },
+      "expected": {
+        "needsYou": true,
+        "nativeProcessStarted": false,
+        "silentDowngrade": false
+      }
+    },
+    {
+      "id": "specification-before-build",
+      "criteria": [
+        "AC35"
+      ],
+      "given": {
+        "nextStage": "work",
+        "requiredStoryComplete": false,
+        "promptAndCasesAccepted": false
+      },
+      "when": {
+        "operation": "drive"
+      },
+      "expected": {
+        "workStageStarted": false,
+        "proposalAccepted": false
+      }
+    },
+    {
+      "id": "legacy-account-preference-ignored",
+      "criteria": [
+        "AC36"
+      ],
+      "given": {
+        "legacyJournal": {
+          "stageMode": "account:old"
+        },
+        "currentMachinePolicy": {
+          "mode": "fixed",
+          "accountId": "current"
+        }
+      },
+      "when": {
+        "operation": "resume"
+      },
+      "expected": {
+        "effectiveAccountTarget": "current",
+        "oldPreferenceRestored": false
+      }
+    },
+    {
+      "id": "machine-action-releases-only-quota-questions",
+      "criteria": [
+        "AC32"
+      ],
+      "given": {
+        "settingsAction": {
+          "tool": "codex",
+          "newPolicyRevision": 9
+        },
+        "waits": [
+          {
+            "id": "quota-one",
+            "origin": "quota",
+            "rev": 57
+          },
+          {
+            "id": "quota-two",
+            "origin": "quota",
+            "rev": 61
+          },
+          {
+            "id": "story-approval",
+            "origin": "workflow",
+            "rev": 63
+          }
+        ]
+      },
+      "when": {
+        "operation": "account-settings-action"
+      },
+      "expected": {
+        "eligibleReleasedWaitIds": [
+          "quota-one",
+          "quota-two"
+        ],
+        "ordinaryApprovalGranted": false,
+        "continuationSentBySettingsAction": false
+      }
+    },
+    {
+      "id": "managed-resume-controller-only",
+      "criteria": [
+        "AC37"
+      ],
+      "given": {
+        "managedP1Run": true,
+        "currentDecision": "valid bound approve"
+      },
+      "when": {
+        "call": "resumeWorkflow"
+      },
+      "expected": {
+        "state": "prepared",
+        "nativeEffects": 0,
+        "decisionRecorded": false,
+        "journalBytesUnchanged": true
+      }
+    },
+    {
+      "id": "public-attach-durable-owner-ports",
+      "criteria": [
+        "AC38"
+      ],
+      "given": {
+        "nativeIdentity": [
+          "saved",
+          "newly discovered"
+        ],
+        "assignment": "exact",
+        "generation": "current",
+        "claim": "owned",
+        "checkpoint": "durable",
+        "controller": "free"
+      },
+      "when": {
+        "operation": "attachWorkflow"
+      },
+      "expected": {
+        "state": "waiting",
+        "attachments": 1,
+        "newStages": 0,
+        "claimBindingDurableBeforeAttach": true
+      }
+    },
+    {
+      "id": "public-attach-owner-refused",
+      "criteria": [
+        "AC38"
+      ],
+      "given": {
+        "claim": [
+          "busy",
+          "uncertain",
+          "unacknowledged"
+        ],
+        "checkpoint": "failed",
+        "owner": [
+          "wrong attempt",
+          "wrong generation",
+          "wrong assignment"
+        ]
+      },
+      "when": {
+        "operation": "attachWorkflow"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "attachments": 0,
+        "newStages": 0
+      }
+    },
+    {
+      "id": "public-attach-live-controller",
+      "criteria": [
+        "AC39"
+      ],
+      "given": {
+        "controller": "holds journal lock",
+        "nativeClaim": "same already-owned identity"
+      },
+      "when": {
+        "operation": "attachWorkflow"
+      },
+      "expected": {
+        "state": "waiting",
+        "attachments": 1,
+        "journalUnchanged": true,
+        "epochIncremented": true,
+        "controllerPollingContinues": true
+      }
+    },
+    {
+      "id": "public-attach-live-discovery-refused",
+      "criteria": [
+        "AC39"
+      ],
+      "given": {
+        "controller": "holds journal lock",
+        "nativeId": "newly discovered or unbound claim"
+      },
+      "when": {
+        "operation": "attachWorkflow"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "attachments": 0,
+        "journalUnchanged": true,
+        "promotions": 0
+      }
+    }
+  ]
+}

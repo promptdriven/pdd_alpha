@@ -1,0 +1,687 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/pdd-cli.prompt.md",
+  "story": "../../story/cli/PDD-CLI-P1.md",
+  "note": "Synthetic contract observations. No implementation or live service results.",
+  "cases": [
+    {
+      "id": "help-no-effects",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "argv": [
+          "workflow",
+          "run",
+          "--help"
+        ]
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "exitCode": 0,
+        "nativeProcessStarted": false,
+        "networkEffect": false,
+        "worksWithoutPrivateClient": true
+      }
+    },
+    {
+      "id": "run-prepares-and-launches",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "newRun": true,
+        "processProof": true
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "savedRunCount": 1,
+        "controllerPaneCount": 1,
+        "foregroundController": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "run-lost-launch",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "paneRun": "ok",
+        "processProof": false
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "exitCode": 1,
+        "launchState": "uncertain",
+        "duplicateControllerCreated": false
+      }
+    },
+    {
+      "id": "drive-current-revision",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "argv": "workflow drive UUID --decision approve --id UUID --rev 57"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "decisionBoundToRevision": 57,
+        "usesSavedRuntime": true,
+        "newRuntimeSubstituted": false
+      }
+    },
+    {
+      "id": "adopt-no-run",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "argv": "workflow adopt UUID"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "adoptionRecorded": true,
+        "controllerStarted": false
+      }
+    },
+    {
+      "id": "clean-dry-run",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "argv": "workflow clean --dry-run"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "dryRun": true,
+        "runFilesUnchanged": true,
+        "worktreeRemoved": false
+      }
+    },
+    {
+      "id": "remote-no-client",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "argv": "workflow run feature 412 --on desktop",
+        "machinePlacement": null
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "unsupported": true,
+        "localStart": false
+      }
+    },
+    {
+      "id": "decide-json-once",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "argv": "workflow decide UUID --decision approve --id UUID --rev 57 --json"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "stdoutLines": 1,
+        "jsonV": 1,
+        "exitCodeUnchanged": true
+      }
+    },
+    {
+      "id": "session-local-preserved",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "argv": "session request",
+        "machinePlacement": null
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "foregroundNative": true,
+        "fullGuideFirst": true,
+        "ownLoginPreserved": true
+      }
+    },
+    {
+      "id": "unknown-option-before-reads",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "argv": "workflow drive UUID --unknown"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "exitCode": 2,
+        "runFilesUnchanged": true,
+        "nativeProcessStarted": false,
+        "networkEffect": false
+      }
+    },
+    {
+      "id": "root-public-recovery-route",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "argv": [
+          "runs-keeper"
+        ],
+        "clientInstalled": false
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "publicRecoveryAvailable": true,
+        "worksWithoutPrivateClient": true
+      }
+    },
+    {
+      "id": "status-read-only",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "argv": [
+          "workflow",
+          "status",
+          "2f9c1d1e-4b7a-4c6e-9b1a-0d2f3e4a5b6c",
+          "--json"
+        ],
+        "clientInstalled": false
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "stdoutObjectVersion": 1,
+        "controllerStarted": false,
+        "runFilesUnchanged": true
+      }
+    },
+    {
+      "id": "status-json-object",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "argv": "workflow status RUN_ID --json",
+        "index": "matching run",
+        "status": "valid and same journalSeq as last record"
+      },
+      "when": {
+        "command": "workflow status"
+      },
+      "expected": {
+        "stdoutLines": 1,
+        "stdoutJson": {
+          "v": 1,
+          "runId": "RUN_ID",
+          "state": "waiting",
+          "journalSeq": 57
+        },
+        "unlistedStatusFieldsMayBePresent": true,
+        "controllerStarted": false
+      }
+    },
+    {
+      "id": "status-journal-fallback",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "statusJournalSeq": 56,
+        "lastCompleteJournalSeq": 57
+      },
+      "when": {
+        "command": "workflow status"
+      },
+      "expected": {
+        "displayJournalSeq": 57,
+        "statusFileUnchanged": true,
+        "journalUnchanged": true
+      }
+    },
+    {
+      "id": "status-unknown-id",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "index": "does not contain requested id",
+        "argv": "workflow status RUN_ID --json"
+      },
+      "when": {
+        "command": "workflow status"
+      },
+      "expected": {
+        "exitCode": 1,
+        "stdoutJson": {
+          "v": 1,
+          "runId": "RUN_ID",
+          "state": "unknown",
+          "message": "Run not found"
+        },
+        "controllerStarted": false
+      }
+    },
+    {
+      "id": "status-empty-index",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "index": "missing",
+        "argv": "workflow status --json"
+      },
+      "when": {
+        "command": "workflow status"
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdoutJson": {
+          "v": 1,
+          "runs": []
+        },
+        "runFilesUnchanged": true
+      }
+    },
+    {
+      "id": "upgrade-cancel",
+      "criteria": [
+        "AC17"
+      ],
+      "given": {
+        "argv": "workflow upgrade RUN_ID",
+        "confirmation": "cancel"
+      },
+      "when": {
+        "command": "workflow upgrade"
+      },
+      "expected": {
+        "runFilesUnchanged": true,
+        "agentStarted": false,
+        "runtimeUnchanged": true
+      }
+    },
+    {
+      "id": "version-local-value",
+      "criteria": [
+        "AC18"
+      ],
+      "given": {
+        "argv": [
+          "--version"
+        ],
+        "packageVersion": "0.1.2"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": "0.1.2\n",
+        "nativeProcessStarted": false,
+        "networkEffect": false
+      }
+    },
+    {
+      "id": "skill-full-guide-first",
+      "criteria": [
+        "AC19"
+      ],
+      "given": {
+        "argv": [
+          "--skill"
+        ],
+        "guidanceFiles": "all present"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "guideFirst": true,
+        "guideTruncated": false,
+        "allRequiredReferencesPresent": true,
+        "installedPathsAbsolute": true
+      }
+    },
+    {
+      "id": "skill-missing-context",
+      "criteria": [
+        "AC20"
+      ],
+      "given": {
+        "argv": [
+          "--skill"
+        ],
+        "requiredReference": "unreadable"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "exitCode": 1,
+        "claimsCompleteBundle": false,
+        "nativeProcessStarted": false
+      }
+    },
+    {
+      "id": "recipe-list-inert",
+      "criteria": [
+        "AC21"
+      ],
+      "given": {
+        "argv": [
+          "workflow",
+          "list",
+          "--json"
+        ],
+        "loaderCatalog": {
+          "workflows": [
+            {
+              "name": "custom",
+              "source": "project"
+            }
+          ],
+          "default": null
+        }
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "stdoutJson": {
+          "workflows": [
+            {
+              "name": "custom",
+              "source": "project"
+            }
+          ],
+          "default": null
+        },
+        "recipeInstalled": false,
+        "nativeProcessStarted": false
+      }
+    },
+    {
+      "id": "alpha-doctor-proposal",
+      "criteria": [
+        "AC22"
+      ],
+      "given": {
+        "argv": [
+          "doctor",
+          "--check-only"
+        ],
+        "clientInstalled": false,
+        "publicChecks": "pass"
+      },
+      "when": {
+        "operation": "pdd-cli-p1"
+      },
+      "expected": {
+        "exitCode": 0,
+        "clientChecks": "SKIP with reason",
+        "privateClientRequired": false
+      }
+    },
+    {
+      "id": "projects-readable",
+      "criteria": [
+        "AC23"
+      ],
+      "given": {
+        "argv": [
+          "projects"
+        ],
+        "catalog": [
+          {
+            "id": "p1",
+            "name": "Calendar",
+            "availability": "local"
+          }
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "stdoutIncludes": [
+          "Calendar",
+          "local"
+        ],
+        "nativeProcessStarted": false,
+        "cloned": false
+      }
+    },
+    {
+      "id": "session-project-unique",
+      "criteria": [
+        "AC23"
+      ],
+      "given": {
+        "argv": [
+          "session",
+          "--project",
+          "cal"
+        ],
+        "catalog": [
+          {
+            "id": "p1",
+            "name": "Calendar",
+            "root": "/work/cal"
+          }
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "selectedProject": "p1",
+        "nativeCwd": "/work/cal",
+        "folderTextRequested": false,
+        "fullGuideFirst": true
+      }
+    },
+    {
+      "id": "project-ambiguous",
+      "criteria": [
+        "AC24"
+      ],
+      "given": {
+        "argv": [
+          "session",
+          "--project",
+          "app"
+        ],
+        "catalog": [
+          {
+            "id": "a",
+            "name": "App"
+          },
+          {
+            "id": "b",
+            "name": "App"
+          }
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "exitCode": 2,
+        "candidateIds": [
+          "a",
+          "b"
+        ],
+        "nativeProcessStarted": false
+      }
+    },
+    {
+      "id": "remote-project-uncloned",
+      "criteria": [
+        "AC24"
+      ],
+      "given": {
+        "argv": [
+          "session",
+          "--project",
+          "Garden"
+        ],
+        "catalog": [
+          {
+            "id": "g",
+            "name": "Garden",
+            "availability": "not_cloned"
+          }
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "exitCode": 1,
+        "next": "Projects",
+        "cloned": false,
+        "nativeProcessStarted": false
+      }
+    },
+    {
+      "id": "session-account-flag-removed",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "argv": [
+          "session",
+          "--account",
+          "work"
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "exitCode": 2,
+        "message": "Set accounts per machine and tool in Settings",
+        "nativeProcessStarted": false
+      }
+    },
+    {
+      "id": "workflow-mode-flag-removed",
+      "criteria": [
+        "AC25"
+      ],
+      "given": {
+        "argv": [
+          "workflow",
+          "run",
+          "feature",
+          "7",
+          "--mode",
+          "auto"
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "exitCode": 2,
+        "runPrepared": false,
+        "nativeProcessStarted": false
+      }
+    },
+    {
+      "id": "target-validates-effort",
+      "criteria": [
+        "AC26"
+      ],
+      "given": {
+        "argv": [
+          "workflow",
+          "run",
+          "feature",
+          "7",
+          "--on",
+          "Studio",
+          "--model",
+          "model-a",
+          "--effort",
+          "ultra"
+        ],
+        "targetCatalog": {
+          "model-a": [
+            "low",
+            "high"
+          ]
+        },
+        "sourceCatalog": {
+          "model-a": [
+            "ultra"
+          ]
+        }
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "exitCode": 2,
+        "runPrepared": false,
+        "nativeProcessStarted": false,
+        "silentDowngrade": false
+      }
+    },
+    {
+      "id": "model-help-local",
+      "criteria": [
+        "AC27"
+      ],
+      "given": {
+        "argv": [
+          "workflow",
+          "run",
+          "--help"
+        ]
+      },
+      "when": {
+        "operation": "runPdd"
+      },
+      "expected": {
+        "exitCode": 0,
+        "helpIncludes": [
+          "--model",
+          "--effort"
+        ],
+        "nativeCatalogRead": false,
+        "networkEffect": false
+      }
+    }
+  ]
+}

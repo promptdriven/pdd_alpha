@@ -1,0 +1,137 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-list.prompt.md",
+  "story": "../../story/cli/WORKFLOW-LIST.md",
+  "note": "Synthetic expected cases derived from the contract, not implementation results.",
+  "cases": [
+    {
+      "id": "sorted-manual-recipes",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "regularRecipes": [
+          "zeta/WORKFLOW.md",
+          "alpha/WORKFLOW.md"
+        ]
+      },
+      "when": {
+        "call": "listLocalWorkflows"
+      },
+      "expected": {
+        "catalog": {
+          "workflows": [
+            {
+              "name": "alpha",
+              "file": ".pdd/workflows/alpha/WORKFLOW.md"
+            },
+            {
+              "name": "zeta",
+              "file": ".pdd/workflows/zeta/WORKFLOW.md"
+            }
+          ],
+          "default": null
+        }
+      }
+    },
+    {
+      "id": "missing-empty",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "directory": "missing"
+      },
+      "when": {
+        "call": "listLocalWorkflows"
+      },
+      "expected": {
+        "catalog": {
+          "workflows": [],
+          "default": null
+        }
+      }
+    },
+    {
+      "id": "symlink-not-followed",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "recipe": "symlink to another project"
+      },
+      "when": {
+        "call": "listLocalWorkflows"
+      },
+      "expected": {
+        "outsideRecipeListed": false
+      }
+    },
+    {
+      "id": "read-error",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "directoryRead": "permission error"
+      },
+      "when": {
+        "call": "listLocalWorkflows"
+      },
+      "expected": {
+        "errorPropagated": true
+      }
+    },
+    {
+      "id": "json-catalog",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "catalog": {
+          "workflows": [
+            {
+              "name": "feature",
+              "source": "bundled"
+            }
+          ],
+          "default": null
+        }
+      },
+      "when": {
+        "call": "formatLocalWorkflows",
+        "json": true
+      },
+      "expected": {
+        "json": {
+          "workflows": [
+            {
+              "name": "feature",
+              "source": "bundled"
+            }
+          ],
+          "default": null
+        }
+      }
+    },
+    {
+      "id": "human-discovery",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "catalog": "one local recipe"
+      },
+      "when": {
+        "call": "formatLocalWorkflows",
+        "json": false
+      },
+      "expected": {
+        "explainsListingIsInert": true,
+        "claimsProductHasNoRunner": false,
+        "startedNativeAgent": false,
+        "installedRecipe": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,1071 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-placement.prompt.md",
+  "story": "../../story/cli/WORKFLOW-PLACEMENT.md",
+  "note": "Synthetic, independent expected cases. Candidate fixture names expand to the exact objects under fixtures. Cases describe the contract and have not been run against code.",
+  "fixtures": {
+    "source": {
+      "id": "m-local",
+      "name": "Laptop"
+    },
+    "sessionCandidates": [
+      {
+        "id": "m-laptop",
+        "name": "Laptop",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 12,
+        "hasCleanCanonicalClone": false,
+        "workingAgentCount": 0,
+        "tags": [
+          "laptop"
+        ]
+      },
+      {
+        "id": "m-studio",
+        "name": "Studio",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 18,
+        "hasCleanCanonicalClone": true,
+        "workingAgentCount": 1,
+        "tags": [
+          "alwaysOn"
+        ]
+      },
+      {
+        "id": "m-server",
+        "name": "Server",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 8,
+        "hasCleanCanonicalClone": false,
+        "workingAgentCount": 0,
+        "tags": []
+      }
+    ],
+    "workflowCandidates": [
+      {
+        "id": "m-source",
+        "name": "Source",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 18,
+        "hasCleanCanonicalClone": true,
+        "workingAgentCount": 0,
+        "tags": []
+      },
+      {
+        "id": "m-always",
+        "name": "Always",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 12,
+        "hasCleanCanonicalClone": false,
+        "workingAgentCount": 2,
+        "tags": [
+          "alwaysOn"
+        ]
+      },
+      {
+        "id": "m-idle",
+        "name": "Idle",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 30,
+        "hasCleanCanonicalClone": true,
+        "workingAgentCount": 0,
+        "tags": []
+      }
+    ],
+    "tieCandidates": [
+      {
+        "id": "m-z",
+        "name": "Zen",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 10,
+        "hasCleanCanonicalClone": false,
+        "workingAgentCount": 0,
+        "tags": []
+      },
+      {
+        "id": "m-a",
+        "name": "Amber",
+        "ownMachine": true,
+        "online": true,
+        "herdrReady": true,
+        "installedAgents": [
+          "codex"
+        ],
+        "accountPick": "available",
+        "freeDiskGB": 10,
+        "hasCleanCanonicalClone": false,
+        "workingAgentCount": 0,
+        "tags": []
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "session-auto-score-canonical-clone",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "auto",
+        "sourceMachineId": "m-laptop",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": "sessionCandidates"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-studio",
+            "name": "Studio"
+          }
+        },
+        "scores": {
+          "m-laptop": -50,
+          "m-studio": 15,
+          "m-server": 0
+        }
+      }
+    },
+    {
+      "id": "session-auto-score-laptop-and-working-agents",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "auto",
+        "sourceMachineId": "m-laptop",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": [
+          {
+            "id": "m-laptop",
+            "name": "Laptop",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 12,
+            "hasCleanCanonicalClone": true,
+            "workingAgentCount": 0,
+            "tags": [
+              "laptop"
+            ]
+          },
+          {
+            "id": "m-light",
+            "name": "Light",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 12,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          }
+        ]
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-light",
+            "name": "Light"
+          }
+        },
+        "scores": {
+          "m-laptop": -30,
+          "m-light": 0
+        }
+      }
+    },
+    {
+      "id": "session-auto-score-tie-by-name",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "auto",
+        "sourceMachineId": "m-a",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": "tieCandidates"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-a",
+            "name": "Amber"
+          }
+        }
+      }
+    },
+    {
+      "id": "workflow-always-on-beats-higher-untagged-score",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "kind": "workflow",
+        "on": "auto",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": "workflowCandidates"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-always",
+            "name": "Always"
+          }
+        },
+        "scores": {
+          "m-source": 20,
+          "m-always": -10
+        }
+      }
+    },
+    {
+      "id": "workflow-no-eligible-always-on-stays-at-source",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "kind": "workflow",
+        "on": "auto",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": [
+          {
+            "id": "m-source",
+            "name": "Source",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 18,
+            "hasCleanCanonicalClone": true,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "m-tagged-but-unready",
+            "name": "Tagged but unready",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": false,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 30,
+            "hasCleanCanonicalClone": true,
+            "workingAgentCount": 0,
+            "tags": [
+              "alwaysOn"
+            ]
+          },
+          {
+            "id": "m-fast",
+            "name": "Fast untagged",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 30,
+            "hasCleanCanonicalClone": true,
+            "workingAgentCount": 0,
+            "tags": []
+          }
+        ]
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-source",
+            "name": "Source"
+          }
+        }
+      }
+    },
+    {
+      "id": "workflow-source-ineligible-no-untagged-fallback",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "kind": "workflow",
+        "on": "auto",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": null,
+        "candidates": [
+          {
+            "id": "m-source",
+            "name": "Source",
+            "ownMachine": true,
+            "online": false,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 20,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "m-fast",
+            "name": "Fast untagged",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 20,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          }
+        ]
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "no_eligible_machine"
+        },
+        "remoteStartCalls": 0
+      }
+    },
+    {
+      "id": "candidate-ineligible-each-supplied-gate",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "auto",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": null,
+        "candidates": [
+          {
+            "id": "foreign",
+            "name": "Not user's machine",
+            "ownMachine": false,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "offline",
+            "name": "Offline",
+            "ownMachine": true,
+            "online": false,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "herdr",
+            "name": "Herdr not ready",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": false,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "tool",
+            "name": "Tool missing",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "claude"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "room",
+            "name": "No room",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "OUT",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          },
+          {
+            "id": "disk",
+            "name": "Disk boundary",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 5,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          }
+        ]
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "no_eligible_machine"
+        },
+        "eligibleMachineIds": []
+      }
+    },
+    {
+      "id": "candidate-disk-above-boundary-is-eligible",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "Enough",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "targetName": "Enough",
+        "candidates": [
+          {
+            "id": "m-enough",
+            "name": "Enough",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 5.01,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          }
+        ]
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-enough",
+            "name": "Enough"
+          }
+        }
+      }
+    },
+    {
+      "id": "explicit-ineligible-target-is-refused",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "kind": "workflow",
+        "on": "Sleeping",
+        "sourceMachineId": "m-source",
+        "targetName": "Sleeping",
+        "agent": "codex",
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": [
+          {
+            "id": "m-sleep",
+            "name": "Sleeping",
+            "ownMachine": true,
+            "online": false,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": true,
+            "workingAgentCount": 0,
+            "tags": [
+              "alwaysOn"
+            ]
+          },
+          {
+            "id": "m-source",
+            "name": "Source",
+            "ownMachine": true,
+            "online": true,
+            "herdrReady": true,
+            "installedAgents": [
+              "codex"
+            ],
+            "accountPick": "available",
+            "freeDiskGB": 40,
+            "hasCleanCanonicalClone": false,
+            "workingAgentCount": 0,
+            "tags": []
+          }
+        ]
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "target_not_eligible"
+        },
+        "remoteStartCalls": 0
+      }
+    },
+    {
+      "id": "auto-without-canonical-repository-keeps-local",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "auto",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": null,
+        "machinePlacementPort": "available"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "local",
+          "target": null
+        },
+        "machineListCalls": 0,
+        "remoteStartCalls": 0
+      }
+    },
+    {
+      "id": "named-machine-without-canonical-repository-is-refused",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "Studio",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": null,
+        "machinePlacementPort": "available"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "repository_unavailable"
+        },
+        "machineListCalls": 0,
+        "remoteStartCalls": 0
+      }
+    },
+    {
+      "id": "dispatch-without-canonical-repository-has-no-effect",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "kind": "workflow",
+        "target": {
+          "id": "m-always",
+          "name": "Always"
+        },
+        "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+        "agent": "codex",
+        "repository": null,
+        "machinePlacementPort": "available"
+      },
+      "when": {
+        "call": "dispatchStart"
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "repository_unavailable"
+        },
+        "remoteStartCalls": 0,
+        "inspectCalls": 0
+      }
+    },
+    {
+      "id": "no-client-auto-keeps-local",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "kind": "workflow",
+        "on": "auto",
+        "machinePlacementPort": null
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "local",
+          "target": null
+        },
+        "machineListCalls": 0,
+        "remoteStartCalls": 0
+      }
+    },
+    {
+      "id": "no-client-named-machine-is-unsupported",
+      "criteria": [
+        "AC2",
+        "AC10"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "Studio",
+        "machinePlacementPort": null
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "refused",
+          "code": "remote_unsupported"
+        },
+        "machineListCalls": 0,
+        "remoteStartCalls": 0
+      }
+    },
+    {
+      "id": "remote-work-uses-canonical-repository-only",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "kind": "session",
+        "target": {
+          "id": "m-studio",
+          "name": "Studio"
+        },
+        "sourceDirty": true,
+        "sourceHasUnpushedCommit": true,
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+        "agent": "codex",
+        "requestText": "Review the current project behavior."
+      },
+      "when": {
+        "call": "dispatchStart",
+        "durableTargetIntent": true,
+        "portReply": {
+          "state": "started",
+          "targetMachineId": "m-studio",
+          "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+          "sessionId": "codex-session-19"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "started",
+          "targetMachineId": "m-studio",
+          "sessionId": "codex-session-19"
+        },
+        "portStartInput": {
+          "targetMachineId": "m-studio",
+          "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+          "kind": "session",
+          "agent": "codex",
+          "repository": {
+            "url": "https://github.com/example/app.git",
+            "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+          },
+          "requestText": "Review the current project behavior."
+        },
+        "excluded": [
+          "cwd",
+          "dirty files",
+          "local-only commits",
+          "environment",
+          "HOME",
+          "credentials"
+        ]
+      }
+    },
+    {
+      "id": "lost-start-reply-inspects-same-machine",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "kind": "workflow",
+        "target": {
+          "id": "m-always",
+          "name": "Always"
+        },
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "workflow": {
+          "name": "feature",
+          "issue": "123"
+        },
+        "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+        "agent": "codex"
+      },
+      "when": {
+        "call": "dispatchStart",
+        "durableTargetIntent": true,
+        "startReply": "lost",
+        "inspectReply": {
+          "state": "started",
+          "targetMachineId": "m-always",
+          "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+          "runId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "started",
+          "targetMachineId": "m-always",
+          "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+          "runId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0"
+        },
+        "calls": [
+          "start(m-always,37410c44-2fc5-4f75-91fd-e6aaf5fb89d0)",
+          "inspect(m-always,37410c44-2fc5-4f75-91fd-e6aaf5fb89d0)"
+        ],
+        "otherMachineStarts": 0
+      }
+    },
+    {
+      "id": "lost-start-unproved-remains-uncertain",
+      "criteria": [
+        "AC8",
+        "AC9"
+      ],
+      "given": {
+        "kind": "workflow",
+        "target": {
+          "id": "m-always",
+          "name": "Always"
+        },
+        "repository": {
+          "url": "https://github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "workflow": {
+          "name": "feature",
+          "issue": "123"
+        },
+        "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+        "agent": "codex"
+      },
+      "when": {
+        "call": "dispatchStart",
+        "durableTargetIntent": true,
+        "startReply": "lost",
+        "inspectReply": {
+          "state": "unknown",
+          "targetMachineId": "m-always",
+          "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0"
+        }
+      },
+      "expected": {
+        "result": {
+          "state": "uncertain",
+          "targetMachineId": "m-always",
+          "startId": "37410c44-2fc5-4f75-91fd-e6aaf5fb89d0",
+          "code": "uncertain"
+        },
+        "calls": [
+          "start(m-always,37410c44-2fc5-4f75-91fd-e6aaf5fb89d0)",
+          "inspect(m-always,37410c44-2fc5-4f75-91fd-e6aaf5fb89d0)"
+        ],
+        "secondStartCalls": 0,
+        "otherMachineStarts": 0
+      }
+    },
+    {
+      "id": "remote-resolves-target-defaults",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "target": "studio",
+        "sourceDefaults": {
+          "model": "source-a",
+          "effort": "ultra"
+        },
+        "targetDefaults": {
+          "model": "target-b",
+          "effort": "high"
+        },
+        "selectionOverrides": null,
+        "project": {
+          "id": "p1",
+          "name": "Calendar"
+        }
+      },
+      "when": {
+        "operation": "dispatchStart"
+      },
+      "expected": {
+        "effectiveSelection": {
+          "model": "target-b",
+          "effort": "high"
+        },
+        "projectName": "Calendar",
+        "accountPreferenceTransmitted": false
+      }
+    },
+    {
+      "id": "project-name-not-folder",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "project": {
+          "id": "p1",
+          "name": "Calendar"
+        },
+        "targetRoot": "/internal/checkouts/cal",
+        "dirtyCheckout": true
+      },
+      "when": {
+        "operation": "dispatchStart"
+      },
+      "expected": {
+        "resultProjectName": "Calendar",
+        "folderTextRequested": false,
+        "dirtyCheckoutModified": false
+      }
+    },
+    {
+      "id": "missing-on-value-refused",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "argv": [
+          "session",
+          "--on"
+        ]
+      },
+      "when": {
+        "operation": "parse-start"
+      },
+      "expected": {
+        "refused": true,
+        "nativeStarted": false,
+        "remoteStarted": false
+      }
+    },
+    {
+      "id": "credential-free-ssh-url",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "Studio",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": {
+          "url": "ssh://git@github.com/example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": "sessionCandidates"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-studio",
+            "name": "Studio"
+          }
+        }
+      }
+    },
+    {
+      "id": "credential-free-scp-ssh",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "kind": "session",
+        "on": "Studio",
+        "sourceMachineId": "m-source",
+        "agent": "codex",
+        "repository": {
+          "url": "git@github.com:example/app.git",
+          "ref": "8f2c80b9c0c6a7b9d4e5f60123456789abcdef01"
+        },
+        "candidates": "sessionCandidates"
+      },
+      "when": {
+        "call": "selectStartTarget"
+      },
+      "expected": {
+        "result": {
+          "state": "selected",
+          "target": {
+            "id": "m-studio",
+            "name": "Studio"
+          }
+        }
+      }
+    }
+  ]
+}

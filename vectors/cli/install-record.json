@@ -1,0 +1,300 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/install-record.prompt.md",
+  "story": "../../story/cli/INSTALL-RECORD.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "revision-conflict",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "rev": 5,
+        "expectedRev": 4,
+        "validLease": true
+      },
+      "when": "writeInstallRecord",
+      "expected": {
+        "code": "stale_record",
+        "recordUnchanged": true
+      }
+    },
+    {
+      "id": "unknown-fields-roundtrip",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "rev": 5,
+        "futureField": {
+          "keep": true
+        },
+        "validLease": true
+      },
+      "when": "Write next known phase",
+      "expected": {
+        "rev": 6,
+        "futureField": {
+          "keep": true
+        },
+        "atomicReplacement": true,
+        "recordMode": "0600"
+      }
+    },
+    {
+      "id": "write-without-lease",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "rev": 5,
+        "validLease": false
+      },
+      "when": "writeInstallRecord",
+      "expected": {
+        "recordUnchanged": true,
+        "activeEffectsAllowed": false
+      }
+    },
+    {
+      "id": "disk-full-before-rename",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "record": "complete rev 5",
+        "writeError": "ENOSPC"
+      },
+      "when": "Persist activation intent",
+      "expected": {
+        "code": "record_io",
+        "record": "complete rev 5",
+        "flipAllowed": false
+      }
+    },
+    {
+      "id": "corrupt-json",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "recordBytes": "{broken"
+      },
+      "when": "readInstallRecord then request mutation",
+      "expected": {
+        "code": "record_damaged",
+        "recordBytes": "{broken",
+        "newEmptyRecordWritten": false
+      }
+    },
+    {
+      "id": "unknown-phase",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "phase": "future_control_state"
+      },
+      "when": "Recover transaction",
+      "expected": {
+        "code": "recovery_required",
+        "flipAllowed": false,
+        "unknownDataPreserved": true
+      }
+    },
+    {
+      "id": "activation-intent-survives",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "phase": "activating",
+        "from": "R1",
+        "to": "R2",
+        "barrierId": "B1"
+      },
+      "when": "Restart recovery process",
+      "expected": {
+        "from": "R1",
+        "to": "R2",
+        "barrierId": "B1",
+        "newTransactionInvented": false
+      }
+    },
+    {
+      "id": "duplicate-exit",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "failures": 1,
+        "pendingAttempt": "A2",
+        "events": [
+          "A2 exits before ready",
+          "A2 duplicate exit callback"
+        ]
+      },
+      "when": "Commit startup outcome",
+      "expected": {
+        "failures": 2,
+        "countedAttemptIds": [
+          "A2"
+        ]
+      }
+    },
+    {
+      "id": "success-resets-counter",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "failures": 2,
+        "pendingAttempt": "A3",
+        "matchingReady": true
+      },
+      "when": "Commit startup success",
+      "expected": {
+        "failures": 0,
+        "lastSuccess": "A3"
+      }
+    },
+    {
+      "id": "unknown-process-proof",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "failures": 1,
+        "pendingAttempt": "A2",
+        "proof": "unavailable"
+      },
+      "when": "Reconcile unresolved attempt",
+      "expected": {
+        "code": "recovery_required",
+        "failures": 1,
+        "newAttemptAllowed": false
+      }
+    },
+    {
+      "id": "rejection-survives-seq-edit",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "rejectedRelease": "R2",
+        "manifestSeq": 10
+      },
+      "when": "Read valid manifest seq 11 still naming R2",
+      "expected": {
+        "rejectedRelease": "R2",
+        "automaticRetryAllowed": false
+      }
+    },
+    {
+      "id": "offline-report-retry",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "reports": [
+          {
+            "id": "report-1",
+            "type": "release.block",
+            "delivered": false
+          }
+        ],
+        "network": "offline"
+      },
+      "when": "Restart then deliver after network returns",
+      "expected": {
+        "reportId": "report-1",
+        "newReportIdCreated": false,
+        "secretFields": []
+      }
+    },
+    {
+      "id": "persist-deadline-evidence",
+      "criteria": [
+        "AC3",
+        "AC4"
+      ],
+      "given": {
+        "attemptId": "A1",
+        "bootId": "B1",
+        "startedAt": 1000,
+        "deadlineAt": 601000,
+        "deadlineRegistration": "D1"
+      },
+      "when": "Persist pre-exec start intent",
+      "expected": {
+        "deadlineAt": 601000,
+        "deadlineSurvivesHelperRestart": true,
+        "independentPollingLoop": false
+      }
+    },
+    {
+      "id": "deadline-counted-once",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "failures": 1,
+        "attemptId": "A2",
+        "events": [
+          "ten-minute deadline failed",
+          "service restart sees same failed A2"
+        ]
+      },
+      "when": "Reconcile pending record",
+      "expected": {
+        "failures": 2,
+        "countedAttemptIds": [
+          "A2"
+        ]
+      }
+    },
+    {
+      "id": "link-clears-unresolved-entry",
+      "criteria": [
+        "AC1",
+        "AC4"
+      ],
+      "given": {
+        "attemptId": "A3",
+        "matchingReadyBeforeDeadline": true,
+        "validLease": true,
+        "failures": 2
+      },
+      "when": "Link commits success through install-record owner",
+      "expected": {
+        "pending": null,
+        "lastSuccess": "A3",
+        "failures": 0,
+        "unlockedWrite": false
+      }
+    },
+    {
+      "id": "concurrent-stage-checkpoint-preserves-owner",
+      "criteria": [
+        "AC1",
+        "AC3"
+      ],
+      "given": {
+        "transaction": "setup T0",
+        "staging": {
+          "T1": "downloading",
+          "T2": "downloading"
+        },
+        "validLease": true
+      },
+      "when": "Persist T1 checked checkpoint",
+      "expected": {
+        "transaction": "setup T0",
+        "T1Phase": "checked",
+        "T2Phase": "downloading",
+        "downloadLockHeld": false
+      }
+    }
+  ]
+}

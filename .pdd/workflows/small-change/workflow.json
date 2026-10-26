@@ -9,7 +9,9 @@
       "file": "scope.md",
       "protocol": "proposal",
       "requiredRoles": [
-        "cases"
+        "cases",
+        "prompt",
+        "story"
       ],
       "approval": "next-advance"
     },

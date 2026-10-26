@@ -213,3 +213,21 @@ test('default execFile records genuine local stdout/stderr and a nonzero process
   assert.equal(report.results[1].stderr, 'failed');
   assert.equal((await runWorkflowTestCommands({ cwd: f.cwd, testCommands: commands.slice(0, 1) })).passed, true);
 });
+
+const vectors=JSON.parse(await fs.readFile(new URL('../vectors/cli/workflow-artifacts.json',import.meta.url),'utf8'));
+for(const c of vectors.cases)test(`independent vector: ${c.id}`,async t=>{
+  const f=await fixture(t),expected=c.expected;
+  if(c.id==='identity-and-bytes'){const value=await readWorkflowHandoff(f.request);assert.equal(!!value,expected.accepted);assert.deepEqual(value,f.data);}
+  else if(c.id==='wrong-input'){await f.save({...f.data,inputRevision:c.given.handoffRevision});await assert.rejects(readWorkflowHandoff(f.request));}
+  else if(c.id==='closed-schema'){await f.save({...f.data,[c.given.extraField]:true,files:[f.data.files[0],f.data.files[0]]});await assert.rejects(readWorkflowHandoff(f.request));}
+  else if(c.id==='missing-required-role'){await f.save({...f.data,files:f.data.files.filter(x=>x.role!=='story')});await assert.rejects(readWorkflowHandoff({...f.request,requiredRoles:c.given.requiredRoles}));}
+  else if(c.id==='report-empty-files'){await f.save({...f.data,files:c.given.files});const value=await readWorkflowHandoff({...f.request,requiredRoles:c.given.requiredRoles});assert.equal(!!value,expected.accepted);assert.deepEqual(value.files,[]);}
+  else if(c.id==='hash-case'){await assertWorkflowArtifacts({cwd:f.cwd,files:f.data.files.map(x=>({...x,sha256:x.sha256.toUpperCase()}))});assert.equal(expected.accepted,true);}
+  else if(c.id==='containment'){await fs.symlink(join(f.cwd,'story/task.md'),join(f.cwd,'link-to-outside.md'));for(const path of c.given.paths)await assert.rejects(assertWorkflowArtifacts({cwd:f.cwd,files:[{...f.data.files[0],path}]}));}
+  else if(c.id==='handoff-metadata'){const actual=join(f.cwd,'metadata');await fs.rename(join(f.cwd,'.git'),actual);await fs.writeFile(join(f.cwd,'.git'),'gitdir: metadata\n');const value=await readWorkflowHandoff({...f.request,handoffPath:join(actual,'pdd/run/handoff.json')});assert.deepEqual(value,f.data);}
+  else if(c.id==='literal-argv'){let observed;const result=await runWorkflowTestCommands({cwd:f.cwd,testCommands:c.given.testCommands},{execFile:async(file,args,options)=>{observed={file,args,options};return {stdout:''};}});assert.equal(result.passed,true);assert.deepEqual([observed.file,...observed.args],c.given.testCommands[0]);assert.notEqual(observed.options.shell,true);}
+  else if(c.id==='no-commands-no-pass')await assert.rejects(runWorkflowTestCommands({cwd:f.cwd,testCommands:c.given.testCommands}));
+  else if(c.id==='exit-status-not-prose'){let n=0;const result=await runWorkflowTestCommands({cwd:f.cwd,testCommands:c.given.testCommands},{execFile:async()=>({code:c.given.observedExits[n++],stdout:c.given.stdout})});assert.equal(result.passed,expected.passed);assert.deepEqual(result.results.map(x=>x.exitCode),expected.resultExitCodes);}
+  else if(c.id==='spawn-failure'){const result=await runWorkflowTestCommands({cwd:f.cwd,testCommands:[['missing-executable']]},{execFile:async()=>{throw Object.assign(Error('spawn failure'),{code:'ENOENT'});}});assert.equal(result.passed,expected.passed);assert.equal(result.results[0].exitCode,expected.resultExitCode);}
+  else assert.fail(`Unmapped vector ${c.id}`);
+});

@@ -476,3 +476,289 @@ test('real local Git proves absent remote branch, recovers one original publicat
   assert.equal(await readFile(bodyFile, 'utf8'), body);
   assert.equal((await git('status', '--porcelain=v1')).stdout, '');
 });
+
+const vectors=JSON.parse(await readFile(new URL('../vectors/cli/workflow-github.json',import.meta.url),'utf8'));
+for(const c of vectors.cases.filter(c=>c.id!=='scan-advisory'))test(`independent vector: ${c.id}`,async t=>{
+  if (c.id === 'accepted-scope-artifact-composition' || c.id.startsWith('artifact-checkpoint-')) return checkpointCase(t, c.id);
+  const f=await fixture(t),expected=c.expected;
+  if(c.id==='issue-normalization'){f.state.issue={number:412,html_url:'https://github.com/Acme/Project/issues/412',title:'Synthetic issue',body:null};const value=await resolveWorkflowIssue({cwd:f.cwd,issue:'Acme/Project#412'},f.ports);assert.equal(value.issue.number,expected.issueNumber);assert.equal(value.issue.body,expected.body);assert.equal(value.repository,'Acme/Project');}
+  else if(c.id==='pr-not-issue'){f.state.issue.pull_request={url:'https://api.github.com/repos/Acme/Project/pulls/12'};await assert.rejects(resolveWorkflowIssue({cwd:f.cwd,issue:12},f.ports));assert.equal(effects(f.calls).length,0);}
+  else if(c.id==='foreign-repository')await assert.rejects(resolveWorkflowIssue({cwd:f.cwd,issue:'other/repo#12'},f.ports));
+  else if(c.id==='prepare-no-publication'){await writeFile(f.bodyFile,'Authored PR\n');const intent=await f.prepare();assert.equal((await readFile(intent.bodyFile,'utf8')).startsWith('Authored PR\n'),expected.authoredBodyPreserved);assert.equal((await readFile(intent.bodyFile,'utf8')).split(intent.marker).length-1,expected.ownLineMarkerCount);assert.equal(effects(f.calls).length,0);}
+  else if(c.id==='dirty-topic'){f.state.dirty=' M source.mjs\n';await assert.rejects(f.prepare());assert.equal(effects(f.calls).length,0);}
+  else if(c.id==='body-alias'){const source=join(f.cwd,'source.mjs');await writeFile(source,'keep\n');await symlink(source,f.bodyFile);await assert.rejects(f.prepare());assert.equal(await readFile(source,'utf8'),'keep\n');}
+  else {
+    const intent=await f.prepare();
+    if(c.id==='unknown-push')f.state.intercept=async(file,args)=>{if(file==='git'&&args[0]==='push')throw Error('lost push reply');};
+    if(c.id==='ambiguous-reconcile')f.state.rows=[row(),row({number:43,url:'https://github.com/Acme/Project/pull/43'})];
+    if(c.id==='remote-head-present')f.state.remoteHead=headSha;
+    if(c.id==='closed-is-not-merged')f.state.rows=[row({state:'CLOSED'})];
+    const value=['ambiguous-reconcile','closed-is-not-merged'].includes(c.id)?await reconcileWorkflowPr({cwd:f.cwd,intent},f.ports):await publishWorkflowPr({cwd:f.cwd,intent,...(['explicit-absence-recovery','remote-head-present'].includes(c.id)?{unpublishedOnly:true}:{})},f.ports);
+    if(expected.state)assert.equal(value.state,expected.state,value.message);
+    if(c.id==='explicit-absence-recovery'){assert.equal(value.state,'open');assert.equal(effects(f.calls).length,2);assert.ok(f.calls.find(x=>x.file==='git'&&x.args[0]==='push').args.includes(headSha+':refs/heads/topic/feature'));}
+    if(c.id==='unknown-push')assert.equal(f.state.published,false);
+    if(['ambiguous-reconcile','remote-head-present','closed-is-not-merged'].includes(c.id))assert.equal(effects(f.calls).length,0);
+    if(c.id==='closed-is-not-merged')assert.equal(value.pr.mergeCommit,expected.mergeCommit);
+  }
+});
+
+
+async function checkpointFixture(t, paths = ['README.prompt.md', 'README.story.md', 'README.cases.md']) {
+  const cwd = await mkdtemp(join(tmpdir(), 'pdd-artifact-commit-'));
+  t.after(() => rm(cwd, {recursive:true, force:true}));
+  const execute = promisify(execFile), calls = [];
+  const git = async (...args) => (await execute('git', args, {cwd})).stdout.trim();
+  await git('init', '-b', 'main'); await git('config', 'user.email', 'test@example.invalid');
+  await git('config', 'user.name', 'Artifact Test');
+  await writeFile(join(cwd, 'README.md'), 'base\n'); await git('add', '--', 'README.md'); await git('commit', '-m', 'base');
+  await git('remote', 'add', 'origin', 'https://github.com/Acme/Project.git');
+  await git('update-ref', 'refs/remotes/origin/main', 'HEAD'); await git('switch', '-c', 'topic/artifacts');
+  const {createHash} = await import('node:crypto');
+  const files = [];
+  for (const [i, path] of paths.entries()) {
+    await writeFile(join(cwd, path), 'approved artifact '+i+'\n');
+    files.push({path,sha256:createHash('sha256').update(await readFile(join(cwd,path))).digest('hex'),role:['prompt','story','cases'][i%3]});
+  }
+  await writeFile(join(cwd, 'README.md'), 'agent change\n'); await git('add', '--', 'README.md');
+  await git('commit', '-m', 'agent implementation only');
+  const expectedHead = await git('rev-parse', 'HEAD');
+  let pr = null;
+  const ports = {async execFile(file,args,options) {
+    calls.push({file,args:[...args]});
+    if (file==='git' && args[0]==='push') return {stdout:''};
+    if (file==='git') return execute(file,args,options);
+    assert.equal(file,'gh');
+    if (args[0]==='repo') return {stdout:JSON.stringify({nameWithOwner:'Acme/Project',defaultBranchRef:{name:'main'},url:'https://github.com/Acme/Project'})};
+    if (args[1]==='list') return {stdout:JSON.stringify(pr?[pr]:[])};
+    assert.equal(args[1],'create'); const value=flag=>args[args.indexOf(flag)+1];
+    pr=row({headRefName:value('--head'),headRefOid:await git('rev-parse','HEAD'),body:await readFile(value('--body-file'),'utf8')});
+    return {stdout:pr.url};
+  }};
+  const input={cwd,runId:'run-123',stageId:'prompt',headBranch:'topic/artifacts',baseBranch:'main',expectedHead,files};
+  const commit = async (overrides={},customPorts=ports) => {
+    const {commitWorkflowArtifacts} = await import('../src/workflow-github.mjs');
+    return commitWorkflowArtifacts({...input,...overrides},customPorts);
+  };
+  return {cwd,git,files,calls,ports,input,commit};
+}
+
+async function checkpointCase(t, id) {
+  const f=await checkpointFixture(t);
+  if(id==='artifact-checkpoint-unrelated-dirty') {
+    for(const staged of [false,true]) {
+      await writeFile(join(f.cwd,'unrelated draft.txt'),'keep\n');
+      if(staged) await f.git('add','--','unrelated draft.txt');
+      const index=await f.git('diff','--cached','--binary');
+      await assert.rejects(f.commit(),error=>/unrelated draft.txt/.test(error.message)&&/commit or move/i.test(error.message));
+      assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+      assert.equal(await f.git('diff','--cached','--binary'),index);
+      assert.equal(await readFile(join(f.cwd,'unrelated draft.txt'),'utf8'),'keep\n');
+    }
+    return;
+  }
+  if(id==='artifact-checkpoint-drift') {
+    await assert.rejects(f.commit({expectedHead:'d'.repeat(40)}));
+    await assert.rejects(f.commit({headBranch:'other'}));
+    await assert.rejects(f.commit({baseBranch:'topic/artifacts'}));
+    await writeFile(join(f.cwd,f.files[0].path),'not accepted\n');
+    await assert.rejects(f.commit(),/hash/);
+    assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+    assert.equal(await f.git('diff','--cached','--name-only'),'');
+    return;
+  }
+  const committed=await f.commit();
+  assert.equal(committed.previousHead,f.input.expectedHead);
+  assert.notEqual(committed.headSha,f.input.expectedHead);
+  assert.deepEqual([...committed.committedPaths].sort(),f.files.map(x=>x.path).sort());
+  assert.equal(await f.git('status','--porcelain'),'');
+  assert.equal(await f.git('rev-parse','HEAD^'),f.input.expectedHead);
+  assert.deepEqual((await f.git('diff-tree','--no-commit-id','--name-only','-r','HEAD')).split('\n').sort(),f.files.map(x=>x.path).sort());
+  for(const file of f.files) assert.equal(await f.git('show',`HEAD:${file.path}`),(await readFile(join(f.cwd,file.path),'utf8')).trim());
+  assert.equal(await f.git('show','HEAD:README.md'),'agent change');
+  if(id==='artifact-checkpoint-inspection-and-interruption') {
+    await assert.rejects(f.commit(),/source_changed/);
+    const again=await f.commit({expectedHead:committed.headSha});
+    assert.deepEqual(again.committedPaths,[]);
+    assert.equal(await f.git('rev-parse','HEAD'),committed.headSha);
+    assert.equal(f.calls.filter(c=>c.file==='git'&&c.args.includes('commit')).length,1);
+    return;
+  }
+  const intent=await prepareWorkflowPr({cwd:f.cwd,runId:'run-123',stageId:'prompt',repository:'Acme/Project',baseBranch:'main',bodyFile:join(f.cwd,'.git','pr.md')},f.ports);
+  assert.equal(intent.headSha,committed.headSha);
+  const result=await publishWorkflowPr({cwd:f.cwd,intent},f.ports);
+  assert.equal(result.state,'open',result.message);
+  assert.equal(result.pr.headSha,committed.headSha);
+  assert.equal(effects(f.calls).length,2);
+}
+
+test('accepted artifact literal pathspecs preserve spaces, leading dashes and Git pathspec punctuation',async t=>{
+  const f=await checkpointFixture(t,['-prompt.md','story with space.md',':(glob)cases*.md']);
+  await f.commit();
+  assert.deepEqual((await f.git('diff-tree','--no-commit-id','--name-only','-r','HEAD')).split('\n').sort(),f.files.map(x=>x.path).sort());
+});
+
+test('accepted artifact symlinks and implicit directory/pathspec scope cannot be committed',async t=>{
+  const f=await checkpointFixture(t);
+  await rm(join(f.cwd,f.files[0].path)); await symlink('README.md',join(f.cwd,f.files[0].path));
+  await assert.rejects(f.commit(),/regular|symlink/);
+  await assert.rejects(f.commit({files:[{...f.files[0],path:'../outside'}]}));
+  await assert.rejects(f.commit({files:[{...f.files[0],role:'implementation'}]}));
+  assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+  assert.equal(await f.git('diff','--cached','--name-only'),'');
+});
+
+
+test('artifact checkpoint refuses a different staged version without replacing it',async t=>{
+  const f=await checkpointFixture(t),path=f.files[0].path;
+  const accepted=await readFile(join(f.cwd,path));
+  await writeFile(join(f.cwd,path),'separate staged work\n'); await f.git('add','--',path);
+  const staged=await f.git('show',`:${path}`);
+  await writeFile(join(f.cwd,path),accepted);
+  await assert.rejects(f.commit(),/artifact_index_changed/);
+  assert.equal(await f.git('show',`:${path}`),staged);
+  assert.deepEqual(await readFile(join(f.cwd,path)),accepted);
+  assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+});
+
+test('artifact checkpoint refuses Git content conversion instead of committing bytes outside the handoff hash',async t=>{
+  const f=await checkpointFixture(t),file=f.files[0];
+  await f.git('config','core.autocrlf','true');
+  await writeFile(join(f.cwd,file.path),'accepted CRLF\r\n');
+  const {createHash}=await import('node:crypto');
+  file.sha256=createHash('sha256').update(await readFile(join(f.cwd,file.path))).digest('hex');
+  await assert.rejects(f.commit(),/artifact_index_changed/);
+  assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+  assert.equal(await readFile(join(f.cwd,file.path),'utf8'),'accepted CRLF\r\n');
+});
+
+test('artifact checkpoint rejects unrelated rename destinations and sources without index or history loss',async t=>{
+  const f=await checkpointFixture(t);
+  await f.git('mv','README.md','unrelated renamed.md');
+  const index=await f.git('diff','--cached','--binary');
+  await assert.rejects(f.commit(),error=>/README.md/.test(error.message)&&/unrelated renamed.md/.test(error.message));
+  assert.equal(await f.git('diff','--cached','--binary'),index);
+  assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+});
+
+
+test('artifact checkpoint preserves an independent staged draft at the final status observation',async t=>{
+  const f=await checkpointFixture(t),path=f.files[0].path;
+  const accepted=await readFile(join(f.cwd,path));
+  let status=0,injected=false,error=null;
+  const ports={async execFile(file,args,options){
+    if(file==='git'&&args[0]==='status'&&++status===3){
+      await writeFile(join(f.cwd,path),'New independent staged draft\n');
+      await f.git('add','--',path);
+      await writeFile(join(f.cwd,path),accepted);
+      injected=true;
+    }
+    return f.ports.execFile(file,args,options);
+  }};
+  try { await f.commit({},ports); } catch(e) { error=e; }
+  assert.equal(injected,true);
+  assert.equal(await f.git('show',':'+path),'New independent staged draft');
+  assert.ok(error,'a changed independent index must refuse');
+  assert.equal(error.code,'workflow_github_artifact_index_changed');
+  assert.match(error.message,/different staged changes.*Commit or move.*preserved your index/);
+  assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+  assert.deepEqual(await readFile(join(f.cwd,path)),accepted);
+});
+
+test('artifact checkpoint respects an existing Git index lock without removing it or changing staged work',async t=>{
+  const f=await checkpointFixture(t),index=await readFile(join(f.cwd,'.git','index'));
+  const lock=join(f.cwd,'.git','index.lock');
+  await writeFile(lock,'independent Git lock\n');
+  await assert.rejects(f.commit(),error=>error.code==='workflow_github_artifact_index_busy');
+  assert.equal(await readFile(lock,'utf8'),'independent Git lock\n');
+  assert.deepEqual(await readFile(join(f.cwd,'.git','index')),index);
+  assert.equal(await f.git('rev-parse','HEAD'),f.input.expectedHead);
+});
+
+test('artifact checkpoint excludes a concurrent Git index writer while publishing its validated private index',async t=>{
+  const f=await checkpointFixture(t);let attempted=false;
+  const ports={async execFile(file,args,options){
+    if(file==='git'&&args[0]==='commit'){
+      attempted=true;
+      assert.ok(options.env.GIT_INDEX_FILE);
+      await assert.rejects(f.git('add','--',f.files[0].path),error=>/index\.lock/.test(error.stderr));
+    }
+    return f.ports.execFile(file,args,options);
+  }};
+  await f.commit({},ports);
+  assert.equal(attempted,true);
+  assert.equal(await f.git('status','--porcelain'),'');
+  assert.equal(await f.git('rev-parse','HEAD^'),f.input.expectedHead);
+});
+
+
+const publicationDescription = () => ({
+  issue: {number:12, url:'https://github.com/Acme/Project/issues/12', title:'Use the requested value'},
+  summary:'Change the value.\nKeep the existing interface.',
+  checks:[{argv:['node','check.mjs'],exitCode:0}]
+});
+
+test('C12 issue description preserves authored body and remains marker-idempotent', async t => {
+  const f = await fixture(t), description = publicationDescription();
+  await writeFile(f.bodyFile, 'Authored rationale\n');
+  const input = {...f.input,description};
+  const intent = await prepareWorkflowPr(input,f.ports);
+  assert.equal(intent.title,'Use the requested value');
+  const body = await readFile(f.bodyFile,'utf8');
+  assert.ok(body.startsWith('Authored rationale\n'));
+  assert.match(body,/Closes #12/);
+  assert.match(body,/Change the value\. Keep the existing interface\./);
+  assert.ok(body.includes('PASS (exit 0): ["node","check.mjs"]'));
+  assert.equal(body.split(intent.marker).length-1,1);
+  assert.deepEqual(await prepareWorkflowPr(input,f.ports),intent);
+  assert.equal(await readFile(f.bodyFile,'utf8'),body);
+  assert.equal(effects(f.calls).length,0);
+});
+
+test('C12 description refuses foreign identity, invalid evidence and injected markers without overwriting authored text', async t => {
+  const invalid = [
+    d => d.issue.url='https://github.com/Other/Project/issues/12',
+    d => d.issue.number=0,
+    d => d.issue.title='Bad\ntitle',
+    d => d.issue.title='x'.repeat(257),
+    d => d.summary='<!-- pdd-workflow:other:stage -->',
+    d => d.checks[0].exitCode=null,
+    d => d.checks[0].argv=['node','pdd-workflow:other:stage']
+  ];
+  for(const mutate of invalid) {
+    const f = await fixture(t), description = publicationDescription(); mutate(description);
+    await writeFile(f.bodyFile,'Preserve this authored text\n');
+    await assert.rejects(prepareWorkflowPr({...f.input,description},f.ports),/workflow_github_/);
+    assert.equal(await readFile(f.bodyFile,'utf8'),'Preserve this authored text\n');
+    assert.equal(effects(f.calls).length,0);
+  }
+});
+
+test('C12 description bounds long summaries and reports failed results without copying raw output', async t => {
+  const f=await fixture(t),description=publicationDescription();
+  description.summary='x'.repeat(600);
+  description.checks=[{argv:['node','check.mjs'],exitCode:1,stdout:'private stdout',stderr:'private stderr'}];
+  const intent=await prepareWorkflowPr({...f.input,description},f.ports),body=await readFile(intent.bodyFile,'utf8');
+  assert.ok(body.includes('x'.repeat(499)+'…'));
+  assert.ok(!body.includes('x'.repeat(500)));
+  assert.ok(body.includes('FAIL (exit 1): ["node","check.mjs"]'));
+  assert.doesNotMatch(body,/private stdout|private stderr/);
+});
+
+
+test('C12 sparse verification evidence refuses before changing the authored body', async t => {
+  const cases = [
+    ['missing check', d => { d.checks = Array(1); }],
+    ['hole after a valid check', d => { d.checks.length = 2; }],
+    ['missing executable', d => { d.checks[0].argv = Array(1); }],
+    ['hole after executable', d => { d.checks[0].argv = ['node', , 'check.mjs']; }]
+  ];
+  for (const [name, change] of cases) await t.test(name, async t => {
+    const f = await fixture(t), description = publicationDescription(); change(description);
+    await writeFile(f.bodyFile, 'Preserve independently authored text\n');
+    await assert.rejects(prepareWorkflowPr({...f.input, description}, f.ports),
+      {code:'workflow_github_description_invalid'});
+    assert.equal(await readFile(f.bodyFile, 'utf8'), 'Preserve independently authored text\n');
+    assert.equal(effects(f.calls).length, 0);
+    assert.equal(f.state.headSha, headSha);
+  });
+});

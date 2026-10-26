@@ -1,0 +1,200 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/update-lock.prompt.md",
+  "story": "../../story/cli/UPDATE-LOCK.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "parallel-setup-and-activation",
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "given": {
+        "owner": "setup",
+        "waiter": "activation"
+      },
+      "when": "Both request update.lock",
+      "expected": {
+        "maxConcurrentOperations": 1,
+        "waitMessageCount": 1,
+        "waitMessage": "Another setup or update is running. Waiting\u2026"
+      }
+    },
+    {
+      "id": "persistent-inode",
+      "criteria": [
+        "AC1",
+        "AC3"
+      ],
+      "given": {
+        "fileExists": true,
+        "pidText": "old pid",
+        "kernelOwner": null
+      },
+      "when": "Acquire lock",
+      "expected": {
+        "acquired": true,
+        "lockFileReplaced": false
+      }
+    },
+    {
+      "id": "live-owner-old-age",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "kernelOwner": "live",
+        "ownerAgeHours": 48
+      },
+      "when": "Another caller requests lock",
+      "expected": {
+        "stolen": false,
+        "secondOperationStarted": false
+      }
+    },
+    {
+      "id": "death-releases-kernel-lock",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "owner": "process A",
+        "waiter": "process B"
+      },
+      "when": "A dies while holding lock",
+      "expected": {
+        "BEventuallyAcquires": true,
+        "manualPidCleanupNeeded": false,
+        "sameLockInode": true
+      }
+    },
+    {
+      "id": "cancel-while-waiting",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "owner": "A",
+        "waiter": "B"
+      },
+      "when": "Cancel B before acquisition",
+      "expected": {
+        "code": "cancelled",
+        "BOperationCalls": 0,
+        "activeMutation": false
+      }
+    },
+    {
+      "id": "kernel-binding-unavailable",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "kernelLockFacilityAvailable": false
+      },
+      "when": "withUpdateLock",
+      "expected": {
+        "code": "lock_unavailable",
+        "operationCalls": 0,
+        "pidFileFallback": false
+      }
+    },
+    {
+      "id": "operation-throws",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "acquired": true,
+        "operationError": "synthetic failure"
+      },
+      "when": "Operation throws",
+      "expected": {
+        "error": "synthetic failure",
+        "lockReleased": true
+      }
+    },
+    {
+      "id": "cli-and-detached-worker",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "requester": "CLI",
+        "worker": "detached updater"
+      },
+      "when": "Start worker and follow progress",
+      "expected": {
+        "CLILeaseHeldWhileFollowing": false,
+        "workerAcquiresOwnLease": true
+      }
+    },
+    {
+      "id": "stage-then-activate",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "stagedTarget": "R2",
+        "lockReleasedAfterChecked": true,
+        "newCurrent": "R3"
+      },
+      "when": "Later activation reacquires",
+      "expected": {
+        "targetAndPredecessorRevalidated": true,
+        "staleAssumptionsUsed": false
+      }
+    },
+    {
+      "id": "nested-helper-lease",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "owner": "updater",
+        "helper": "ensureOwnedNode"
+      },
+      "when": "Call helper inside locked operation",
+      "expected": {
+        "secondLockAcquisition": false,
+        "sameLeaseUsed": true
+      }
+    },
+    {
+      "id": "stage-download-does-not-wait-for-setup",
+      "criteria": [
+        "AC1",
+        "AC6"
+      ],
+      "given": {
+        "lockOwner": "setup",
+        "downloadTarget": "R2"
+      },
+      "when": "Stage into unique transaction temporary folder",
+      "expected": {
+        "downloadMayProceed": true,
+        "stagerHoldsUpdateLock": false,
+        "currentMutation": false
+      }
+    },
+    {
+      "id": "publication-waits-and-revalidates",
+      "criteria": [
+        "AC5",
+        "AC6"
+      ],
+      "given": {
+        "lockOwner": "setup",
+        "verifiedStage": "R2",
+        "currentChangedDuringDownload": "R3"
+      },
+      "when": "Acquire activation lease after setup",
+      "expected": {
+        "predecessorRevalidated": "R3",
+        "blindOverwrite": false,
+        "downloadUnderLock": false
+      }
+    }
+  ]
+}

@@ -16,7 +16,7 @@ function setup(t) {
 }
 function sample(name = 'repair-label') {
   return { version: 1, name, overview: 'WORKFLOW.md', stages: [
-    { id: 'expect', kind: 'agent', file: 'expect.md', protocol: 'proposal', requiredRoles: ['cases'], approval: 'next-advance' },
+    { id: 'expect', kind: 'agent', file: 'expect.md', protocol: 'proposal', requiredRoles: ['prompt','story','cases'], approval: 'next-advance' },
     { id: 'edit', kind: 'agent', file: 'edit.md', protocol: 'work' },
     { id: 'measure', kind: 'agent', file: 'measure.md', protocol: 'verify' },
     { id: 'publish', kind: 'pr', file: 'publish.md', publication: 'verified' },
@@ -67,6 +67,60 @@ test('snapshot bytes and digest remain immutable; later Markdown or JSON edits p
   assert.equal(first.files.find(file => file.path === 'edit.md').content, 'Instructions for edit.md.\n');
   const changed = sample(); changed.stages[1].optional = true; writeFileSync(join(directory, 'workflow.json'), JSON.stringify(changed));
   assert.notEqual(loadWorkflowDefinition({ ...options, name: 'repair-label' }).digest, second.digest);
+});
+for (const path of ['workflow.json', 'WORKFLOW.md', 'edit.md']) {
+  test(`UTF-8 BOM round-trip preserves selected ${path} bytes and immutable snapshot hashes`, t => {
+    const options = setup(t), directory = put(options.cwd, sample());
+    const plain = path === 'workflow.json' ? readFileSync(join(directory, path)) : Buffer.from('# Café 👋\r\nSelected instructions.\n');
+    const selected = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), plain]);
+    writeFileSync(join(directory, path), selected);
+    const loaded = loadWorkflowDefinition({ ...options, name: 'repair-label' });
+    const file = loaded.files.find(file => file.path === path);
+    assert.deepEqual(Buffer.from(file.content, 'utf8'), selected);
+    assert.equal(file.sha256, hash(selected));
+    assert.equal(hash(Buffer.from(file.content, 'utf8')), file.sha256);
+    assert.deepEqual(Buffer.from(JSON.parse(JSON.stringify(file)).content, 'utf8'), selected);
+    assert.deepEqual(listWorkflowDefinitions(options), [{ name: 'repair-label', source: 'project' }]);
+    writeFileSync(join(directory, path), plain);
+    const later = loadWorkflowDefinition({ ...options, name: 'repair-label' });
+    assert.notEqual(later.digest, loaded.digest);
+    assert.deepEqual(later.stages, loaded.stages);
+    assert.deepEqual(Buffer.from(file.content, 'utf8'), selected);
+  });
+}
+test('UTF-8 BOM never permits malformed UTF-8 in metadata, overview or stage instructions', t => {
+  const options = setup(t);
+  for (const path of ['workflow.json', 'WORKFLOW.md', 'edit.md']) {
+    const directory = put(options.cwd, sample());
+    writeFileSync(join(directory, path), Buffer.from([0xef, 0xbb, 0xbf, 0xc3, 0x28]));
+    assert.throws(() => loadWorkflowDefinition({ ...options, name: 'repair-label' }), TypeError);
+  }
+});
+test('UTF-8 BOM bytes count toward the inclusive file size limit', t => {
+  const options = setup(t), directory = put(options.cwd, sample());
+  const selected = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.alloc(256 * 1024 - 3, 'x')]);
+  writeFileSync(join(directory, 'edit.md'), selected);
+  const loaded = loadWorkflowDefinition({ ...options, name: 'repair-label' });
+  assert.deepEqual(Buffer.from(loaded.files.find(file => file.path === 'edit.md').content), selected);
+  writeFileSync(join(directory, 'edit.md'), Buffer.concat([selected, Buffer.from('x')]));
+  assert.throws(() => loadWorkflowDefinition({ ...options, name: 'repair-label' }), /bounded/);
+});
+test('UTF-8 BOM bytes count toward the inclusive aggregate snapshot size limit', t => {
+  const options = setup(t), definition = sample();
+  definition.stages = Array.from({ length: 8 }, (_, index) => ({ id: `report-${index}`, kind: 'agent', protocol: 'report', file: `report-${index}.md` }));
+  const directory = put(options.cwd, definition), bom = Buffer.from([0xef, 0xbb, 0xbf]);
+  let remaining = 2 * 1024 * 1024 - readFileSync(join(directory, 'workflow.json')).length - readFileSync(join(directory, 'WORKFLOW.md')).length;
+  for (const stage of definition.stages) {
+    const size = Math.min(256 * 1024, remaining);
+    writeFileSync(join(directory, stage.file), Buffer.concat([bom, Buffer.alloc(size - bom.length, 'x')]));
+    remaining -= size;
+  }
+  assert.equal(remaining, 0);
+  const load = () => loadWorkflowDefinition({ ...options, name: 'repair-label' });
+  assert.equal(load().files.reduce((size, file) => size + Buffer.byteLength(file.content), 0), 2 * 1024 * 1024);
+  const last = join(directory, definition.stages.at(-1).file);
+  writeFileSync(last, Buffer.concat([readFileSync(last), Buffer.from('x')]));
+  assert.throws(load, /snapshot exceeds 2MiB/);
 });
 test('discovery unions actual project and bundled names without hardcoding three recipes', t => {
   const options = setup(t); put(options.packageRoot, sample('zeta')); put(options.cwd, sample('alpha')); put(options.cwd, sample('zeta'));

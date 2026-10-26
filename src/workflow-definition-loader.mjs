@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-definition-loader.prompt.md (sha256: 726f55cca0befe2570c8353ab6589f3d7167c82f6b11274136a9b76c68917be4).
+// Generated from prompts/cli/workflow-definition-loader.prompt.md (sha256: dc72ce3da605b490fd3bbe9c704d9244ef0ca4b6a8c7389568460ef8bfc13da6).
 import { constants, lstatSync, realpathSync, openSync, fstatSync, readFileSync, closeSync, readdirSync } from 'node:fs';
 import { resolve, join, relative, isAbsolute, sep } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -57,7 +57,7 @@ function readFile(root, name) {
     const bytes = readFileSync(fd);
     parents(root, name.split('/').slice(0, -1));
     if (!unchanged(opened, fstatSync(fd)) || !unchanged(opened, lstatSync(path))) fail(`file changed during read: ${name}`);
-    const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     return { path: name, sha256: hash(bytes), content };
   } finally { closeSync(fd); }
 }
@@ -88,7 +88,7 @@ function validate(data, name) {
       if (!Array.isArray(roles) || roles.some(role => !ROLES.has(role)) || new Set(roles).size !== roles.length) fail(`${id}: invalid artifact roles`);
       stage.requiredRoles = [...roles];
       if (raw.protocol === 'proposal') {
-        if (proposal || raw.optional || !roles.length || !['human', 'next-advance'].includes(raw.approval)) fail(`${id}: invalid single proposal/approval`);
+        if (proposal || raw.optional || !['prompt', 'story', 'cases'].every(role => roles.includes(role)) || !['human', 'next-advance'].includes(raw.approval)) fail(`${id}: invalid single proposal/approval`);
         proposal = stage; accepted = raw.approval === 'next-advance';
       } else if (raw.approval !== undefined) fail(`${id}: approval belongs to proposal`);
       if (['work', 'verify'].includes(raw.protocol) && !accepted) fail(`${id}: work requires prior proposal acceptance`);
@@ -123,8 +123,10 @@ export function loadWorkflowDefinition({ name, cwd, packageRoot } = {}) {
   const root = local && exists(local) ? (directory(local), local) : parents(bundled, ['.pdd', 'workflows', name]);
   const definition = readFile(root, 'workflow.json');
   let data;
-  try { data = JSON.parse(definition.content); } catch { fail(`${name}: malformed workflow.json`); }
-  const stages = validate(data, name);
+  // Consume the JSON marker for parsing without changing the frozen file bytes.
+  try { data = JSON.parse(definition.content.replace(/^\uFEFF/, '')); } catch { fail(`${name}: malformed workflow.json`); }
+  let stages;
+  try { stages = validate(data, name); } catch (error) { fail(`${name}: ${error.message}`); }
   const names = [...new Set([data.overview, ...stages.map(stage => stage.file)])].sort();
   const files = [definition, ...names.map(path => readFile(root, path))].sort((a, b) => a.path.localeCompare(b.path, 'en'));
   if (files.reduce((size, file) => size + Buffer.byteLength(file.content), 0) > 2 * 1024 * 1024) fail('snapshot exceeds 2MiB');

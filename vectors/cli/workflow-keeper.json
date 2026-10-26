@@ -1,0 +1,303 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-keeper.prompt.md",
+  "story": "../../story/cli/WORKFLOW-KEEPER.md",
+  "note": "Independent synthetic expectations. Each given names conditions, not observed program output. Case notation is not a runtime schema.",
+  "cases": [
+    {
+      "id": "restart-after-death",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "controlState": "running",
+        "herdrUpSeconds": 60,
+        "stableServerSeconds": 30,
+        "lockFreeAtSeconds": [
+          30,
+          60
+        ],
+        "launchesLastHour": 0,
+        "runtime": "valid"
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 1,
+        "requiresProcessProof": true,
+        "stageFirstPromptsRepeated": 0
+      }
+    },
+    {
+      "id": "human-wait",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "controlState": "waiting_person",
+        "rev": 57
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 0,
+        "decisionCreated": false
+      }
+    },
+    {
+      "id": "question-lost",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "controlState": "question_lost"
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 0,
+        "keysSent": 0
+      }
+    },
+    {
+      "id": "one-free-check",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "controlState": "waiting_agent",
+        "lockFreeChecks": 1
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 0
+      }
+    },
+    {
+      "id": "budget-boundary",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "controlState": "running",
+        "launchesLastHour": 3
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 0,
+        "needsYou": true
+      }
+    },
+    {
+      "id": "uncertain-launch",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "controlState": "running",
+        "priorLaunch": "uncertain",
+        "noNewJournalProof": true
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "inspectOriginal": true,
+        "driveLaunches": 0
+      }
+    },
+    {
+      "id": "quota-observation",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "controlState": "WAIT",
+        "renewalDue": true,
+        "freshRoomCheck": "network failure"
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "state": "WAIT",
+        "continuations": 0,
+        "retryObservation": true
+      }
+    },
+    {
+      "id": "alpha-only",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "privateClientInstalled": false,
+        "publicRecoveryOwnerInstalled": true,
+        "allGuardsPass": true
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "recoveryUsesPrivateCode": false,
+        "driveLaunches": 1
+      }
+    },
+    {
+      "id": "legacy-unadopted",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "oldJournal": true,
+        "adopted": false
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 0
+      }
+    },
+    {
+      "id": "unstable-herdr",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "herdrUpSeconds": 30,
+        "stableServerSeconds": 29.999
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "driveLaunches": 0
+      }
+    },
+    {
+      "id": "public-runs-keeper-service",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "invocation": "pdd runs-keeper",
+        "installedBy": "pdd setup",
+        "clientInstalled": false
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "runsAtBootOrLogin": true,
+        "privateDependency": false,
+        "reconcileIntervalSeconds": 30
+      }
+    },
+    {
+      "id": "service-owner-contention",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "serviceLock": "held by Alpha recovery owner",
+        "secondOwner": "Link"
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "secondOwnerLaunches": 0,
+        "secondOwnerResult": "busy"
+      }
+    },
+    {
+      "id": "nonmanaged-command-pass-through",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "invocation": "typed claude",
+        "managedLaunchRecord": null,
+        "optedIn": false
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "stockInvocationUnchanged": true,
+        "stockSignInUnchanged": true,
+        "claimOrSwitchApplied": false
+      }
+    },
+    {
+      "id": "managed-restore",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "launchRecord": "PDD-managed stage",
+        "successor": "generation 4 current",
+        "requestedRestore": "retired generation 3"
+      },
+      "when": {
+        "operation": "workflow-keeper"
+      },
+      "expected": {
+        "restoreRefused": true,
+        "stockSignInUnchanged": true
+      }
+    },
+    {
+      "id": "restore-policy-revision",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "savedAccount": "a",
+        "currentPolicy": {
+          "revision": 8,
+          "targetAccountId": "b"
+        },
+        "eligibleNonHumanRun": true
+      },
+      "when": {
+        "operation": "reconcileWorkflowControllers"
+      },
+      "expected": {
+        "policyReconciledBeforeNativeRestore": true,
+        "independentAccountPick": false,
+        "originalStagePromptRepeated": false
+      }
+    },
+    {
+      "id": "fixed-quota-stays-stopped",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "controlState": "waiting_person",
+        "origin": "quota",
+        "machinePolicy": {
+          "mode": "fixed",
+          "accountId": "a"
+        }
+      },
+      "when": {
+        "operation": "reconcileWorkflowControllers"
+      },
+      "expected": {
+        "controllerStarted": false,
+        "policyChanged": false,
+        "questionAnswered": false
+      }
+    }
+  ]
+}

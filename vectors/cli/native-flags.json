@@ -1,0 +1,868 @@
+{
+  "status": "accepted",
+  "prompt": "../../prompts/cli/native-flags.prompt.md",
+  "story": "../../story/cli/NATIVE-FLAGS.md",
+  "note": "Synthetic cases. Shape is local to these cases, not a PDD execution schema. String values are JSON text: a \\t or \\u001b inside cwd is the real control character; the same sequence inside an expected trust element is the literal TOML escape text.",
+  "cases": [
+    {
+      "id": "codex-fresh-full-default",
+      "criteria": [
+        "AC1",
+        "AC6"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/project\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-fresh-full-explicit",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "fullAccess": true,
+          "resume": null
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/project\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-space-dot-equals",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/my proj.v2/a=b"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/my proj.v2/a=b\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-double-quote",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/say \"hi\""
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/say \\\"hi\\\"\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-backslash",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/back\\slash"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/back\\\\slash\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-single-quote-hash-brackets",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/it's #1 [x]"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/it's #1 [x]\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-tab-newline",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/a\tb\nc"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/a\\tb\\nc\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-escape-and-del",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/e\u001bxy"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/e\\u001bx\\u007fy\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-non-ascii",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/café/日本"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/café/日本\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "codex-trust-not-normalized",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/a/../b/"
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/a/../b/\"={trust_level=\"trusted\"}}"
+      ]
+    },
+    {
+      "id": "claude-fresh-full",
+      "criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project"
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions"
+      ]
+    },
+    {
+      "id": "codex-plain",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "fullAccess": false
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "-c",
+        "check_for_update_on_startup=false"
+      ]
+    },
+    {
+      "id": "claude-plain",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "fullAccess": false
+        }
+      },
+      "expected": []
+    },
+    {
+      "id": "codex-resume-full",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "resume": "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+        }
+      },
+      "expected": [
+        "resume",
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/project\"={trust_level=\"trusted\"}}",
+        "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+      ]
+    },
+    {
+      "id": "codex-resume-plain",
+      "criteria": [
+        "AC4",
+        "AC5"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "fullAccess": false,
+          "resume": "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+        }
+      },
+      "expected": [
+        "resume",
+        "--no-daemon",
+        "-c",
+        "check_for_update_on_startup=false",
+        "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+      ]
+    },
+    {
+      "id": "claude-resume-full",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "resume": "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions",
+        "--resume",
+        "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+      ]
+    },
+    {
+      "id": "claude-resume-plain",
+      "criteria": [
+        "AC4",
+        "AC5"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "fullAccess": false,
+          "resume": "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+        }
+      },
+      "expected": [
+        "--resume",
+        "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+      ]
+    },
+    {
+      "id": "claude-resume-uppercase-unchanged",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "resume": "4F815A50-14D3-4A55-BE2D-A3221137A4DD"
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions",
+        "--resume",
+        "4F815A50-14D3-4A55-BE2D-A3221137A4DD"
+      ]
+    },
+    {
+      "id": "resume-null-is-fresh",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "resume": null
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions"
+      ]
+    },
+    {
+      "id": "agent-case-sensitive",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "Codex",
+          "cwd": "/home/user/project"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "agent-unknown",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "gemini",
+          "cwd": "/home/user/project"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "agent-padded",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": " claude",
+          "cwd": "/home/user/project"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "cwd-relative",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "project"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "cwd-empty",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": ""
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "cwd-missing-claude",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "cwd-nul",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/a\u0000b"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "full-access-null",
+      "criteria": [
+        "AC6",
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "fullAccess": null
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "full-access-string",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "fullAccess": "false"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "resume-empty-string",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "resume": ""
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "resume-session-name",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "resume": "my-session"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "resume-log-path-id",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "resume": "p0123456789abcdef"
+        }
+      },
+      "expectedError": "TypeError"
+    },
+    {
+      "id": "extra-property-ignored",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "model": "other-model"
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions"
+      ]
+    },
+    {
+      "id": "separate-equal-arrays",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {},
+      "when": {
+        "calls": [
+          {
+            "call": "nativeArgs",
+            "args": {
+              "agent": "claude",
+              "cwd": "/home/user/project"
+            }
+          },
+          {
+            "call": "nativeArgs",
+            "args": {
+              "agent": "claude",
+              "cwd": "/home/user/project"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "results": [
+          [
+            "--dangerously-skip-permissions"
+          ],
+          [
+            "--dangerously-skip-permissions"
+          ]
+        ],
+        "sameArray": false,
+        "inputAfter": {
+          "agent": "claude",
+          "cwd": "/home/user/project"
+        },
+        "mustNotContain": [
+          "--dangerously-bypass-hook-trust",
+          "codex",
+          "claude",
+          "--",
+          "-m",
+          "--model",
+          "-s",
+          "-a",
+          "--add-dir",
+          "-C"
+        ]
+      }
+    },
+    {
+      "id": "codex-selection-model-effort",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "selection": {
+            "model": "gpt-5-codex",
+            "effort": "high"
+          }
+        }
+      },
+      "expected": [
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/project\"={trust_level=\"trusted\"}}",
+        "-m",
+        "gpt-5-codex",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ]
+    },
+    {
+      "id": "codex-selection-model-only-resume",
+      "criteria": [
+        "AC5",
+        "AC9"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "resume": "123e4567-e89b-12d3-a456-426614174000",
+          "selection": {
+            "model": "gpt-5-codex",
+            "effort": null
+          }
+        }
+      },
+      "expected": [
+        "resume",
+        "--no-daemon",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "projects={\"/home/user/project\"={trust_level=\"trusted\"}}",
+        "-m",
+        "gpt-5-codex",
+        "123e4567-e89b-12d3-a456-426614174000"
+      ]
+    },
+    {
+      "id": "claude-selection-model-effort",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "selection": {
+            "model": "claude-opus-5-5",
+            "effort": "high"
+          }
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions",
+        "--model",
+        "claude-opus-5-5",
+        "--effort",
+        "high"
+      ]
+    },
+    {
+      "id": "claude-selection-no-access-resume",
+      "criteria": [
+        "AC4",
+        "AC5",
+        "AC9"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "fullAccess": false,
+          "resume": "123e4567-e89b-12d3-a456-426614174000",
+          "selection": {
+            "model": "claude-sonnet-5-5",
+            "effort": null
+          }
+        }
+      },
+      "expected": [
+        "--model",
+        "claude-sonnet-5-5",
+        "--resume",
+        "123e4567-e89b-12d3-a456-426614174000"
+      ]
+    },
+    {
+      "id": "selection-null-adds-nothing",
+      "criteria": [
+        "AC8",
+        "AC9"
+      ],
+      "given": {},
+      "when": {
+        "call": "nativeArgs",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "selection": null
+        }
+      },
+      "expected": [
+        "--dangerously-skip-permissions"
+      ]
+    },
+    {
+      "id": "selection-malformed-throws",
+      "criteria": [
+        "AC9",
+        "AC7"
+      ],
+      "given": {},
+      "when": {
+        "calls": [
+          {
+            "call": "nativeArgs",
+            "args": {
+              "agent": "codex",
+              "cwd": "/home/user/project",
+              "selection": {}
+            }
+          },
+          {
+            "call": "nativeArgs",
+            "args": {
+              "agent": "codex",
+              "cwd": "/home/user/project",
+              "selection": {
+                "model": "gpt-5-codex"
+              }
+            }
+          },
+          {
+            "call": "nativeArgs",
+            "args": {
+              "agent": "claude",
+              "cwd": "/home/user/project",
+              "selection": {
+                "model": "",
+                "effort": "high"
+              }
+            }
+          },
+          {
+            "call": "nativeArgs",
+            "args": {
+              "agent": "claude",
+              "cwd": "/home/user/project",
+              "selection": "gpt-5-codex"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "throws": "TypeError",
+        "each": true
+      }
+    }
+  ]
+}

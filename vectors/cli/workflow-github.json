@@ -1,0 +1,313 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-github.prompt.md",
+  "story": "../../story/cli/WORKFLOW-GITHUB.md",
+  "note": "Synthetic expected cases derived from the contract, not implementation results.",
+  "cases": [
+    {
+      "id": "issue-normalization",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "selector": "owner/repo#412",
+        "origin": "same repository",
+        "body": null
+      },
+      "when": {
+        "call": "resolveWorkflowIssue"
+      },
+      "expected": {
+        "issueNumber": 412,
+        "body": "",
+        "repositoryMatchesOrigin": true
+      }
+    },
+    {
+      "id": "pr-not-issue",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "apiItem": "pull_request field present"
+      },
+      "when": {
+        "call": "resolveWorkflowIssue"
+      },
+      "expected": {
+        "rejected": true,
+        "publicationEffect": false
+      }
+    },
+    {
+      "id": "foreign-repository",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "selectorRepository": "other/repo",
+        "originRepository": "owner/repo"
+      },
+      "when": {
+        "call": "resolveWorkflowIssue"
+      },
+      "expected": {
+        "rejected": true
+      }
+    },
+    {
+      "id": "prepare-no-publication",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "topic": "clean committed nondefault, ahead of base",
+        "body": "authored regular file"
+      },
+      "when": {
+        "call": "prepareWorkflowPr"
+      },
+      "expected": {
+        "intentMatchesSource": true,
+        "authoredBodyPreserved": true,
+        "ownLineMarkerCount": 1,
+        "remoteBranchWritten": false,
+        "prCreated": false
+      }
+    },
+    {
+      "id": "dirty-topic",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "topic": "unstaged change"
+      },
+      "when": {
+        "call": "prepareWorkflowPr"
+      },
+      "expected": {
+        "rejected": true,
+        "remoteBranchWritten": false,
+        "prCreated": false
+      }
+    },
+    {
+      "id": "body-alias",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "body": "symlink to tracked source"
+      },
+      "when": {
+        "call": "prepareWorkflowPr"
+      },
+      "expected": {
+        "rejected": true,
+        "trackedSourceUnchanged": true
+      }
+    },
+    {
+      "id": "exact-pr-readback",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "intent": "durably saved by runner",
+        "remoteReadback": "one exact PR"
+      },
+      "when": {
+        "call": "publishWorkflowPr"
+      },
+      "expected": {
+        "state": "open",
+        "returnedPr": "actual verified PR",
+        "mergedByHelper": false
+      }
+    },
+    {
+      "id": "unknown-push",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "pushOutcome": "reply lost"
+      },
+      "when": {
+        "call": "publishWorkflowPr"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "prCreated": false,
+        "automaticRepublish": false
+      }
+    },
+    {
+      "id": "ambiguous-reconcile",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "matches": "two same-marker candidates"
+      },
+      "when": {
+        "call": "reconcileWorkflowPr"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "pr": null,
+        "remoteWrites": false
+      }
+    },
+    {
+      "id": "explicit-absence-recovery",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "runnerApproval": "fresh current intent",
+        "prSearches": "complete, no candidates",
+        "remoteHead": "normal no-match exit2 and empty stdout",
+        "input": "unchanged"
+      },
+      "when": {
+        "call": "publishWorkflowPr",
+        "unpublishedOnly": true
+      },
+      "expected": {
+        "sameSavedIntentUsed": true,
+        "nonforcePublicationAllowed": true
+      }
+    },
+    {
+      "id": "remote-head-present",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "remoteHead": "present exact saved SHA"
+      },
+      "when": {
+        "call": "publishWorkflowPr",
+        "unpublishedOnly": true
+      },
+      "expected": {
+        "state": "recovery_required",
+        "newRemoteWrite": false,
+        "prCreated": false
+      }
+    },
+    {
+      "id": "closed-is-not-merged",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "readback": "CLOSED",
+        "mergeCommit": null
+      },
+      "when": {
+        "call": "reconcileWorkflowPr"
+      },
+      "expected": {
+        "state": "closed",
+        "mergeCommit": null,
+        "mergedByHelper": false
+      }
+    },
+    {
+      "id": "scan-advisory",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "publication": "authorized unchanged input",
+        "secretScan": "finding"
+      },
+      "when": {
+        "call": "publishWorkflowPr through runner"
+      },
+      "expected": {
+        "warning": "redacted",
+        "needsYou": true,
+        "blockedOnlyByScan": false
+      }
+    },
+    {
+      "id": "accepted-scope-artifact-composition",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "scope": "accepted prompt, Story and cases remain untracked",
+        "change": "agent commits implementation only",
+        "verification": "exact accepted native checks succeeded"
+      },
+      "when": {
+        "call": "runner open-pr"
+      },
+      "expected": {
+        "localCommit": "exact accepted artifact files and bytes only",
+        "prIncludes": "scope artifacts and agent implementation commit",
+        "originalVerificationPreserved": true,
+        "pushCount": 1,
+        "createCount": 1
+      }
+    },
+    {
+      "id": "artifact-checkpoint-unrelated-dirty",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "scope": "accepted artifact hashes match",
+        "worktree": "unrelated staged or unstaged or untracked path"
+      },
+      "when": {
+        "call": "runner open-pr"
+      },
+      "expected": {
+        "rejected": true,
+        "message": "lists unrelated paths and asks to commit or move them",
+        "artifactCommit": false,
+        "remoteWrites": false,
+        "unrelatedIndexAndBytesPreserved": true
+      }
+    },
+    {
+      "id": "artifact-checkpoint-drift",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "scope": "hash mismatch, unsafe file or changed branch/HEAD"
+      },
+      "when": {
+        "call": "commitWorkflowArtifacts"
+      },
+      "expected": {
+        "rejected": true,
+        "commit": false,
+        "remoteWrites": false
+      }
+    },
+    {
+      "id": "artifact-checkpoint-inspection-and-interruption",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "checkpoint": "commit took effect but success record was not durable"
+      },
+      "when": {
+        "call": "resume or inspect"
+      },
+      "expected": {
+        "savedInputDriftRefuses": true,
+        "noCommitRepeat": true,
+        "noPublication": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,550 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/pdd-launch.prompt.md",
+  "story": "../../story/cli/PDD-LAUNCH.md",
+  "note": "Synthetic independent expected cases, authored from the intended contract before implementation. This JSON is a local specification format, not an executable test harness or observed result. Expected objects assert the named fields/effects; other observations are unconstrained unless explicitly forbidden. Symbolic artifact, process and boot identities are stand-ins, never real credentials.",
+  "cases": [
+    {
+      "id": "three-exits-before-ready",
+      "criteria": [
+        "AC2",
+        "AC4"
+      ],
+      "given": {
+        "current": "R2",
+        "previous": "R1",
+        "events": [
+          "A1 exits before ready",
+          "A2 exits before ready",
+          "A3 exits before ready"
+        ]
+      },
+      "when": "Exec starts and reconcile on service-manager restarts",
+      "expected": {
+        "current": "R1",
+        "previous": "R1",
+        "rejected": [
+          "R2"
+        ],
+        "fallbackStarted": true,
+        "releaseBlockReports": 1
+      }
+    },
+    {
+      "id": "success-breaks-consecutive-chain",
+      "criteria": [
+        "AC2",
+        "AC3"
+      ],
+      "given": {
+        "events": [
+          "A1 fails",
+          "A2 ready",
+          "A3 fails",
+          "A4 fails"
+        ]
+      },
+      "when": "Reconcile durable local outcomes for R2",
+      "expected": {
+        "consecutiveFailures": 2,
+        "rollback": false
+      }
+    },
+    {
+      "id": "stale-ready-marker",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "pendingAttempt": "A2",
+        "readyMarkerAttempt": "A1"
+      },
+      "when": "A2 exits",
+      "expected": {
+        "startupSuccess": false,
+        "incrementCount": 1
+      }
+    },
+    {
+      "id": "ready-wrong-runtime",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "pendingRelease": "R2",
+        "pendingAttempt": "A2",
+        "ready": {
+          "releaseId": "R1",
+          "attemptId": "A2"
+        }
+      },
+      "when": "Process exits",
+      "expected": {
+        "startupSuccess": false,
+        "incrementCount": 1
+      }
+    },
+    {
+      "id": "ready-then-fast-exit",
+      "criteria": [
+        "AC2",
+        "AC3"
+      ],
+      "given": {
+        "failuresBefore": 2,
+        "matchingReadyPersistedAtMs": 599999,
+        "recordSuccessCommitCompleted": false
+      },
+      "when": "Link exits before record reset; exec shim reconciles",
+      "expected": {
+        "consecutiveFailures": 0,
+        "rollback": false,
+        "successfulStartRecognized": true
+      }
+    },
+    {
+      "id": "reboot-between-failures",
+      "criteria": [
+        "AC2",
+        "AC5"
+      ],
+      "given": {
+        "failuresBefore": 1,
+        "pendingAttempt": "A2",
+        "oldBoot": "B1",
+        "currentBoot": "B2",
+        "matchingReady": false
+      },
+      "when": "Recover proved dead A2; then A3 fails",
+      "expected": {
+        "R2FailureCount": 3,
+        "current": "previous fallback",
+        "sameAttemptCountedTwice": false
+      }
+    },
+    {
+      "id": "exec-shim-reinvoked-live-candidate",
+      "criteria": [
+        "AC1",
+        "AC5"
+      ],
+      "given": {
+        "pendingAttempt": "A2",
+        "processProof": "same live process"
+      },
+      "when": "Invoke exec shim again before deadline",
+      "expected": {
+        "secondLinkStarted": false,
+        "failureCountChanged": false,
+        "parentSupervisorPresent": false
+      }
+    },
+    {
+      "id": "unprovable-old-process",
+      "criteria": [
+        "AC2",
+        "AC5"
+      ],
+      "given": {
+        "pendingAttempt": "A2",
+        "processProof": "unknown"
+      },
+      "when": "Recover",
+      "expected": {
+        "code": "recovery_required",
+        "newLinkStarted": false,
+        "failureCountChanged": false
+      }
+    },
+    {
+      "id": "exec-failure-counts",
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "given": {
+        "candidateNodeExecutable": false,
+        "supportRuntimeHealthy": true,
+        "failuresBefore": 2
+      },
+      "when": "Attempt candidate start",
+      "expected": {
+        "R2FailureCount": 3,
+        "fallbackStartPossible": true,
+        "unverifiedSystemNodeFallback": false
+      }
+    },
+    {
+      "id": "no-valid-previous",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "failuresBefore": 2,
+        "previous": null
+      },
+      "when": "Candidate fails third time",
+      "expected": {
+        "needsYou": true,
+        "candidateRetried": false,
+        "recordPreserved": true
+      }
+    },
+    {
+      "id": "same-release-new-manifest-seq",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "rejected": "R2",
+        "oldSeq": 20,
+        "newSeq": 21,
+        "sameArtifactDigests": true
+      },
+      "when": "Receive hint and restart machine",
+      "expected": {
+        "R2Reinstalled": false,
+        "R2FailureCountReset": false
+      }
+    },
+    {
+      "id": "different-published-release",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "rejected": "R2",
+        "nextPublishedRelease": "R3",
+        "R3ChecksPass": true
+      },
+      "when": "Selector authorizes R3 through normal activation",
+      "expected": {
+        "R3Eligible": true,
+        "R2StillRejected": true,
+        "bypassNormalChecks": false
+      }
+    },
+    {
+      "id": "ready-with-hosted-parts-down",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "localReady": true,
+        "relay": "down",
+        "keeper": "down",
+        "appHost": "down"
+      },
+      "when": "Observe startup result",
+      "expected": {
+        "startupSuccess": true,
+        "consecutiveFailures": 0,
+        "rollback": false
+      }
+    },
+    {
+      "id": "hung-link-deadline-failure",
+      "criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "given": {
+        "LinkAlive": true,
+        "matchingReady": false,
+        "elapsedMs": 600000,
+        "processIdentityMatches": true
+      },
+      "when": "One-shot startup deadline checks the attempt",
+      "expected": {
+        "incrementCount": 1,
+        "matchingFailedLinkTerminated": true,
+        "serviceManagerMayRestart": true,
+        "supervisorPresent": false
+      }
+    },
+    {
+      "id": "link-start-and-link-owned-check",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "LinkStarts": true,
+        "network": "available"
+      },
+      "when": "Start Link; later its normal six-hour safety check runs",
+      "expected": {
+        "manifestCheckAtStart": true,
+        "normalSafetyCheckOwner": "Link",
+        "independentLauncherReleaseCheck": false
+      }
+    },
+    {
+      "id": "failed-network-check",
+      "criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "given": {
+        "consecutiveFailures": 2,
+        "current": "R2",
+        "checkNetwork": "offline"
+      },
+      "when": "Link-owned safety check fails",
+      "expected": {
+        "current": "R2",
+        "consecutiveFailures": 2,
+        "rollback": false
+      }
+    },
+    {
+      "id": "rollback-offline-report",
+      "criteria": [
+        "AC4",
+        "AC6"
+      ],
+      "given": {
+        "thirdFailure": true,
+        "network": "offline",
+        "fallbackValid": true
+      },
+      "when": "Roll back then reconnect",
+      "expected": {
+        "rollbackCompletesOffline": true,
+        "reportQueuedWithStableId": true,
+        "reportDeliveredByOldLinkAfterReconnect": true
+      }
+    },
+    {
+      "id": "linux-rapid-failure-survival",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "platform": "linux",
+        "candidateRapidFailures": 3,
+        "HerdrInitiallyAbsent": true
+      },
+      "when": "Start Herdr independently, then update Link and roll back",
+      "expected": {
+        "StartLimitIntervalSec": 0,
+        "Restart": "always",
+        "RestartSec": 2,
+        "normalCgroupKillPolicy": true,
+        "HerdrCgroupSeparate": true,
+        "updaterCgroupSeparate": true,
+        "agentAndControllerPidsUnchanged": true
+      }
+    },
+    {
+      "id": "mac-service-survival",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "platform": "darwin"
+      },
+      "when": "Restart Link after independent Herdr/updater launch",
+      "expected": {
+        "AbandonProcessGroup": true,
+        "HerdrDetached": true,
+        "updaterSeparateContext": true,
+        "HerdrSignals": 0,
+        "paneSignals": 0
+      }
+    },
+    {
+      "id": "alpha-only-local-recovery",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "clientInstalled": false,
+        "interruptedInstall": true
+      },
+      "when": "Invoke pdd-launch recover then cli --version",
+      "expected": {
+        "privateServiceRequired": false,
+        "installStateReconciled": true,
+        "absoluteOwnedNodeUsed": true
+      }
+    },
+    {
+      "id": "rollback-recovery-after-flip",
+      "criteria": [
+        "AC4",
+        "AC5"
+      ],
+      "given": {
+        "phase": "rolling_back",
+        "current": "R1",
+        "previous": "R1",
+        "failedRelease": "R2",
+        "reportAlreadyDurable": true
+      },
+      "when": "Restart launcher recovery",
+      "expected": {
+        "current": "R1",
+        "previous": "R1",
+        "secondRollbackFlip": false,
+        "duplicateReportCreated": false
+      }
+    },
+    {
+      "id": "deadline-before-boundary",
+      "criteria": [
+        "AC2",
+        "AC3"
+      ],
+      "given": {
+        "elapsedMs": 599999,
+        "ready": false,
+        "LinkLive": true
+      },
+      "when": "Check startup attempt",
+      "expected": {
+        "failed": false,
+        "incrementCount": 0,
+        "LinkTerminated": false
+      }
+    },
+    {
+      "id": "ready-before-deadline",
+      "criteria": [
+        "AC2",
+        "AC3"
+      ],
+      "given": {
+        "elapsedMs": 599999,
+        "matchingReadyDurable": true,
+        "consecutiveFailures": 2
+      },
+      "when": "Commit success then deliver stale deadline callback",
+      "expected": {
+        "consecutiveFailures": 0,
+        "LinkTerminated": false,
+        "unresolvedEntryCleared": true
+      }
+    },
+    {
+      "id": "late-ready-cannot-erase-failure",
+      "criteria": [
+        "AC2",
+        "AC3",
+        "AC5"
+      ],
+      "given": {
+        "attemptFailedAtMs": 600000,
+        "readyArrivesAtMs": 600001,
+        "consecutiveFailures": 2
+      },
+      "when": "Receive late ready for failed attempt",
+      "expected": {
+        "consecutiveFailures": 2,
+        "failureErased": false,
+        "secondCount": false
+      }
+    },
+    {
+      "id": "three-startup-hangs",
+      "criteria": [
+        "AC2",
+        "AC4"
+      ],
+      "given": {
+        "current": "R2",
+        "previous": "R1",
+        "attempts": [
+          {
+            "id": "A1",
+            "noReadyAtMs": 600000
+          },
+          {
+            "id": "A2",
+            "noReadyAtMs": 600000
+          },
+          {
+            "id": "A3",
+            "noReadyAtMs": 600000
+          }
+        ]
+      },
+      "when": "Deadline exits and service-manager restarts each failed attempt",
+      "expected": {
+        "current": "R1",
+        "previous": "R1",
+        "R2FailureCount": 3,
+        "R2Rejected": true,
+        "extraProbationTimer": false
+      }
+    },
+    {
+      "id": "stale-deadline-pid-reused",
+      "criteria": [
+        "AC2",
+        "AC5"
+      ],
+      "given": {
+        "deadlineAttempt": "A1",
+        "currentAttempt": "A2",
+        "pidNumberSame": true,
+        "processBirthDifferent": true
+      },
+      "when": "Deliver A1 deadline callback",
+      "expected": {
+        "A2Terminated": false,
+        "A2FailureCountChanged": false
+      }
+    },
+    {
+      "id": "automatic-rollback-ignores-floor",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "thirdFailure": true,
+        "previous": "R1",
+        "minDowngrade": "R2",
+        "previousVerifiedBeforeActivation": true
+      },
+      "when": "Reconcile third failed start",
+      "expected": {
+        "current": "R1",
+        "previous": "R1",
+        "minDowngradeConsulted": false,
+        "reportQueued": true
+      }
+    },
+    {
+      "id": "missing-platform-deadline",
+      "criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "given": {
+        "armStartupDeadlineAvailable": false
+      },
+      "when": "Prepare candidate exec",
+      "expected": {
+        "code": "startup_deadline_unavailable",
+        "candidateExec": false,
+        "candidateFailureInvented": false
+      }
+    },
+    {
+      "id": "exec-does-not-retain-parent",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "candidateVerified": true,
+        "deadlineRegistered": true
+      },
+      "when": "Exec Link through stable shim",
+      "expected": {
+        "launcherRemainsAsParent": false,
+        "processIdentityPreservedAcrossExec": true,
+        "independentLauncherSafetyLoop": false
+      }
+    }
+  ]
+}

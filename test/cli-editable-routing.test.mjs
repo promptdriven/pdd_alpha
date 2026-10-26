@@ -9,15 +9,16 @@ import { parseArgv } from '../src/argument-parser.mjs';
 import { renderCompletion } from '../src/completion.mjs';
 const uuid='a1234567-1234-4123-8123-123456789abc';
 const capture=()=>({text:'',write(s){this.text+=s;}});
-const transport=Object.fromEntries(['runHerdrStage','inspectHerdrStage','attachHerdrStage','closeHerdrStage'].map(name=>[name,()=>assert.fail('Caller must not dispatch stage directly')]));
+const workflowModels={resolveWorkflowModel:async()=>({state:'selected',selection:{model:'native',effort:null}})};
+const transport=Object.fromEntries(['runHerdrStage','inspectHerdrStage','attachHerdrStage','closeHerdrStage','resumeHerdrStage'].map(name=>[name,()=>assert.fail('Caller must not dispatch stage directly')]));
 const temp=t=>{const p=mkdtempSync(join(tmpdir(),'pdd-caller-'));t.after(()=>rmSync(p,{recursive:true,force:true}));return p;};
 
-test('editable free NAME reaches one real runner interface with exact four native ports, no guessed snapshot',async()=>{
+test('editable free NAME reaches one real runner interface with preparation interface without starting stage transport, no guessed snapshot',async()=>{
  const calls=[],stdout=capture(),stderr=capture();
- const runner={runWorkflow:async(input,ports)=>{calls.push({input,ports});return {exitCode:2,state:'waiting',runId:uuid,stage:'human-review',message:'waiting '+uuid+' human-review'};}};
- assert.equal(await runPdd(['workflow','run','my-team-workflow','octo/repo#12','--agent','claude'],{workflowRunner:runner,workflowStages:transport,cwd:'/assigned invoker',packageRoot:'/package',stdout,stderr}),2);
- assert.equal(calls.length,1);assert.deepEqual(calls[0].input,{name:'my-team-workflow',issue:'octo/repo#12',agent:'claude',cwd:'/assigned invoker',packageRoot:'/package'});
- for(const [name,fn] of Object.entries(transport))assert.equal(calls[0].ports[name],fn);
+ const runner={prepareWorkflow:async(input,ports)=>{calls.push({input,ports});return {exitCode:2,state:'waiting',runId:uuid,stage:'human-review',message:'waiting '+uuid+' human-review'};}};
+ assert.equal(await runPdd(['workflow','run','my-team-workflow','octo/repo#12','--agent','claude'],{workflowModels,workflowRunner:runner,workflowStages:transport,cwd:'/assigned invoker',packageRoot:'/package',stdout,stderr}),2);
+ assert.equal(calls.length,1);assert.deepEqual(calls[0].input,{name:'my-team-workflow',issue:'octo/repo#12',agent:'claude',machineId:'local',cwd:'/assigned invoker',packageRoot:'/package',launchSelection:{model:'native',effort:null}});
+ for(const name of Object.keys(transport))assert.equal(calls[0].ports[name],undefined);
  assert.equal('context' in calls[0].input,false);assert.equal(stdout.text,'waiting '+uuid+' human-review\n');assert.equal(stderr.text,'');
  for(const name of ['../bad','/bad','Bad','a--b','a-','a'.repeat(65)])assert.throws(()=>parseArgv(['workflow','run',name,'1']));
 });

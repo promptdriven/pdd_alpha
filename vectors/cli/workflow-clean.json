@@ -1,0 +1,254 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-clean.prompt.md",
+  "story": "../../story/cli/WORKFLOW-CLEAN.md",
+  "note": "Independent synthetic expectations. Each given names conditions, not observed program output. Case notation is not a runtime schema.",
+  "cases": [
+    {
+      "id": "safe-archive-first",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "terminal": true,
+        "prClosedDays": 8,
+        "dirt": [],
+        "uniqueCommits": [],
+        "liveClaims": false,
+        "archive": "durable readback",
+        "remoteCopy": "verified"
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": true,
+        "archiveRetained": true,
+        "archiveBeforeRemove": true
+      }
+    },
+    {
+      "id": "age-equality",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "prClosedDays": 7
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false
+      }
+    },
+    {
+      "id": "unpushed-commit",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "prMergedDays": 10,
+        "uniqueUnpushedCommits": 1
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false,
+        "reason": "unpushed work"
+      }
+    },
+    {
+      "id": "closed-unmerged-unique",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "prClosedDays": 10,
+        "merged": false,
+        "uniqueWork": true
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false,
+        "personChoice": true
+      }
+    },
+    {
+      "id": "wait-even-old",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "prClosedDays": 30,
+        "controlState": "WAIT"
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false,
+        "paneAndWorktreeRetained": true
+      }
+    },
+    {
+      "id": "untracked-file",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "prClosedDays": 10,
+        "untracked": [
+          "notes.txt"
+        ]
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false
+      }
+    },
+    {
+      "id": "ignored-file",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "prClosedDays": 10,
+        "ignoredUnique": [
+          "local-output.bin"
+        ]
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false
+      }
+    },
+    {
+      "id": "remote-unavailable",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "terminal": true,
+        "remoteRead": "failed"
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false
+      }
+    },
+    {
+      "id": "archive-full-disk",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "eligible": true,
+        "archiveFsync": "ENOSPC"
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false,
+        "originalJournalIntact": true
+      }
+    },
+    {
+      "id": "index-write-fails",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "eligible": true,
+        "archive": "verified",
+        "indexAppend": "failed"
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false,
+        "archiveRetained": true
+      }
+    },
+    {
+      "id": "race-after-check",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "eligibleAtStart": true,
+        "newDirtyFileBeforeRemove": true
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false
+      }
+    },
+    {
+      "id": "dry-run",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "eligible": true,
+        "dryRun": true
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "removed": false,
+        "fileWrites": 0,
+        "worktreeRemoves": 0
+      }
+    },
+    {
+      "id": "low-disk",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "freeGB": 1.9,
+        "unpushedCommits": 1
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "alert": true,
+        "removed": false
+      }
+    },
+    {
+      "id": "stable-lock-during-remove",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "eligible": true,
+        "controllerLock": "inside removable gitDir"
+      },
+      "when": {
+        "operation": "workflow-clean"
+      },
+      "expected": {
+        "stableLifecycleHeldThroughRemoval": true,
+        "innerLockDescriptorsReleasedBeforeRemoval": true,
+        "heldLockInodeDeleted": false
+      }
+    }
+  ]
+}

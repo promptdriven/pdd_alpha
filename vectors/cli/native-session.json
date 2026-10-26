@@ -1,0 +1,341 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/native-session.prompt.md",
+  "story": "../../story/cli/NATIVE-SESSION.md",
+  "note": "Synthetic independent expected cases authored from the contract. The spawn, signal and TTY ports are stand-ins; no real Codex, Claude or network is used.",
+  "cases": [
+    {
+      "id": "codex-foreground-argv",
+      "criteria": [
+        "AC1",
+        "AC3"
+      ],
+      "given": {
+        "installed": [
+          "codex"
+        ],
+        "stdinIsTTY": true
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "# Guide\\nRead this first.",
+          "request": "fix the $PATH bug && tell me",
+          "selection": {
+            "model": "gpt-5-codex",
+            "effort": "high"
+          }
+        }
+      },
+      "expected": {
+        "spawn": {
+          "command": "codex",
+          "shell": false,
+          "argv": [
+            "--no-daemon",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--dangerously-bypass-hook-trust",
+            "-c",
+            "check_for_update_on_startup=false",
+            "-c",
+            "projects={\"/home/user/project\"={trust_level=\"trusted\"}}",
+            "-m",
+            "gpt-5-codex",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "# Guide\\nRead this first.\\n\\nfix the $PATH bug && tell me"
+          ],
+          "cwd": "/home/user/project",
+          "stdio": "inherit",
+          "envChanged": false
+        }
+      }
+    },
+    {
+      "id": "claude-foreground-no-selection",
+      "criteria": [
+        "AC1",
+        "AC3"
+      ],
+      "given": {
+        "installed": [
+          "claude"
+        ],
+        "stdinIsTTY": true
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "context": "# Guide",
+          "request": null,
+          "selection": null
+        }
+      },
+      "expected": {
+        "spawn": {
+          "command": "claude",
+          "argv": [
+            "--dangerously-skip-permissions",
+            "# Guide"
+          ],
+          "shell": false
+        },
+        "mustNotContain": [
+          "--model",
+          "--effort"
+        ]
+      }
+    },
+    {
+      "id": "exit-code-preserved",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "installed": [
+          "codex"
+        ],
+        "childExit": {
+          "code": 3
+        }
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "result": 3
+      }
+    },
+    {
+      "id": "signal-exit-maps-to-128-plus",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "installed": [
+          "claude"
+        ],
+        "childExit": {
+          "signal": "SIGKILL",
+          "signalNumber": 9
+        }
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "result": 137
+      }
+    },
+    {
+      "id": "missing-native-returns-127",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "installed": []
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "result": 127,
+        "stderrLines": 1,
+        "spawnAttempts": 1,
+        "installAttempted": false
+      }
+    },
+    {
+      "id": "other-spawn-failure-returns-1",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "installed": [
+          "codex"
+        ],
+        "spawnError": "EACCES"
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "result": 1,
+        "spawnAttempts": 1
+      }
+    },
+    {
+      "id": "no-config-or-auth-writes",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "installed": [
+          "codex"
+        ]
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": {
+            "model": "gpt-5-codex",
+            "effort": "high"
+          }
+        }
+      },
+      "expected": {
+        "filesWritten": [],
+        "envChanged": false,
+        "cwd": "/home/user/project"
+      }
+    },
+    {
+      "id": "sigterm-forwarded-once",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "installed": [
+          "claude"
+        ],
+        "stdinIsTTY": true,
+        "wrapperSignals": [
+          "SIGTERM"
+        ]
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "childSignals": [
+          "SIGTERM"
+        ],
+        "listenersAfterClose": 0
+      }
+    },
+    {
+      "id": "sigint-not-duplicated-on-tty",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "installed": [
+          "codex"
+        ],
+        "stdinIsTTY": true,
+        "wrapperSignals": [
+          "SIGINT"
+        ]
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "childSignals": [],
+        "stillWaiting": true
+      }
+    },
+    {
+      "id": "sigint-forwarded-when-not-tty",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "installed": [
+          "codex"
+        ],
+        "stdinIsTTY": false,
+        "wrapperSignals": [
+          "SIGINT"
+        ]
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "codex",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "childSignals": [
+          "SIGINT"
+        ]
+      }
+    },
+    {
+      "id": "native-refusal-is-the-outcome",
+      "criteria": [
+        "AC7",
+        "AC5"
+      ],
+      "given": {
+        "installed": [
+          "claude"
+        ],
+        "childExit": {
+          "code": 1
+        },
+        "childStderr": "refused to run as root"
+      },
+      "when": {
+        "call": "launchNativeSession",
+        "args": {
+          "agent": "claude",
+          "cwd": "/home/user/project",
+          "context": "c",
+          "selection": null
+        }
+      },
+      "expected": {
+        "result": 1,
+        "spawnAttempts": 1,
+        "autoAnswered": false
+      }
+    }
+  ]
+}

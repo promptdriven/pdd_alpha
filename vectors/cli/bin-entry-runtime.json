@@ -1,0 +1,95 @@
+{
+  "prompt": "../../prompts/cli/bin-entry.prompt.md",
+  "story": "../../story/cli/BIN-ENTRY.md",
+  "note": "Independent synthetic expectations for AC7; these are not real-install or native acceptance results.",
+  "cases": [
+    {
+      "id": "managed-runtime-reaches-prepare-freeze-and-controller",
+      "given": {
+        "entry": "fetched",
+        "current": "R1",
+        "extension": {
+          "retained": [
+            "opaque",
+            7
+          ]
+        }
+      },
+      "expected": {
+        "runtimeRelease": "R1",
+        "prepared": true,
+        "frozen": true,
+        "controllerRequested": true,
+        "nativeEffects": 0,
+        "canonicalAdditions": {
+          "codexVersion": null,
+          "claudeVersion": null,
+          "herdrVersion": null,
+          "cacheSchema": null
+        }
+      }
+    },
+    {
+      "id": "pinned-runtime-handoff-ignores-new-current",
+      "given": {
+        "entry": "R1",
+        "current": "R2",
+        "extension": {
+          "retained": [
+            "opaque",
+            7
+          ]
+        }
+      },
+      "expected": {
+        "runtimeRelease": "R1",
+        "prepared": true,
+        "frozen": true,
+        "controllerRequested": true,
+        "nativeEffects": 0,
+        "canonicalAdditions": {
+          "codexVersion": null,
+          "claudeVersion": null,
+          "herdrVersion": null,
+          "cacheSchema": null
+        }
+      }
+    },
+    {
+      "id": "unmanaged-workflow-retains-preassignment-runtime-refusal",
+      "given": {
+        "entry": "fetched",
+        "current": null,
+        "envClaimsPinned": true
+      },
+      "expected": {
+        "exitCode": 1,
+        "message": "A verified immutable runtime is required before assignment.",
+        "commands": 0,
+        "prepared": false,
+        "controllerRequested": false,
+        "nativeEffects": 0
+      }
+    },
+    {
+      "id": "invalid-managed-runtime-never-reaches-dispatcher",
+      "given": {
+        "entry": "fetched",
+        "current": "R1",
+        "invalidNode": "relative/node",
+        "envClaimsPinned": true
+      },
+      "expected": {
+        "exitCode": 1,
+        "code": "runtime_unavailable",
+        "prepared": false,
+        "controllerRequested": false,
+        "nativeEffects": 0
+      }
+    }
+  ],
+  "requiredContracts": [
+    "../../prompts/cli/workflow-runner.prompt.md",
+    "../../prompts/cli/workflow-runtime.prompt.md"
+  ]
+}

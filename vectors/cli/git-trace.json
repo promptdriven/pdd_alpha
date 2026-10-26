@@ -1,0 +1,14 @@
+{
+  "prompt": "../../prompts/cli/git-trace.prompt.md",
+  "story": "../../story/cli/GIT-TRACE.md",
+  "cases": [
+    {"id":"disabled","given":{"PDD_TRACE":"unset"},"expected":{"calls":1,"logCreated":false}},
+    {"id":"transport-refusal","given":{"exit":128,"stderr":"fatal: could not read Username for 'https://github.com': terminal prompts disabled\n"},"expected":{"exit":128,"outcome":"rejected","calls":1,"allocation":"recovery_required","adds":0,"claims":0}},
+    {"id":"privacy","given":{"inputs":"URL userinfo/query, bearer header, access token, private key and unknown diagnostic text"},"expected":{"credentialsInFile":false,"credentialsInReport":false}},
+    {"id":"unsafe-log","given":{"log":"symlink, hardlink, nonprivate file or non-directory ancestor"},"expected":{"targetChanged":false,"commandResultChanged":false}},
+    {"id":"special-file-race","given":{"log":"private regular file replaced with FIFO after metadata check"},"expected":{"records":[],"blocked":false,"commandResultChanged":false}},
+    {"id":"tail","given":{"completeRecords":205,"finalPartialLine":true},"expected":{"maximumRecords":200,"firstCompleteRecord":5,"partialPrinted":false}},
+    {"id":"rejected-zero","given":{"action":"rejects with numeric code zero"},"expected":{"outcome":"rejected","sameThrownObject":true}},
+    {"id":"logging-failure","given":{"traceWrite":"unavailable"},"expected":{"calls":1,"sameReturnOrError":true,"retry":false}}
+  ]
+}

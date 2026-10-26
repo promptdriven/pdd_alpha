@@ -1,0 +1,11 @@
+#!/bin/sh
+# Generated from prompts/cli/packaging.prompt.md (sha256: 9bb5314bfef6f7258304e3a33514ebd46df9afe267db2be0fc68dcdbdc60b4dd).
+# Dispatch only to a bundled release-platform helper; never compile on install.
+set -eu
+case "$(uname -s)" in Linux) pdd_os=linux ;; Darwin) pdd_os=darwin ;; *) exit 70 ;; esac
+case "$(uname -m)" in x86_64|amd64) pdd_arch=x64 ;; arm64|aarch64) pdd_arch=arm64 ;; *) exit 70 ;; esac
+case "$0" in */*) pdd_bin_path=${0%/*} ;; *) pdd_bin_path=. ;; esac
+pdd_bin_dir=$(CDPATH= cd -P -- "$pdd_bin_path" && pwd)
+pdd_flock="$pdd_bin_dir/../launcher/native/$pdd_os-$pdd_arch/pdd-flock"
+[ -x "$pdd_flock" ] || exit 70
+exec "$pdd_flock" "$@"

@@ -1,0 +1,259 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-worktree.prompt.md",
+  "story": "../../story/cli/WORKFLOW-WORKTREE.md",
+  "note": "Synthetic expected cases derived from the contract, not implementation results.",
+  "cases": [
+    {
+      "id": "dirty-source-preserved",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "source": "dirty",
+        "issue": "unclaimed",
+        "fetch": "success"
+      },
+      "when": {
+        "call": "allocateIssueWorktree"
+      },
+      "expected": {
+        "state": "ready",
+        "sourceBytesUnchanged": true,
+        "sourceStatusUnchanged": true,
+        "worktree": "new external sibling directory"
+      }
+    },
+    {
+      "id": "fetch-failure",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "fetch": "failed",
+        "localBase": "old but present"
+      },
+      "when": {
+        "call": "allocateIssueWorktree"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "newWorktreeCreated": false
+      }
+    },
+    {
+      "id": "same-issue-concurrent",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "requests": "different run ids and workflow names, same issue"
+      },
+      "when": {
+        "call": "allocateIssueWorktree concurrently"
+      },
+      "expected": {
+        "readyAssignmentsAtMost": 1,
+        "otherState": "conflict",
+        "existingWorkPreserved": true
+      }
+    },
+    {
+      "id": "different-issues",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "requests": "two unclaimed issues"
+      },
+      "when": {
+        "call": "allocateIssueWorktree concurrently"
+      },
+      "expected": {
+        "bothAssignmentsRetained": true,
+        "sharedIndexOverwrite": false
+      }
+    },
+    {
+      "id": "lost-add-reply",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "addReply": "lost",
+        "physicalAssignment": "exact saved identity"
+      },
+      "when": {
+        "call": "allocateIssueWorktree"
+      },
+      "expected": {
+        "state": "ready",
+        "replacementWorktreeCreated": false
+      }
+    },
+    {
+      "id": "incomplete-intent",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "savedIntent": "partial"
+      },
+      "when": {
+        "call": "allocateIssueWorktree"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "replacementWorktreeCreated": false,
+        "oldMetadataDeleted": false
+      }
+    },
+    {
+      "id": "lookup-dirty-later",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "assignment": "valid",
+        "laterChanges": "commits and dirt"
+      },
+      "when": {
+        "call": "lookupIssueWorktree"
+      },
+      "expected": {
+        "state": "ready",
+        "sourceModified": false,
+        "savedBaseChanged": false
+      }
+    },
+    {
+      "id": "initializing-lock",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "gitLockReason": "initializing"
+      },
+      "when": {
+        "call": "lookupIssueWorktree"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "worktreeUnlocked": false
+      }
+    },
+    {
+      "id": "protective-lock",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "gitLockReason": "keep this worktree",
+        "assignment": "otherwise valid"
+      },
+      "when": {
+        "call": "lookupIssueWorktree"
+      },
+      "expected": {
+        "state": "ready",
+        "lockRemoved": false
+      }
+    },
+    {
+      "id": "legacy-location",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "layout": "original commonDir/pdd/worktrees UUID",
+        "assignment": "valid"
+      },
+      "when": {
+        "call": "lookupIssueWorktree"
+      },
+      "expected": {
+        "state": "ready",
+        "worktreeMoved": false,
+        "metadataRewritten": false
+      }
+    },
+    {
+      "id": "path-alias",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "allocationParent": "symlink"
+      },
+      "when": {
+        "call": "allocateIssueWorktree"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "writesThroughAlias": false
+      }
+    },
+    {
+      "id": "rejected-zero-not-success",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "gitResult": "rejected with code zero"
+      },
+      "when": {
+        "call": "lookupIssueWorktree"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "falseReady": false
+      }
+    },
+    {
+      "id": "fetch-tracking-mismatch",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "fetch": "successful fresh FETCH_HEAD",
+        "remoteTrackingRef": "older commit"
+      },
+      "when": {
+        "call": "allocateIssueWorktree"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "newWorktreeCreated": false,
+        "staleLocalBaseUsed": false
+      }
+    },
+    {
+      "id": "fetch-auth-diagnostic",
+      "criteria": [
+        "AC2",
+        "AC14"
+      ],
+      "given": {
+        "fetchExit": 128,
+        "stderr": "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+        "localBase": "old but present",
+        "source": "dirty"
+      },
+      "when": {
+        "call": "allocateIssueWorktree",
+        "trace": "enabled or disabled"
+      },
+      "expected": {
+        "state": "recovery_required",
+        "messageIncludes": [
+          "git fetch origin main",
+          "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+          "gh auth setup-git"
+        ],
+        "newWorktreeCreated": false,
+        "authOrRetry": false,
+        "sourceUnchanged": true
+      }
+    }
+  ]
+}

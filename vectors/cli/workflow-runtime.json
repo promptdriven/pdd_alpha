@@ -1,0 +1,384 @@
+{
+  "status": "accepted; not executed",
+  "prompt": "../../prompts/cli/workflow-runtime.prompt.md",
+  "story": "../../story/cli/WORKFLOW-RUNTIME.md",
+  "note": "Independent synthetic expectations. Each given names conditions, not observed program output. Case notation is not a runtime schema.",
+  "cases": [
+    {
+      "id": "freeze-full-context",
+      "criteria": [
+        "AC1"
+      ],
+      "given": {
+        "input": [
+          "full guide",
+          "selected JSON",
+          "all declared Markdown",
+          "exact stage instructions"
+        ]
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "frozen": "actual bytes and hashes",
+        "beforeFirstPrompt": true,
+        "credentialsSaved": false
+      }
+    },
+    {
+      "id": "source-changed",
+      "criteria": [
+        "AC2"
+      ],
+      "given": {
+        "savedFreeze": "valid",
+        "originalGuide": "edited",
+        "originalRecipe": "edited"
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "resumeInput": "saved freeze",
+        "refusedForOriginalEdit": false
+      }
+    },
+    {
+      "id": "freeze-changed",
+      "criteria": [
+        "AC3"
+      ],
+      "given": {
+        "savedFreeze": "digest mismatch"
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "ok": false,
+        "code": "frozen_input_invalid",
+        "launches": 0
+      }
+    },
+    {
+      "id": "node-missing",
+      "criteria": [
+        "AC4"
+      ],
+      "given": {
+        "recordedNode": "absent",
+        "currentNode": "available"
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "ok": false,
+        "code": "runtime_missing",
+        "fallbackToCurrent": false
+      }
+    },
+    {
+      "id": "partial-freeze",
+      "criteria": [
+        "AC5"
+      ],
+      "given": {
+        "write": "interrupted before directory durable"
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "launches": 0,
+        "overwriteFreeze": false
+      }
+    },
+    {
+      "id": "multi-release-run",
+      "criteria": [
+        "AC6"
+      ],
+      "given": {
+        "runVersion": "old",
+        "machineVersionsSince": 4,
+        "unfinished": true
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "keepOldRuntime": true,
+        "unknownFieldsPreserved": true
+      }
+    },
+    {
+      "id": "upgrade-not-consent",
+      "criteria": [
+        "AC7"
+      ],
+      "given": {
+        "machineUpdate": "activated",
+        "waitingRev": 57
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "runVersionChanged": false,
+        "waitRev": 57
+      }
+    },
+    {
+      "id": "stock-tool-change",
+      "criteria": [
+        "AC8"
+      ],
+      "given": {
+        "recordedCodex": "older",
+        "installedCodex": "newer"
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "stockToolPinnedByPDD": false,
+        "compatibilityCheckRequired": true
+      }
+    },
+    {
+      "id": "freeze-seed-complete",
+      "criteria": [
+        "AC9"
+      ],
+      "given": {
+        "seed": [
+          "canonical issue/task",
+          "repository",
+          "baseRef",
+          "baseSha",
+          "sourceRoot",
+          "assigned root"
+        ]
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "seedBytesFrozen": true,
+        "undeclaredLookup": false
+      }
+    },
+    {
+      "id": "raw-unknown-control-preserved",
+      "criteria": [
+        "AC10"
+      ],
+      "given": {
+        "sharedControlState": "future-state",
+        "rewrite": "retained older runtime"
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "rawControlStateAfterRewrite": "future-state",
+        "effectsAuthorized": false
+      }
+    },
+    {
+      "id": "blocked-pinned-run",
+      "criteria": [
+        "AC11"
+      ],
+      "given": {
+        "runRuntime": "blocked release",
+        "liveStage": true
+      },
+      "when": {
+        "operation": "workflow-runtime"
+      },
+      "expected": {
+        "notice": "Needs you: Upgrade run",
+        "automaticRunUpgrade": false,
+        "runtimeDeleted": false,
+        "stageKilled": false
+      }
+    },
+    {
+      "id": "upgrade-current-stopped",
+      "criteria": [
+        "AC12"
+      ],
+      "given": {
+        "expectedRev": 57,
+        "currentRev": 57,
+        "boundary": "stopped",
+        "target": "verified",
+        "confirmed": true
+      },
+      "when": {
+        "call": "upgradeWorkflowRuntime"
+      },
+      "expected": {
+        "state": "upgraded",
+        "code": null,
+        "journalEvents": [
+          "upgrade.intent",
+          "upgrade.committed"
+        ],
+        "runtimeChangedOnlyByCommit": true,
+        "agentStarted": false
+      }
+    },
+    {
+      "id": "upgrade-stale-revision",
+      "criteria": [
+        "AC13"
+      ],
+      "given": {
+        "expectedRev": 57,
+        "currentRev": 58
+      },
+      "when": {
+        "call": "upgradeWorkflowRuntime"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "stale_decision",
+        "runtimeUnchanged": true,
+        "journalUnchanged": true
+      }
+    },
+    {
+      "id": "upgrade-live-turn",
+      "criteria": [
+        "AC14"
+      ],
+      "given": {
+        "expectedRev": 57,
+        "currentRev": 57,
+        "turn": "working"
+      },
+      "when": {
+        "call": "upgradeWorkflowRuntime"
+      },
+      "expected": {
+        "state": "refused",
+        "code": "run_not_stopped",
+        "runtimeUnchanged": true
+      }
+    },
+    {
+      "id": "upgrade-before-commit-crash",
+      "criteria": [
+        "AC15"
+      ],
+      "given": {
+        "upgradeIntent": "durable old/new",
+        "upgradeCommitted": false,
+        "process": "restarted"
+      },
+      "when": {
+        "recover": "same upgrade intent"
+      },
+      "expected": {
+        "activeRuntime": "old",
+        "agentStarted": false,
+        "guessedCommit": false
+      }
+    },
+    {
+      "id": "upgrade-after-commit-crash",
+      "criteria": [
+        "AC16"
+      ],
+      "given": {
+        "upgradeCommitted": true,
+        "statusWrite": "interrupted"
+      },
+      "when": {
+        "recover": "same upgrade intent"
+      },
+      "expected": {
+        "activeRuntime": "new",
+        "oldIntentReplayed": false
+      }
+    },
+    {
+      "id": "upgrade-repeat-current-request",
+      "criteria": [
+        "AC17"
+      ],
+      "given": {
+        "expectedRev": 57,
+        "currentRev": 58,
+        "sameTarget": "same verified release and digests",
+        "priorUpgrade": "committed"
+      },
+      "when": {
+        "call": "upgradeWorkflowRuntime"
+      },
+      "expected": {
+        "state": "upgraded",
+        "additionalTransitionRecorded": false
+      }
+    },
+    {
+      "id": "upgrade-target-conflict",
+      "criteria": [
+        "AC18"
+      ],
+      "given": {
+        "expectedRev": 57,
+        "priorIntentTarget": "release-a",
+        "requestedTarget": "release-b"
+      },
+      "when": {
+        "call": "upgradeWorkflowRuntime"
+      },
+      "expected": {
+        "state": "refused",
+        "oldIntentPreserved": true,
+        "runtimeUnchanged": true
+      }
+    },
+    {
+      "id": "freeze-project-and-selection",
+      "criteria": [
+        "AC19"
+      ],
+      "given": {
+        "seed": {
+          "project": {
+            "id": "p1",
+            "name": "Calendar"
+          },
+          "launchSelection": {
+            "model": "a",
+            "effort": "high"
+          }
+        },
+        "laterSettings": {
+          "model": "b",
+          "effort": "low"
+        }
+      },
+      "when": {
+        "operation": "freezeWorkflowInputs"
+      },
+      "expected": {
+        "frozenProject": {
+          "id": "p1",
+          "name": "Calendar"
+        },
+        "frozenSelection": {
+          "model": "a",
+          "effort": "high"
+        },
+        "accountPreferenceFrozen": false
+      }
+    }
+  ]
+}
