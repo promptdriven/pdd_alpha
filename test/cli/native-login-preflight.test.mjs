@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {runPdd} from '../../src/pdd-cli.mjs';
 import * as nativeAgentAuth from '../../src/native-agent-auth.mjs';
 
+const advice='Agents need a sign-in: run `pdd accounts add codex` (or claude) when ready.\n';
 const runId='3ba0c0c3-1c26-4a3c-8db6-39d988d3f85b';
 function output(){return {text:'',write(value){this.text+=value;}};}
 function io(){return {stdout:output(),stderr:output(),cwd:'/selected/repo'};}
@@ -30,7 +31,7 @@ for(const agent of ['codex','claude'])test(`new ${agent} workflow checks login b
   assert.deepEqual(calls,['auth','prepare','controller']);assert.equal(deps.stderr.text,'');assert.equal(deps.stdout.text,`Started workflow ${runId}.\n`);
 });
 for(const [state,code,expected] of [
-  ['blocked','agent_sign_in_required','codex is not signed in. Run codex login before starting a workflow.\n'],
+  ['blocked','agent_sign_in_required',advice],
   ['unavailable','native_agent_missing','codex is not installed. Install it and run codex login.\n'],
   ['unavailable','agent_auth_status_unavailable','codex sign-in status is unavailable. Check codex login status before starting a workflow.\n']
 ])test(`workflow ${code} refuses before preparation and Herdr effects`,async()=>{
@@ -47,32 +48,45 @@ test('malformed, wrong-tool and thrown status cannot print private messages or g
     assert.match(deps.stderr.text,/sign-in status is unavailable/);assert.doesNotMatch(deps.stderr.text,/synthetic-secret|private-synthetic/);
   }
 });
-test('setup checks both native tools before any installation/recovery/client effects',async()=>{
+test('setup skips native probes and preserves installation/recovery/client ordering',async()=>{
   const calls=[],deps={...io(),setupModules:setup(calls),nativeAgentAuth:{checkNativeAgentAuth:async({agent})=>{calls.push(agent);return reply(agent,agent==='codex'?'ready':'unavailable',agent==='codex'?null:'native_agent_missing');}},
     workflowHerdrBoot:{ensureHerdrInstalled:async()=>{calls.push('herdr');return {state:'ready',code:null,executable:'/absolute/herdr'};}},
     clientAdapter:{runSetupCommand:async()=>{calls.push('client');return 0;}}};
-  assert.equal(await runPdd(['setup'],deps),0);assert.deepEqual(calls,['runtime','codex','claude','herdr','lease','record','support','service','client']);
+  assert.equal(await runPdd(['setup'],deps),0);assert.deepEqual(calls,['runtime','herdr','lease','record','support','service','client']);
   assert.equal(deps.stderr.text,'');
 });
-test('setup installed signed-out tool refuses despite another ready tool',async()=>{
-  for(const signedOut of ['codex','claude']) {
-    const calls=[],deps={...io(),setupModules:setup(calls),nativeAgentAuth:{checkNativeAgentAuth:async({agent})=>{calls.push(agent);return agent===signedOut?reply(agent,'blocked','agent_sign_in_required'):reply(agent);}},
-      workflowHerdrBoot:{ensureHerdrInstalled:()=>assert.fail('No install')},clientAdapter:{runSetupCommand:()=>assert.fail('No client')}};
-    assert.equal(await runPdd(['setup'],deps),1);assert.deepEqual(calls,['runtime','codex','claude']);assert.match(deps.stderr.text,new RegExp(`${signedOut} is not signed in`));
+for(const status of ['signed-out','missing','unknown','throws'])test(`setup ${status} native tools do not prevent provisioning or continuation`,async()=>{
+  const calls=[];let probes=0;
+  const deps={...io(),setupModules:setup(calls),nativeAgentAuth:{checkNativeAgentAuth:async({agent})=>{
+    probes++;if(status==='throws')throw Error('private-payload');
+    return reply(agent,status==='signed-out'?'blocked':'unavailable',status==='signed-out'?'agent_sign_in_required':status==='missing'?'native_agent_missing':'agent_auth_status_unavailable');}},
+    workflowHerdrBoot:{ensureHerdrInstalled:async()=>{calls.push('herdr');return {state:'ready',code:null,executable:'/absolute/herdr'};}},
+    clientAdapter:{runSetupCommand:async()=>{calls.push('client');return 0;}}};
+  assert.equal(await runPdd(['setup'],deps),0);assert.equal(probes,0);
+  assert.deepEqual(calls,['runtime','herdr','lease','record','support','service','client']);
+  assert.equal(deps.stderr.text,'');assert.equal(deps.stdout.text,advice);
+});
+test('setup preserves nonzero and malformed private outcomes without completion advice',async()=>{
+  for(const exit of [1,2,130,undefined,{},-1,256]){
+    const calls=[],deps={...io(),setupModules:setup(calls),
+      nativeAgentAuth:{checkNativeAgentAuth:()=>assert.fail('No native probe')},
+      workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null,executable:'/absolute/herdr'})},
+      clientAdapter:{runSetupCommand:async()=>exit}};
+    assert.equal(await runPdd(['setup'],deps),Number.isInteger(exit)&&exit>0&&exit<256?exit:1);
+    assert.equal(deps.stdout.text,'');
   }
 });
-test('setup all missing or unknown status refuses without provisioning',async()=>{
-  for(const code of ['native_agent_missing','agent_auth_status_unavailable']){
-    const calls=[],deps={...io(),setupModules:setup(calls),nativeAgentAuth:{checkNativeAgentAuth:async({agent})=>reply(agent,'unavailable',code)},
-      workflowHerdrBoot:{ensureHerdrInstalled:()=>assert.fail('No install')}};
-    assert.equal(await runPdd(['setup'],deps),1);assert.deepEqual(calls,['runtime']);assert.equal(deps.stdout.text,'');
-  }
+for(const agent of ['codex','claude'])test(`signed-out ${agent} foreground session refuses without launching or waiting`,async()=>{
+  let probes=0;const deps={...io(),workflowModels,nativeAgentAuth:{checkNativeAgentAuth:async()=>{probes++;return reply(agent,'blocked','agent_sign_in_required');}},
+    nativeSession:()=>assert.fail('No native launch')};
+  assert.equal(await runPdd(['session','--agent',agent],deps),1);
+  assert.equal(probes,1);assert.equal(deps.stdout.text,'');assert.equal(deps.stderr.text,advice);
 });
 test('setup readiness is not cached for a later new workflow',async()=>{
   let run=false;const calls=[],deps=start({setupModules:setup(calls),nativeAgentAuth:{checkNativeAgentAuth:async({agent})=>run?reply(agent,'blocked','agent_sign_in_required'):reply(agent)},
     workflowHerdrBoot:{ensureHerdrInstalled:async()=>({state:'ready',code:null,executable:'/absolute/herdr'})},workflowRunner:{prepareWorkflow:()=>assert.fail('No preparation')}});
   assert.equal(await runPdd(['setup'],deps),0);run=true;
-  assert.equal(await runPdd(['workflow','run','small-change','20'],deps),1);assert.match(deps.stderr.text,/codex is not signed in/);
+  assert.equal(await runPdd(['workflow','run','small-change','20'],deps),1);assert.equal(deps.stderr.text,advice);
 });
 test('discovery, malformed input and remote source refusal never query native auth',async()=>{
   const deps=start({nativeAgentAuth:{checkNativeAgentAuth:()=>assert.fail('No native probe')}});
@@ -87,7 +101,7 @@ test('default production workflow route uses real status helper and blocks signe
   const deps={...io(),cwd:root,workflowModels,ports:{env:{PATH:root,HOME:root}},workflowHerdrBoot:{ensureDefaultHerdr:()=>assert.fail('No Herdr')},
     workflowController:{startWorkflowController:()=>assert.fail('No controller')}};
   assert.equal(await runPdd(['workflow','run','small-change','20'],deps),1);
-  assert.equal(deps.stdout.text,'');assert.equal(deps.stderr.text,'codex is not signed in. Run codex login before starting a workflow.\n');
+  assert.equal(deps.stdout.text,'');assert.equal(deps.stderr.text,advice);
   assert.deepEqual((await fs.readdir(root)),['codex']);
 });
 test('real helper is usable through explicit offline-owner seam with native HOME preserved',async t=>{

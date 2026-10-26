@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-herdr-service.prompt.md (sha256: edb404e32901d49e4d6868048b10710f48c79457273f33885aa234bda6d12661).
+// Generated from prompts/cli/workflow-herdr-service.prompt.md (sha256: 0cca916ceac6ba82cde8f05daa049cb14a0d95b980dd6cf77adefbfa4e063ba3).
 import * as fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {join,isAbsolute,dirname} from 'node:path';
@@ -22,7 +22,7 @@ const quote=s=>'"'+s.replaceAll('\\','\\\\').replaceAll('"','\\"').replaceAll('%
 const xml=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&apos;');
 export function herdrServiceFiles({home,herdr,platform=process.platform}){
  if(!pathOK(home)||!pathOK(herdr))throw fail();
- if(platform==='linux')return [{path:join(home,'.config/systemd/user',UNIT),text:`# PDD default Herdr user service\n[Unit]\nDescription=Herdr default session for PDD\n\n[Service]\nType=simple\nExecStart=${quote(herdr)} server\nWorkingDirectory=${quote(home).replaceAll('$$','$')}\nEnvironment=${quote('HOME='+home).replaceAll('$$','$')}\nRestart=on-failure\nRestartSec=2\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`}];
+ if(platform==='linux')return [{path:join(home,'.config/systemd/user',UNIT),text:`# PDD default Herdr user service\n[Unit]\nDescription=Herdr default session for PDD\n\n[Service]\nType=simple\nExecStart=${quote(herdr)} server\nWorkingDirectory=${home.replaceAll('%','%%')}/.\nEnvironment=${quote('HOME='+home).replaceAll('$$','$')}\nRestart=on-failure\nRestartSec=2\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`}];
  if(platform==='darwin')return [{path:join(home,'Library/LaunchAgents',LABEL+'.plist'),text:`<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(herdr)}</string><string>server</string></array><key>WorkingDirectory</key><string>${xml(home)}</string><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(home)}</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>AbandonProcessGroup</key><true/></dict></plist>\n`}];
  return [];
 }

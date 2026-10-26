@@ -3,11 +3,26 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import {join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {withUpdateLock} from '../../src/update-lock.mjs';
 import {provisionHerdrService,herdrServiceFiles,checkHerdrService,startInstalledHerdr} from '../../src/workflow-herdr-service.mjs';
 import {ensureDefaultHerdr} from '../../src/workflow-herdr-boot.mjs';
 const unit='pdd-herdr-default.service',label='ai.promptdriven.pdd-herdr-default';
 const reply=()=>({stdout:JSON.stringify({result:{workspaces:[]}}),code:0});
+test('Linux manager parses the generated working directory as the exact home without starting a service',
+ {skip:process.platform!=='linux'},async t=>{
+ const root=await fs.mkdtemp(join(tmpdir(),'pdd-herdr-unit-'));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ for(const name of ['ordinary','home space " %h $ \\ literal','trailing space ','trailing-backslash\\']){
+  const home=join(root,name),[file]=herdrServiceFiles({home,herdr:'/usr/bin/true',platform:'linux'});
+  await fs.mkdir(dirname(file.path),{recursive:true});await fs.writeFile(file.path,file.text);
+  const {stdout}=await promisify(execFile)('systemd-analyze',['--user','--man=no','verify',file.path],
+   {env:{...process.env,LC_ALL:'C',SYSTEMD_LOG_LEVEL:'debug'},timeout:10000,maxBuffer:4*1024*1024});
+  assert.ok(stdout.split('\n').some(line=>line===`\t\tWorkingDirectory: ${home}`),
+   `systemd must preserve the exact home ${JSON.stringify(home)}`);
+ }
+});
 async function fixture(t,platform='linux'){
  const home=await fs.mkdtemp(join(tmpdir(),'pdd-c19-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const binary=join(home,'Herdr % $ " & tool');await fs.writeFile(binary,'#!/bin/sh\nexit 0\n',{mode:0o700});

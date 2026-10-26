@@ -1,4 +1,4 @@
-// Generated from prompts/cli/native-agent-auth.prompt.md (sha256: bd8be7e627d25392b07856d623e54363bfd94f8475acab1b0f534e984b0123d0).
+// Generated from prompts/cli/native-agent-auth.prompt.md (sha256: 368c4b56452f153585123b4087d1cc30793e5690a4dde1b169394bed30dd275a).
 import * as fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {execFile} from 'node:child_process';
@@ -11,7 +11,7 @@ export async function checkNativeAgentAuth({agent,cwd}={},ports={}) {
   const unknown=()=>reply('unavailable','agent_auth_status_unavailable',`${agent} sign-in status is unavailable. Check ${agent==='claude'?'claude auth status':'codex login status'} before starting a workflow.`);
   if(!['codex','claude'].includes(agent))return {state:'unavailable',code:'agent_auth_status_unavailable',agent:null,message:'Choose codex or claude to check native sign-in.'};
   const login=agent==='codex'?'codex login':'claude auth login';
-  const blocked=()=>reply('blocked','agent_sign_in_required',`${agent} is not signed in. Run ${login} before starting a workflow.`);
+  const blocked=()=>reply('blocked','agent_sign_in_required','Agents need a sign-in: run `pdd accounts add codex` (or claude) when ready.');
   const missing=()=>reply('unavailable','native_agent_missing',`${agent} is not installed. Install it and run ${login}.`);
   if(typeof cwd!=='string'||!isAbsolute(cwd)||/[\p{Cc}\p{Cs}]/u.test(cwd))return unknown();
   try {

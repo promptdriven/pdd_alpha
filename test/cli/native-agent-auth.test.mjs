@@ -52,7 +52,7 @@ test(`failed native probe stays unknown: ${failure.code} ${Boolean(failure.kille
 test('Node failed status with explicit negative remains actionable',async t=>{
   const f=await fixture(t);
   const result=await checkNativeAgentAuth({agent:'codex',cwd:f.root},{...f.ports,execFile:async()=>{throw Object.assign(Error('not copied'),{code:1,stdout:'',stderr:'Not logged in\n'});}});
-  assert.equal(result.code,'agent_sign_in_required');assert.match(result.message,/codex login/);
+  assert.equal(result.code,'agent_sign_in_required');assert.equal(result.message,'Agents need a sign-in: run `pdd accounts add codex` (or claude) when ready.');
 });
 test('missing, non-executable and malformed explicit selection do not fall back',async t=>{
   const f=await fixture(t);const noExec=join(f.root,'disabled');await fs.writeFile(noExec,'no',{mode:0o600});

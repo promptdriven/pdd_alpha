@@ -14,6 +14,11 @@ service definition `{path,text}` for supported Linux/macOS, with an absolute
 Herdr executable and explicit HOME/working directory. Encode paths as literal
 systemd arguments or XML strings, including spaces, quotes, dollar and percent
 characters; reject control characters. No PATH-selected executable in a service.
+Linux `WorkingDirectory` uses the manager's literal path syntax, independently
+of command-argument and environment quoting. The manager must resolve it to the
+supplied home, including trailing spaces or backslashes; quote characters must
+not turn an absolute home into a relative path, and percent specifiers must not
+substitute another directory.
 Linux owns `~/.config/systemd/user/pdd-herdr-default.service`, enabled under
 `default.target`, automatic restart after failure and KillMode=process so a manager restart of
 Herdr does not kill its native children. macOS owns

@@ -185,7 +185,8 @@ process.exitCode=await runPdd(['setup'],{home:process.env.HOME,cwd:process.env.H
  const result=await execute(process.execPath,['--input-type=module','--eval',script],{env,timeout:15000});
  assert.match(result.stdout,/Public recovery service ready/);assert.equal(result.stderr,'');
  assert.deepEqual((await fs.readFile(herdrLog,'utf8')).trim().split('\n').map(JSON.parse),[['--help'],['--session','default','workspace','list'],['--session','default','workspace','list']]);
- assert.deepEqual((await fs.readFile(f.authLog,'utf8')).trim().split('\n').map(JSON.parse),[{args:['login','status'],cwd:f.home,home:f.home}]);
+ // D18 setup must not probe either native account before provisioning.
+ await assert.rejects(fs.readFile(f.authLog,'utf8'),{code:'ENOENT'});
  assert.deepEqual((await fs.readFile(log,'utf8')).trim().split('\n').map(JSON.parse),[['--user','daemon-reload'],['--user','enable','pdd-herdr-default.service'],['--user','is-enabled','pdd-herdr-default.service'],['--user','daemon-reload'],['--user','enable','--now','pdd-runs-keeper.service'],['--user','start','pdd-herdr-default.service']]);
  assert.match(await fs.readFile(join(f.home,'.config/systemd/user/pdd-herdr-default.service'),'utf8'),/ExecStart=.*herdr.* server/);
  assert.match(await fs.readFile(join(f.home,'.config/systemd/user/pdd-runs-keeper.service'),'utf8'),/cli runs-keeper/);

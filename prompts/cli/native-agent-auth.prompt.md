@@ -2,7 +2,7 @@
 
 Own `src/native-agent-auth.mjs`. Export async module function
 `checkNativeAgentAuth({agent,cwd},ports={})`. It checks existing Codex or Claude
-login before a workflow starts, without launching a conversation or performing
+login before a workflow or foreground session starts, without launching a conversation or performing
 login/logout, a model call, credential-file access or configuration mutation.
 Preservation: additive read-only admission evidence; native environment, HOME,
 cwd, account selection and process identity remain with their existing owners.
@@ -11,8 +11,14 @@ Return `{state,code,agent,message}`. Only `ready` with `code:null` is affirmativ
 `blocked/agent_sign_in_required` means the native CLI explicitly reports no login;
 `unavailable/native_agent_missing` means no executable was found;
 `unavailable/agent_auth_status_unavailable` covers unknown or failed status.
-Messages contain only fixed tool names and plain native install/login/status
-next steps, never raw output, account names, tokens or exception text.
+An explicitly signed-out result has exactly this fixed advice:
+
+> Agents need a sign-in: run `pdd accounts add codex` (or claude) when ready.
+
+Other messages contain only fixed tool names and plain native install/status next
+steps, never raw output, account names, tokens or exception text. Setup does not
+call this helper: authentication is an agent-start guard, never an install or
+setup prerequisite.
 
 Find the first executable regular file on the invocation environment's PATH,
 resolving relative and empty entries against cwd. An explicit

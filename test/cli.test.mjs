@@ -138,12 +138,19 @@ for(const key of ['readFileSync','readdirSync','statSync','lstatSync']){const or
   const fakeBin = join(sandbox, 'native-bin'); mkdirSync(fakeBin);
   const nativeScript = `#!${process.execPath}
 import fs from 'node:fs';
+// Strict synthetic offline status replies: never consume the session stdin.
+const args=process.argv.slice(2),codex=process.argv[1].endsWith('/codex');
+if(JSON.stringify(args)===JSON.stringify(codex?['login','status']:['auth','status','--json'])){
+ fs.appendFileSync(process.env.NATIVE_STATUS_LOG,JSON.stringify({agent:codex?'codex':'claude',args})+'\\n');
+ console.log(codex?'Logged in using ChatGPT':JSON.stringify({loggedIn:true}));process.exit(0);
+}
 const input=fs.readFileSync(0,'utf8');
 console.log(JSON.stringify({executable:process.argv[1],argv:process.argv.slice(2),cwd:process.cwd(),input,setting:process.env.NATIVE_SETTING_EXAMPLE}));
 process.exit(Number(process.env.NATIVE_FIXTURE_EXIT||0));
 `;
   for (const name of ['codex','claude']) writeFileSync(join(fakeBin,name), nativeScript, {mode:0o755});
-  const nativeEnv = {...env, PATH:fakeBin+':'+env.PATH,NATIVE_SETTING_EXAMPLE:'unchanged'};
+  const authLog=join(sandbox,'native-status.jsonl');
+  const nativeEnv = {...env, PATH:fakeBin+':'+env.PATH,NATIVE_SETTING_EXAMPLE:'unchanged',NATIVE_STATUS_LOG:authLog};
   const request = 'Help with this project; $(touch must-not-exist) "quoted"';
   for (const agent of ['codex','claude']) {
     const launched = spawnSync(process.execPath,[bin,'session','--agent',agent,request],
@@ -156,6 +163,7 @@ process.exit(Number(process.env.NATIVE_FIXTURE_EXIT||0));
     assert.ok(observed.argv.at(-1).includes(readFileSync(join(packed,'docs/workflows.md'),'utf8')));
     assert.equal(observed.cwd,project);assert.equal(observed.input,'native stdin is inherited\n');assert.equal(observed.setting,'unchanged');
   }
+  assert.deepEqual(readFileSync(authLog,'utf8').trim().split('\n').map(JSON.parse),[{agent:'codex',args:['login','status']},{agent:'claude',args:['auth','status','--json']}]);
   for (const name of ['feature','bug','small-change']) {
     for (const agent of [null,'codex','claude']) {
       const args=[bin,'workflow',name,...(agent?['--agent',agent]:[]),'--',request+' --help'];

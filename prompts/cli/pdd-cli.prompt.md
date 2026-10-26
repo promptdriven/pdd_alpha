@@ -148,12 +148,21 @@ lists public doctor plus optional phone/link; local discovery imports none of th
 
 ## Public setup and recovery
 
-Before public setup effects, check existing native login through module function
-`checkNativeAgentAuth({agent,cwd},ports)` from
-`src/native-agent-auth.mjs` for codex and claude. Absent tools are optional when
-at least one installed tool is ready; an installed signed-out or unreadable tool
-stops setup with its fixed actionable message and exit1. No installed tool also
-stops setup. Print no account/status payload. Setup never signs in for the user.
+Install and setup never require prior Codex or Claude sign-in. Public setup must
+not query native login status, read credentials or invoke native sign-in, even
+when neither tool is installed or a status provider is supplied. The private
+setup owner offers each chosen tool's optional sign-in at step 6 after GitHub;
+skip or no terminal does not make native authentication a setup/Link prerequisite.
+Keep real runtime, service, enrollment and private-provider refusals intact.
+After a setup continuation returns exit 0 (including public-only recovery), end
+stdout with exactly one line:
+
+> Agents need a sign-in: run `pdd accounts add codex` (or claude) when ready.
+
+This advice claims neither account readiness nor Link readiness. Never convert a
+nonzero, missing or malformed private result to success or print completion
+advice after such a result. The selected private entry and post-lease awaited
+lifetime below remain unchanged. Native homes stay untouched by public setup.
 
 `setup [--no-phone]` first resolves its verified runtime using the existing
 versions owner; a failed runtime resolution performs no Herdr installation.
@@ -350,23 +359,25 @@ Explicit setupModules remain an offline owner seam: a supplied herdrService
 module opts that seam into provisioning and readiness; production always uses
 the real module. No command-line switch bypasses the service prerequisite.
 
-## Native workflow login preflight
+## Native agent login preflight
 
-For each new local `workflow run`, after placement/model/project selection and
-before `prepareWorkflow`, check the selected codex/claude tool with the native
-login owner above using the selected cwd and existing native environment. Only
+For each new local `workflow run` or foreground `session`, after placement/model/project selection and
+before `prepareWorkflow` or native session launch, check the selected codex/claude tool with the native
+`src/native-agent-auth.mjs:checkNativeAgentAuth({agent,cwd},ports)` using the selected cwd and existing native environment. Only
 ready/code:null permits preparation, Herdr startup or controller admission;
-otherwise print that owner's fixed message once on stderr and return1. A previous
+otherwise print a fixed safe message once on stderr and return1, except a missing
+foreground-session executable retains exit127. Explicitly signed-out
+results use the exact setup accounts-add advice above. A previous
 setup success is never cached as run readiness. Remote source dispatch does not
 check the source login; its target owns local admission. Resume, drive, attach,
-status, recovery and foreground manual sessions retain their existing contracts.
+status and recovery retain their existing contracts.
 The independently owned stage watcher handles a later sign-in screen.
 
 Keep explicit offline owner injection compatible: an injected workflowRunner
-owns its own preparation prerequisites, and supplied setupModules own setup
-prerequisites. They do not construct a default native probe. An explicit
-`dependencies.nativeAgentAuth` module opts either seam into this CLI preflight
-through the same public check function. Production's absent injected owner always
+owns its own preparation prerequisites, and an injected nativeSession owns its
+launch prerequisites. They do not construct a default native probe. An explicit
+`dependencies.nativeAgentAuth` module opts those launch seams into this CLI preflight
+through the same public check function; setup never uses it. Production's absent injected owner always
 uses the real lazy module. Invalid/throwing auth replies give fixed sign-in-status
 guidance, never arbitrary messages or success. Accept only valid combinations
 of state/code and selected agent, and use fixed CLI diagnostics derived from them.

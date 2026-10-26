@@ -146,7 +146,7 @@ test('stock installer reaches real public setup after publication; rerun disclos
   }
   assert.equal((await readInstallRecord({ home: f.home })).value.transaction.id, record.transaction.id);
   assert.match(await fs.readFile(f.capture, 'utf8'), /enable --now pdd-runs-keeper\.service/);
-  assert.equal(await fs.readFile(f.authCapture, 'utf8'), '<login>\n<status>\n<login>\n<status>\n');
+  await assert.rejects(fs.readFile(f.authCapture, 'utf8'), { code: 'ENOENT' });
   await assertHerdrPersistence(f, 2);
 });
 
@@ -173,7 +173,7 @@ node --input-type=module -e 'import{readFileSync,realpathSync}from"node:fs";cons
 /bin/rm -r "$S66_ROOT/pdd"
 `, 0o755);
   const result = await f.run({ S66_ROOT: legacy, S66_CALLS: calls });
-  assert.equal(await fs.readFile(f.authCapture, 'utf8'), '<login>\n<status>\n');
+  await assert.rejects(fs.readFile(f.authCapture, 'utf8'), { code: 'ENOENT' });
   await assertHerdrPersistence(f, 1);
   assert.equal(result.stdout.split('Removed old global npm pdd (promptdriven/pdd_alpha).').length, 2);
   assert.match(result.stdout, /Public recovery service ready/);

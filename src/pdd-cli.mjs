@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: f008899e8d74d404fdb2020d51a23f9b4259f9eab731e58de752c0c78a5b9556).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 9a5edbfe66162ba141fc819cbf6ddeacbf76e20eabf890e5a2c546e0990123ae).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -126,9 +126,10 @@ export async function runPdd(argv, dependencies = {}) {
         ||(result.state==='unavailable'&&['native_agent_missing','agent_auth_status_unavailable'].includes(result.code)))?result:unknown;
     } catch {return unknown;}
   }
+  const signInAdvice='Agents need a sign-in: run `pdd accounts add codex` (or claude) when ready.';
   function nativeLoginFailure(result) {
     const {agent,code}=result,login=agent==='codex'?'codex login':'claude auth login';
-    line(stderr,code==='agent_sign_in_required'?`${agent} is not signed in. Run ${login} before starting a workflow.`
+    line(stderr,code==='agent_sign_in_required'?signInAdvice
       :code==='native_agent_missing'?`${agent} is not installed. Install it and run ${login}.`
       :`${agent} sign-in status is unavailable. Check ${agent==='codex'?'codex login status':'claude auth status'} before starting a workflow.`);
   }
@@ -342,13 +343,6 @@ export async function runPdd(argv, dependencies = {}) {
         const lock=modules.lock??await import('./update-lock.mjs');
         const launcher=modules.launcher??await import('./pdd-launch.mjs');
         let runtime=await versions.resolveRuntime({home,versionRoot:packageRoot},ports);
-        if(!dependencies.setupModules||nativeAgentAuth){
-          const checks=[];
-          for(const agent of ['codex','claude'])checks.push(await nativeLogin(agent,cwd));
-          const failure=checks.find(result=>result.state!=='ready'&&result.code!=='native_agent_missing')
-            ??(!checks.some(result=>result.state==='ready')?checks[0]:null);
-          if(failure){nativeLoginFailure(failure);return 1;}
-        }
         if(!await readyHerdr('ensureHerdrInstalled'))return 1;
         const herdrService=modules.herdrService??(!dependencies.setupModules?await import('./workflow-herdr-service.mjs'):null);
         const result=await lock.withUpdateLock({home},async lease=>{
@@ -363,7 +357,7 @@ export async function runPdd(argv, dependencies = {}) {
         if(herdrService&&!await readyHerdr('ensureDefaultHerdr',runtime))return 1;
         if(clientAdapter?.runSetupCommand) {
           const exit=await clientAdapter.runSetupCommand(argv.slice(1),{...ports,cwd,packageRoot});
-          if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();return exit;
+          if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();if(exit===0)line(stdout,signInAdvice);return exit;
         }
         if(clientAdapter===undefined){
           let client;
@@ -371,11 +365,11 @@ export async function runPdd(argv, dependencies = {}) {
           if(client){
             try{
               const exit=await client.runSetupCommand(argv.slice(1),{home,linkDir:join(home,'.pdd/link'),stdin,stdout,stderr,signal});
-              if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();return exit;
+              if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();if(exit===0)line(stdout,signInAdvice);return exit;
             }catch{line(stderr,'Optional client command unconfirmed. Inspect local state before retrying.');return 1;}
           }
         }
-        line(stdout,'Public recovery service ready.');return 0;
+        line(stdout,'Public recovery service ready.');line(stdout,signInAdvice);return 0;
       }catch(error) {if(error?.code==='herdr_not_found'){line(stderr,safeLabel(error.message));return 1;}line(stderr,'Public setup could not be completed. Use the verified PDD installer or ~/.pdd/launcher/pdd-launch recover, then rerun pdd setup.');return 1;}
     }
     case 'doctor': {
@@ -427,6 +421,10 @@ export async function runPdd(argv, dependencies = {}) {
       let launch;
       try {launch=await launchInput(plan);if(launch.exitCode!==undefined)return launch.exitCode;}
       catch {line(stderr,'Launch selection unavailable. Check the local adapters.');return 1;}
+      if(dependencies.nativeSession===undefined||nativeAgentAuth){
+        const auth=await nativeLogin(launch.agent,launch.cwd);
+        if(auth.state!=='ready'){nativeLoginFailure(auth);return auth.code==='native_agent_missing'?127:1;}
+      }
       let context;
       try { context = loadGuidance({ packageRoot, cwd: launch.cwd, workflows: true, workflowName: plan.workflowName }); }
       catch { return guidanceError(stderr); }
