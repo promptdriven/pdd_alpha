@@ -79,3 +79,18 @@ test('C15 corrupt complete rows refuse append unchanged while diagnostic reads r
  assert.equal((await appendKeeperDecision(entry,ports)).ok,true);
  assert.equal(await fs.readFile(path,'utf8'),valid+valid);
 });
+
+
+test('C20 C21 current structured keeper diagnostics display fixes and reset time without changing saved status',async t=>{
+ const home=await folder(t),dir=join(home,runId);await fs.mkdir(dir);const status={v:1,runId,state:'running',journalSeq:4,updatedAt:999};await writeRunStatus(dir,status);
+ for(const diagnostic of [{code:'herdr_not_found',reason:'server_absent'},{code:'launch_budget',resetAt:3601000}]){
+  assert.equal((await appendKeeperDecision({...entry,...diagnostic,decision:'needs_you',controller:'unknown',message:'PRIVATE ignored'}, {home})).ok,true);
+  const saved=await readKeeperDecision({runId},{home});assert.equal(saved.message,undefined);
+  const value=(await readRunStatus(dir,{home})).value;assert.equal(value.state,'recovery_required');
+  assert.match(value.message,diagnostic.reason?/Herdr is not running.*pdd setup/:/1970-01-01T01:00:01.000Z.*pdd workflow status.*pdd doctor/);
+  assert.deepEqual(JSON.parse(await fs.readFile(join(dir,'status.json'),'utf8')),status);
+ }
+ const path=join(home,'.pdd/logs/keeper.jsonl'),before=await fs.readFile(path,'utf8');
+ for(const bad of [{reason:'raw private text'},{code:'other',resetAt:3601000},{code:'launch_budget',resetAt:1e100}])assert.equal((await appendKeeperDecision({...entry,...bad},{home})).ok,false);
+ assert.equal(await fs.readFile(path,'utf8'),before);assert.doesNotMatch(before,/PRIVATE/);
+});

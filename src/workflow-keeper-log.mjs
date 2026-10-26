@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-keeper-log.prompt.md (sha256: 9ffc25c22b2e37443d6b6839e2654865a4dc29cac40ef383345b9861453df43c).
+// Generated from prompts/cli/workflow-keeper-log.prompt.md (sha256: a787a6714a13e03b0bc0c8fb5227622cefd49b3d545a5cd1682f53f40629b38e).
 import * as nodeFs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {join} from 'node:path';
@@ -9,7 +9,9 @@ const LIMIT=1024*1024,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]
 const token=x=>x===null||x==='WAIT'||typeof x==='string'&&/^[a-z][a-z0-9_]{0,79}$/.test(x);
 function row(x){
   if(!x||x.v!==1||x.runId!==null&&!UUID.test(x.runId??'')||!token(x.decision)||!token(x.code)||!Number.isFinite(x.at)||x.at<0||x.journalSeq!==null&&(!Number.isSafeInteger(x.journalSeq)||x.journalSeq<0)||!['absent','held','started','unknown'].includes(x.controller))return null;
-  return {v:1,runId:x.runId,decision:x.decision,code:x.code,at:x.at,journalSeq:x.journalSeq,controller:x.controller};
+  if(x.reason!==undefined&&(x.reason!=='server_absent'||x.code!=='herdr_not_found'))return null;
+  if(x.resetAt!==undefined&&(x.code!=='launch_budget'||!Number.isFinite(x.resetAt)||x.resetAt<0||!Number.isFinite(new Date(x.resetAt).getTime())))return null;
+  return {...(x.reason?{reason:x.reason}:{}),...(x.resetAt!==undefined?{resetAt:x.resetAt}:{}),v:1,runId:x.runId,decision:x.decision,code:x.code,at:x.at,journalSeq:x.journalSeq,controller:x.controller};
 }
 function owned(s){return s.uid===(process.geteuid?.()??s.uid);}
 function regular(s){return s.isFile()&&s.nlink===1&&owned(s)&&(s.mode&0o077)===0&&s.size<=LIMIT;}

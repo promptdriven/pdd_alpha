@@ -7,7 +7,11 @@ Module function `appendKeeperDecision({runId,decision,code,at,journalSeq,control
 appends one JSON line to `~/.pdd/logs/keeper.jsonl`, with version 1. Require UUIDv4
 runId (invalid inputs may use null), bounded lowercase machine decision/code
 identifiers or null, finite nonnegative time, nonnegative safe journalSeq or null,
-and controller `absent`, `held`, `started` or `unknown`. Keep only these fields;
+and controller `absent`, `held`, `started` or `unknown`. Optional `reason` is
+only `server_absent` paired with `herdr_not_found`; optional `resetAt` is a finite
+nonnegative epoch-millisecond time representable as UTC, paired with `launch_budget`.
+Retain these structured diagnostics, and reject invalid supplied values.
+Old rows without them remain valid. Keep only these fields;
 never arbitrary errors or paths. Return `{ok}`; errors do not throw or steer recovery.
 The keeper serializes passes. Create private directories through the directory
 owner and use an owned, singly linked regular mode0600 file with no followed final

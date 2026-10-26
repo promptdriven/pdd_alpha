@@ -44,6 +44,34 @@ The exact asset URL, signature mechanism and artifact table are release inputs;
 if unavailable, print an actionable verification error and execute nothing.
 Do not print a fabricated production curl command or trust root.
 
+`launcher/build-bootstrap.mjs:buildBootstrap({descriptor,destination,custody})`
+accepts optional staging release custody from the trusted release builder:
+`{descriptorBytes, signature, publicTrust}`. The bytes must parse to the same
+descriptor used in the artifact table; verify its Ed25519 signature with the
+builder-supplied public-only staging trust and matching key ID before generating
+an installer. This build input is not a runtime trust-discovery mechanism.
+Preserve those exact bytes, never a JSON reserialization, in the installer.
+Unsigned legacy/public bootstrap inputs remain supported without custody files.
+
+For signed custody, create `trust/descriptor.json`, `trust/descriptor.sig` and
+`trust/release-root.json` only inside this bootstrap's fresh Alpha extraction
+tree, before its directory digest and atomic immutable-version publication.
+Descriptor signature framing is the canonical base64url token plus one LF.
+Public root metadata uses U4b's `schema: "pdd/staging-release-root/v1"` and
+`purpose: "u4-user-release-root"`, with staging environment, key ID, Ed25519 algorithm,
+SPKI public PEM and its DER SHA256. It carries no private material and is not
+authority by presence: the Keeper-owned consumer must independently pin the
+U4b root in trusted code/provider before comparing this file and verifying the
+descriptor. No caller/receipt/tenant/current selector becomes trust.
+
+Retain entered directory authority for these writes. Refuse a preexisting or
+symlinked `trust` path, never overwrite source-archive files, and create the
+directory0700/files0600. Publication's existing tree digest includes these files;
+keep existing immutable runtimes, receipts and lifetime/GC rules unchanged.
+Existing-install delegation does not add or replace custody. A private consumer
+uses its actual retained physical versionRoot, not current or cwd. Bootstrap adds
+no runtime reader, provider, clientDigest or credential-helper inference.
+
 Preflight OS/architecture, HTTPS/download tools, verification tools, owned-path
 writability and disk requirements. Missing prerequisites yield one next step,
 without privileged installation, automatic sudo or shell-profile edits. The

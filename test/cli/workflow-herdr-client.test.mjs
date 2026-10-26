@@ -301,3 +301,13 @@ for(const duplicate of [false,true])test(`C18 bounded procfs scan completes the 
  if(duplicate)assert.deepEqual(seen,{complete:false,upSince:null,stableSince:null});
  else{assert.equal(seen.complete,true);assert.deepEqual(seen.server,{pid:100,startIdentity:`linux:${boot}:987`});}
 });
+
+
+test('C20 explicit absent server reports the setup fix while contradictory and unknown replies remain unproved',async()=>{
+ for(const mode of ['absent','wrong-session','contradictory','malformed','transport']){
+  const f=fixture();f.ports.fs.readdir=()=>assert.fail('no ownership scan without a running server');
+  f.ports.execFile=async()=>{if(mode==='transport')throw Error('no transport proof');return {code:0,stdout:JSON.stringify({server:mode==='malformed'?{}:{running:false,status:mode==='contradictory'?'running':'not_running',session:mode==='wrong-session'?'other':'default'}})};};
+  const {observeHerdr}=await createWorkflowHerdrPorts(f.ports),result=await observeHerdr();assert.equal(result.complete,false);assert.equal(result.upSince,null);assert.equal(result.stableSince,null);
+  if(mode==='absent'){assert.equal(result.code,'herdr_not_found');assert.equal(result.reason,'server_absent');assert.match(result.message,/^Herdr is not running.*pdd setup/);}else assert.equal(result.code,undefined,mode);
+ }
+});

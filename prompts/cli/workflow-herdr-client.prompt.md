@@ -135,6 +135,14 @@ Unix socket and its shared OS start identity, confirmed around a second status
 reply and socket-owner observation. Use `--session default status --json` and
 its `server.running`, `server.status`, `server.session` (null or default), and
 absolute `server.socket`; missing, ambiguous or changed proof stays unknown.
+A successful status reply explicitly reporting `running:false`,
+`status:not_running` and session null/default proves server absence: return
+`complete:false`, null times, `code:herdr_not_found`, `reason:server_absent`
+and the fixed message `Herdr is not running. Run pdd setup to start the Herdr
+service, then inspect pdd workflow status before resuming the saved run.`
+Do not probe socket ownership or infer stopped controller/stage identity from
+this observation. Transport errors, wrong session, contradictory or incomplete
+replies remain unknown. Missing executable diagnostics keep their path reason.
 On Linux bind the listening inode from `/proc/net/unix` to its unique
 `/proc/<pid>/fd` socket owner. On busy hosts, independent process-descriptor
 reads must be able to overlap with a finite concurrency bound. Still finish

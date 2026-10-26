@@ -160,7 +160,14 @@ status may refine its display. A positively free controller lock means display
 controller ownership means `unknown` and “controller status unknown; recovery:
 <code>”. A held lock or newly started controller does not claim absence. Preserve
 terminal/human-wait results, current identities and journalSeq. This overlay
-changes only the returned view, never files or state. Missing, invalid, older or
+changes only the returned view, never files or state. For an eligible current
+keeper diagnostic with `reason:server_absent`, display `recovery_required` and
+`Herdr is not running. Run pdd setup to start the Herdr service, then inspect
+pdd workflow status before resuming the saved run.` For `launch_budget` with a
+valid `resetAt`, display recovery required with the UTC retry time and advice
+to inspect status/doctor and resume the saved run after that time. Neither
+message claims a controller stopped without its lock evidence or permits a
+retry; preserve terminal/human waits and held/started controllers as above. Missing, invalid, older or
 unavailable diagnostics leave the existing view intact; they grant no action.
 
 <details>

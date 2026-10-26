@@ -104,7 +104,7 @@ code, including unfamiliar codes; strip terminal control characters, use
 `unknown` for missing/empty values, and render an explicit null code as `null`.
 For `herdr_identity_unavailable`, append the fixed safe explanation
 `Herdr process identity is unavailable for the new controller pane. No controller command was sent.`
-Do not print arbitrary result messages or infer a cause for other codes.
+For `launch_budget`, append the controller’s safe reset-time message (UTC retry time and status/doctor/resume advice). Do not print arbitrary result messages or infer a cause for other codes.
 If the result supplies `missingPorts`, include `Missing ports: NAME, NAME.` for
 its nonempty identifier names (letters, digits, underscores and dots, starting
 with a letter). Do not infer missing dependencies from `unsupported`, dump the

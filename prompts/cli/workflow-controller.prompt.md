@@ -58,7 +58,34 @@ for drive's process/lock proof. Cleanup treats any unresolved admitted launch as
 an active effect and retains the run. Drive uses lifecycle when acquiring its
 own controller.lock. All run/resume/decide/keeper
 starts share this gate; concurrent callers cannot launch two controllers.
-Count relaunch admissions durably in the launch-intent records, not the index.
+Count only unplanned recovery admissions against a rolling three-per-hour crash
+budget, durably in launch-intent records, not the index. The initial run start
+and a newly accepted human decision are planned launches and neither consume nor
+are blocked by this budget. A repeated decision binding is not new authority.
+Save immutable `launchKind` (`initial`, `decision`, `recovery`) at admission;
+all checkpoints retain it. For old records without this field, exempt a proven
+first admission (admission 1 with no decision) and the first occurrence of each
+valid decision binding; conservatively count any other unclassified record.
+Never rewrite history to migrate accounting. An uncertain recovery admission
+already consumes one slot, and inspection of it never consumes another.
+
+Export pure module function `controllerLaunchBudget(launches, now)` for keeper
+and controller to share accounting: return `{used, resetAt, message}`. Count
+recovery timestamps strictly newer than `now - 3600000`; at the exact expiry
+boundary the slot is available. With three or more counted entries, `resetAt`
+is the earliest epoch-millisecond time when fewer than three remain (otherwise
+null). The fixed safe message gives that UTC time and asks the user to inspect
+`pdd workflow status` / `pdd doctor` and resume the saved run after that time;
+never advise deleting history or starting a duplicate run. Refuse a recovery
+admission with `launch_budget`, `resetAt` and this message before effects.
+When keeper inspects an original decision launch and positive bound exit evidence
+proves it died after that decision was consumed (journal no longer in human wait),
+a same-request recovery starts the drive without repeating that decision. Its new
+intent has no decision and is an unplanned recovery; the original decision binding
+is immutable. A human wait or unproved exit never permits this conversion.
+The controller rechecks this budget under its existing admission locks; keeper
+prechecks grant no authority. All prior identity, revision and no-repeat guards
+retain precedence.
 Save launch intent under `<runDir>/controller-launch/` with a unique launch id,
 run, recorded runtime, decision binding if present and phase before tab/create
 or `pane run`. Save returned workspace/tab/pane/terminal ids before probing or typing.

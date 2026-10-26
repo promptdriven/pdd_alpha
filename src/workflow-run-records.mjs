@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-run-records.prompt.md (sha256: e508d2b2a8312f0634c8b93254cd69d9f484607b2784f77d0b41fe1c6885de56).
+// Generated from prompts/cli/workflow-run-records.prompt.md (sha256: a827f4ca30074ea68eae58b6acfab78f105d0f41fb790a943fb3a6706fbdb6a1).
 import * as nodeFs from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
@@ -133,6 +133,13 @@ export async function readRunStatus(runDir, ports = {}) {
       if(recovery&&recovery.journalSeq===value.journalSeq&&Number.isFinite(value.updatedAt)&&recovery.at>=value.updatedAt&&['absent','unknown'].includes(recovery.controller)){
         value.state=recovery.controller==='absent'?'recovery_required':'unknown';
         value.message=`controller ${recovery.controller==='absent'?'not running':'status unknown'}; recovery: ${recovery.code??recovery.decision}`;
+        if(recovery.reason==='server_absent'){
+          value.state='recovery_required';
+          value.message='Herdr is not running. Run pdd setup to start the Herdr service, then inspect pdd workflow status before resuming the saved run.';
+        }else if(recovery.code==='launch_budget'&&Number.isFinite(recovery.resetAt)){
+          value.state='recovery_required';
+          value.message=`Controller recovery limit reached (3 unplanned launches per hour). Retry available at ${new Date(recovery.resetAt).toISOString()}. Inspect pdd workflow status and pdd doctor; resume the saved run after that time.`;
+        }
       }
     }
     return { value, warnings };

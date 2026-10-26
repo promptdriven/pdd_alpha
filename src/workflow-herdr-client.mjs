@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: 67eea91a81136b0b4a20ad075556463d9b4ed1369c48b71d6a648270fc350e93).
+// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: 31dfe229eb0c94b1fde4b434b82a267ef7d6b556f8da0110e3c13a2ee73d11ad).
 import * as nodeFs from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
@@ -209,6 +209,7 @@ export async function createWorkflowHerdrPorts(ports={}){
   }
   async function serverStatus(){
     const {server}=await request('server.status',['status','--json']);
+    if(server?.running===false&&server.status==='not_running'&&[null,'default'].includes(server.session))throw Object.assign(Error('Herdr is not running. Run pdd setup to start the Herdr service, then inspect pdd workflow status before resuming the saved run.'),{code:'herdr_not_found',reason:'server_absent'});
     if(server?.running!==true||server.status!=='running'||![null,'default'].includes(server.session)||typeof server.socket!=='string'||!isAbsolute(server.socket)||server.socket.includes('\0'))throw fault('process_unproved');
     return server.socket;
   }
@@ -223,7 +224,7 @@ export async function createWorkflowHerdrPorts(ports={}){
       if(!continuity||key!==continuity.key||now<continuity.last||now-continuity.last>60000)continuity={upSince:now,stableSince:now,key,last:now};
       else continuity={...continuity,last:now};
       return {complete:true,upSince:continuity.upSince,stableSince:continuity.stableSince,server};
-    }catch(error){continuity=null;return {complete:false,upSince:null,stableSince:null,...(error?.code==='herdr_not_found'?{code:error.code,message:error.message}:{})};}
+    }catch(error){continuity=null;return {complete:false,upSince:null,stableSince:null,...(error?.code==='herdr_not_found'?{code:error.code,message:error.message,...(error.reason==='server_absent'?{reason:error.reason}:{})}:{})};}
   }
   return {herdr:ports.herdr!==undefined?ports.herdr:herdr,processStartIdentity:identity,observeHerdr:ports.observeHerdr!==undefined?ports.observeHerdr:observeHerdr};
 }

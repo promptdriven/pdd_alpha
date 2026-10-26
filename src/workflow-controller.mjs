@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: d21d89ec6473283fa677718a9b4118bf0349c0adc4951fb85569562bcc92669f).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: 0b636adf22f0f6292a0bd351904e9ac5caf0a6c589bfe9f22746dcedbb78d593).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -14,6 +14,18 @@ const compositionInputs=new WeakMap();
 const herdrRequest=(p,operation,method,request)=>traceHerdrRequest({operation,request},()=>p.herdr[method](request),p);
 const result=(state,code=null,controller=null)=>({state,code,controller});
 const identityRefusal=intent=>({...result('refused','herdr_identity_unavailable',intent),message:'Herdr process identity is unavailable for the new controller pane. No controller command was sent.'});
+function launchKind(launches, spec){
+  if(spec.decision&&decisionArgs(spec.decision)&&!launches.some(x=>isDeepStrictEqual(x.decision,spec.decision)))return 'decision';
+  return launches.length===0&&!spec.decision?'initial':'recovery';
+}
+export function controllerLaunchBudget(launches,now){
+  const recovery=launches.filter((x,i)=>{
+    const kind=x.launchKind??(x.admission===i+1?launchKind(launches.slice(0,i),x):'recovery');
+    return kind==='recovery'&&now-x.admittedAt<3600000;
+  }).map(x=>x.admittedAt).sort((a,b)=>a-b);
+  const resetAt=recovery.length>=3?recovery[recovery.length-3]+3600000:null;
+  return {used:recovery.length,resetAt,message:resetAt===null?null:`Controller recovery limit reached (3 unplanned launches per hour). Retry available at ${new Date(resetAt).toISOString()}. Inspect pdd workflow status and pdd doctor; resume the saved run after that time.`};
+}
 function traceSelector(p){
   try{
     const raw=p.env?.PDD_TRACE??process.env.PDD_TRACE;
@@ -59,7 +71,7 @@ export async function readControllerLaunches({runDir},ports={}){
       const h=await fs.open(join(dir,name,file),constants.O_RDONLY|(constants.O_NOFOLLOW??0));
       try{const stat=await h.stat();if(!stat.isFile()||stat.nlink!==1||stat.size>256*1024)throw Error('invalid launch');last=JSON.parse(await h.readFile('utf8'));}finally{await h.close();}
       if(last.step!==step++)throw Error('launch sequence invalid');
-      if(first&&!isDeepStrictEqual(Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration','traceSelector','line'].map(k=>[k,first[k]])),Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration','traceSelector','line'].map(k=>[k,last[k]]))))throw Error('launch binding changed');
+      if(first&&!isDeepStrictEqual(Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration','traceSelector','line','launchKind'].map(k=>[k,first[k]])),Object.fromEntries(['runId','runtime','decision','admittedAt','admission','argv','previousGeneration','traceSelector','line','launchKind'].map(k=>[k,last[k]]))))throw Error('launch binding changed');
       first??=last;
       if(!Number.isSafeInteger(last.admission)||last.admission<1||last.runDir!==runDir||last.launchId!==name||last.step!==Number(file.slice(0,4))||!Number.isFinite(last.admittedAt))throw Error('invalid launch');
     }
@@ -67,6 +79,7 @@ export async function readControllerLaunches({runDir},ports={}){
   }
   launches.sort((a,b)=>a.admission-b.admission);
   if(launches.some((l,i)=>l.admission!==i+1))throw Error('launch admissions invalid');
+  for(let i=0;i<launches.length;i++)if(launches[i].launchKind!==undefined&&launches[i].launchKind!==launchKind(launches.slice(0,i),launches[i]))throw Error('launch kind invalid');
   return launches;
 }
 function decisionArgs(d){
@@ -155,7 +168,7 @@ export async function startWorkflowController(spec,ports={}){
   const input=spec??{};
   spec=Object.fromEntries(['runId','runDir','root','workflow','issueNumber','runtime'].map(k=>[k,input[k]]));
   spec.decision=input.decision??null;
-  const args=decisionArgs(spec.decision);
+  let args=decisionArgs(spec.decision);
   if(!UUID.test(spec.runId??'')||!safePath(spec.runDir)||!safePath(spec.root)||!safePath(spec.runtime?.node)||!safePath(spec.runtime?.bin)||!NAME.test(spec.workflow??'')||!Number.isSafeInteger(spec.issueNumber)||spec.issueNumber<1||!args)return result('refused','unsupported');
   const composition=compositionInputs.get(ports);
   if(composition&&!isDeepStrictEqual(ports.runtime,spec.runtime)){
@@ -177,16 +190,18 @@ export async function startWorkflowController(spec,ports={}){
       // The prior proof is now durably exited. A new decision still passes all
       // existing current-state, assignment, revision and lifetime-lock checks.
       prior=reconciled.controller;
+      if(sameDecision&&recoveredExit){spec={...spec,decision:null};args=[];}
     }
     let intent;
     const admitted=await ports.withLifecycleGuard(spec,async()=>{
       const {state}=await strictRead(spec.runDir,ports),code=admission(state,spec);if(code)return result('refused',code);
       if(ports.validateRun && await ports.validateRun(spec,state)!==true)return result('refused','assignment_invalid');
       if(ports.inspectControllerLock && await ports.inspectControllerLock(spec)!=='free')return result('refused','controller_busy');
-      const now=ports.now?.()??Date.now();if(launches.filter(x=>now-x.admittedAt<3600000).length>=3)return result('refused','launch_budget');
+      const now=ports.now?.()??Date.now(),kind=launchKind(launches,spec),budget=controllerLaunchBudget(launches,now);
+      if(kind==='recovery'&&budget.used>=3)return {...result('refused','launch_budget'),resetAt:budget.resetAt,message:budget.message};
       const launchId=randomUUID(),argv=[spec.runtime.node,spec.runtime.bin,'workflow','drive',spec.runId,'--launch-id',launchId,...args];
       const selector=traceSelector(ports),line=(selector?`PDD_TRACE='${selector}' `:'')+argv.map(x=>`'${x}'`).join(' ');
-      intent={...spec,launchId,argv,line,...(selector?{traceSelector:selector}:{}),phase:'admitted',step:0,admission:launches.length+1,admittedAt:now,previousGeneration:state.controller?.generation??0};
+      intent={...spec,launchId,launchKind:kind,argv,line,...(selector?{traceSelector:selector}:{}),phase:'admitted',step:0,admission:launches.length+1,admittedAt:now,previousGeneration:state.controller?.generation??0};
       await save(intent,ports);return null;
     });if(admitted)return admitted;
     let effected=false;

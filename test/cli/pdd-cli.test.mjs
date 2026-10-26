@@ -118,3 +118,10 @@ test('human resume decision maps runner binding to controller public binding',as
   workflowController:{startWorkflowController:async input=>{calls++;assert.deepEqual(input.decision,{decision:'approve',id:action,rev:57,expectStage:'review',expectSeq:4});return {state:'started'};}}}),0);
  assert.equal(calls,1);
 });
+
+
+test('C21 resume prints the safe crash-budget reset and never retries the refused controller',async()=>{
+ const deps=io();let starts=0;const message='Controller recovery limit reached (3 unplanned launches per hour). Retry available at 2026-10-26T18:00:00.000Z. Inspect pdd workflow status and pdd doctor; resume the saved run after that time.';
+ const code=await runPdd(['workflow','resume',id],{...deps,workflowRunner:{resumeWorkflow:async()=>({state:'prepared',runId:id})},workflowController:{startWorkflowController:async()=>{starts++;return {state:'refused',code:'launch_budget',resetAt:1793037600000,message};}}});
+ assert.equal(code,1);assert.equal(starts,1);assert.equal(deps.stdout.text,'');assert.ok(deps.stderr.text.includes(message));assert.match(deps.stderr.text,/refused \(launch_budget\)/);
+});

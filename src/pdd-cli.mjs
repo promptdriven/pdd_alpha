@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: a7ed5262e4cb839c7f09f76c7cd19f4957d01dcf8d333db14489aed1b65d82e0).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 29296f1554e543b17fb00cebbd9b2fdefbf782759214e2d76db91362b7efdf08).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -251,7 +251,7 @@ export async function runPdd(argv, dependencies = {}) {
           const state=safeLabel(result?.state)||'unknown';
           const code=result?.code===null?'null':safeLabel(result?.code)||'unknown';
           const missing=Array.isArray(result?.missingPorts)?result.missingPorts.filter(name=>typeof name==='string'&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)):[];
-          const missingHerdr=result?.code==='herdr_not_found'&&typeof result.message==='string'?` ${safeLabel(result.message)}.`:'';
+          const missingHerdr=['herdr_not_found','launch_budget'].includes(result?.code)&&typeof result.message==='string'?` ${safeLabel(result.message)}.`:'';
           const identityMessage=result?.code==='herdr_identity_unavailable'?' Herdr process identity is unavailable for the new controller pane. No controller command was sent.':'';
           line(stderr,!['refused','failed'].includes(result?.state)
             ?`Workflow controller may be running: ${state} (${code}).${missingHerdr} Check pdd workflow status ${prepared.runId}.`

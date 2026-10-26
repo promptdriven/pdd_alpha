@@ -1,4 +1,4 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: cf357b9f290aec734a69518263887d14bc09b4b203f03632385aeea8cd0a9992).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: 17506bf774b40a9f1a9a56fb936fe0595f4b8227a3098fda793de266f9fef47b).
 import * as fs from 'node:fs/promises';
 import { cleanupLegacyNpm } from './npm-cleanup.mjs';
 import { join } from 'node:path';

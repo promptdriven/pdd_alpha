@@ -1,5 +1,5 @@
 #!/bin/sh
-# Generated from prompts/cli/bootstrap.prompt.md (sha256: cf357b9f290aec734a69518263887d14bc09b4b203f03632385aeea8cd0a9992).
+# Generated from prompts/cli/bootstrap.prompt.md (sha256: 17506bf774b40a9f1a9a56fb936fe0595f4b8227a3098fda793de266f9fef47b).
 set -eu
 # This installer is a child process; never change the invoking shell's umask.
 umask 077
@@ -7,6 +7,9 @@ umask 077
 # checkout deliberately contains no production URL, key or fabricated artifact.
 pdd_release_table='__PDD_RELEASE_TABLE__'
 pdd_npm_cleanup='__PDD_NPM_CLEANUP__'
+pdd_trust_descriptor='__PDD_TRUST_DESCRIPTOR__'
+pdd_trust_signature='__PDD_TRUST_SIGNATURE__'
+pdd_trust_root='__PDD_TRUST_ROOT__'
 pdd_bootstrap_fail() { printf '%s\n' "$1" 'Next: Obtain the verified GitHub release installer, then rerun pdd setup.' >&2; exit 1; }
 case "$pdd_release_table" in '__PDD_RELEASE_TABLE__') pdd_bootstrap_fail 'verification_error: trusted release descriptor is unavailable.' ;; esac
 for pdd_tool in uname curl openssl tar gzip awk df mktemp mkdir chmod cat cp; do
@@ -126,6 +129,20 @@ awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" {exit 1}' "$pdd_stage/alpha-memb
   for pdd_tree in node alpha; do
     (pdd_enter_private "$pdd_tree" repair; pdd_normalize_fresh_tree) || exit 1
   done
+  # Begin signed release custody: entered directories remain the write authority.
+  if [ -n "$pdd_trust_descriptor" ]; then
+    (
+      pdd_enter_private alpha
+      [ ! -e trust ] && [ ! -L trust ] || pdd_bootstrap_fail 'Release custody path already exists.'
+      pdd_enter_private trust
+      set -C
+      printf '%s' "$pdd_trust_descriptor" | openssl base64 -d -A > ./descriptor.json || pdd_bootstrap_fail 'Signed release bytes cannot be retained.'
+      printf '%s\n' "$pdd_trust_signature" > ./descriptor.sig || pdd_bootstrap_fail 'Release signature cannot be retained.'
+      printf '%s' "$pdd_trust_root" | openssl base64 -d -A > ./release-root.json || pdd_bootstrap_fail 'Public release root cannot be retained.'
+      [ "$(pwd -P)" = "$pdd_directory" ] && [ "$pdd_directory" -ef . ] && [ -O . ] || pdd_bootstrap_fail 'Release custody directory changed.'
+    ) || exit 1
+  fi
+  # End signed release custody.
   # Publication moves alpha into versions/. Keep the executing module/native
   # closure at its own stable path until activation and support setup finish.
   cp -R -P ./alpha ./bootstrap || pdd_bootstrap_fail 'Bootstrap support cannot be staged.'

@@ -41,10 +41,12 @@ unknown lock, or failed inspection, clears the observation. Unknown/failed serve
 evidence, a server restart or backward time also invalidates it. Explicit supplied legacy observers without a
 server field retain their timestamp binding but cannot retain a memo through
 an unsettled pass. A fresh locked recheck immediately precedes launch admission;
-concurrent keepers cannot both create a launch intent. Persist launch admissions
-and allow fewer than 3 in the preceding hour. Exactly 3 suppresses the next
-launch. If uncertainty remains from an earlier launch, reconcile its exact
-process/journal first; it consumes admission and cannot cause another blind start.
+concurrent keepers cannot both create a launch intent. Use the controller owner’s durable crash-budget accounting: initial starts and
+new human decisions are exempt; three unplanned recovery admissions in the
+preceding hour suppress another recovery. Return `needs_you / launch_budget`
+with the controller’s safe reset-time message and `resetAt`, including when
+prior-intent reconciliation reaches this refusal. If uncertainty remains from an earlier launch, reconcile its exact
+process/journal first; an unplanned admission consumes one slot and cannot cause another blind start.
 When observations are available, recover a killed controller within 90 s.
 Unknown Herdr state never proves an agent or controller stopped.
 
@@ -94,6 +96,14 @@ Other arbitrary controller error text is not a diagnostic contract.
 None of this changes eligibility, quota/fleet prerequisites,
 restore provider refusal, physical authority, lock observations or launch proof.
 
+A confirmed absent default server returns `needs_you / herdr_not_found`,
+`reason: server_absent`, and `Herdr is not running. Run pdd setup to start the
+Herdr service, then inspect pdd workflow status before resuming the saved run.`
+Clear observation continuity and launch nothing. Unknown or malformed server
+observations remain `herdr_unsettled`; they do not establish absence. Preserve
+missing-executable path diagnostics separately. Service startup remains the
+C19 service owner's contract, not a reason to bypass observation or identity.
+
 ## Explain every recovery decision
 
 Every reconciliation pass records one bounded JSONL decision for each supplied run
@@ -102,7 +112,8 @@ code, timestamp, observed journal sequence and whether its controller lock was
 positively free. Include stopped, skipped, refused, uncertain and started outcomes;
 errors also produce one decision. A free lock is an observation, never permission
 to skip the existing two-observation, lifecycle, runtime or process proof gates.
-No arbitrary controller message, pane text, paths, context or credentials enter
+Optional `reason: server_absent` and budget `resetAt` retain actionable diagnostics
+for status without arbitrary text. No arbitrary controller message, pane text, paths, context or credentials enter
 this log. Recording failure warns safely and cannot alter recovery or repeat an
 effect. `PDD_TRACE=herdr` additionally uses the existing redacted trace facility.
 The log is diagnostic only and never read as launch authority.

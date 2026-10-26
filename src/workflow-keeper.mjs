@@ -1,10 +1,10 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 85b27bacb2088df40a4b7dc6289ae7ea4820cb50c553c23cca3187a834f1e24c).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 073a599ddf97dee35cc0b277735ddb7327d89a32fa9e9d27fd365294c06f4bbb).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { withWorkflowLock, inspectWorkflowLock, claimWorkflowSession } from './workflow-claims.mjs';
-import { startWorkflowController, readControllerLaunches, createLocalWorkflowControllerPorts } from './workflow-controller.mjs';
+import { startWorkflowController, controllerLaunchBudget, readControllerLaunches, createLocalWorkflowControllerPorts } from './workflow-controller.mjs';
 import { checkWorkflowRuntime } from './workflow-runtime.mjs';
 import { readRunIndex } from './workflow-run-records.mjs';
 import {appendKeeperDecision} from './workflow-keeper-log.mjs';
@@ -16,7 +16,8 @@ const eligible=s=>['running','waiting_agent','quota_wait','WAIT'].includes(s?.co
 const fleetRequired=()=>Object.assign(Error('This recovery operation is unavailable: this needs the fleet client.'),{code:'fleet_client_required'});
 const unavailable=async()=>{throw fleetRequired();};
 const invalidRestoreProvider=()=>({state:'refused',code:'unsupported',message:'Managed restore requires callable recovery providers.'});
-const controllerMessage=seen=>seen.code==='herdr_not_found'&&typeof seen.message==='string'?{message:seen.message}:{};
+const controllerMessage=seen=>['herdr_not_found','launch_budget'].includes(seen.code)&&typeof seen.message==='string'?{message:seen.message,...(seen.code==='launch_budget'&&Number.isFinite(seen.resetAt)?{resetAt:seen.resetAt}:{})}:{};
+const controllerState=seen=>seen.code==='launch_budget'&&seen.state==='refused'?'needs_you':seen.state;
 export async function createWorkflowKeeperPorts(ports={}){
   const local=await createLocalWorkflowControllerPorts(ports);
   const defaults={
@@ -77,7 +78,7 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
         ports={...passPorts,...saved.ports};
       }
       const herdr=await ports.observeHerdr?.();
-      if(herdr?.code==='herdr_not_found'){memo.delete(entry.runId);finish('needs_you',herdr.code,{message:herdr.message});continue;}
+      if(herdr?.code==='herdr_not_found'){memo.delete(entry.runId);finish('needs_you',herdr.code,{message:herdr.message,...(herdr.reason==='server_absent'?{reason:herdr.reason}:{})});continue;}
       const first=memo.get(entry.runId);
       const serverKnown=Number.isSafeInteger(herdr?.server?.pid)&&herdr.server.pid>0&&typeof herdr.server.startIdentity==='string'&&herdr.server.startIdentity.length>0;
       const sameObservation=first&&first.runDir===entry.runDir&&first.upSince===herdr?.upSince&&first.at<=now&&isDeepStrictEqual(first.server,herdr?.server);
@@ -101,16 +102,17 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
       if(prior&&prior.phase!=='exited'){
         controller='unknown';
         const seen=await (ports.startWorkflowController??(spec=>startWorkflowController(spec,ports)))({runId:s.runId,runDir:entry.runDir,root:s.root??entry.root,workflow:s.name,issueNumber:s.issue?.number,runtime:s.runtime,decision:prior.decision});
-        finish(seen.state,seen.code,{...controllerMessage(seen),inspectOriginal:true});continue;
+        finish(controllerState(seen),seen.code,{...controllerMessage(seen),inspectOriginal:true});continue;
       }
-      if(launches.filter(l=>now-l.admittedAt<3600000).length>=3){finish('needs_you','launch_budget');continue;}
+      const budget=controllerLaunchBudget(launches,now);
+      if(budget.used>=3){finish('needs_you','launch_budget',{resetAt:budget.resetAt,message:budget.message});continue;}
       // Launcher performs a fresh strict read and lock recheck under its admission gate.
       controller='unknown';
       const seen=await (ports.startWorkflowController??(spec=>startWorkflowController(spec,ports)))({runId:s.runId,runDir:entry.runDir,root:s.root??entry.root,workflow:s.name,issueNumber:s.issue?.number,runtime:s.runtime});
-      memo.delete(entry.runId);finish(seen.state,seen.code,controllerMessage(seen));
+      memo.delete(entry.runId);finish(controllerState(seen),seen.code,controllerMessage(seen));
     }catch(error){memo.delete(entry?.runId);if(error?.code==='herdr_not_found')finish('needs_you',error.code,{message:error.message});else finish('stopped','recovery_inspection_failed');}
     finally{
-      if(decision)try{await (passPorts.appendKeeperDecision??appendKeeperDecision)({runId:UUID.test(entry?.runId??'')?entry.runId:null,decision:decision.state,code:decision.code??null,at:now,journalSeq,controller},passPorts);}catch{/* Diagnostic failure cannot change recovery. */}
+      if(decision)try{await (passPorts.appendKeeperDecision??appendKeeperDecision)({runId:UUID.test(entry?.runId??'')?entry.runId:null,decision:decision.state,code:decision.code??null,at:now,journalSeq,controller,...(decision.reason?{reason:decision.reason}:{}),...(decision.resetAt!==undefined?{resetAt:decision.resetAt}:{})},passPorts);}catch{/* Diagnostic failure cannot change recovery. */}
     }
   }
   return results;
@@ -126,7 +128,7 @@ export async function runWorkflowKeeper({home=homedir()},ports={}){
       try{
         const found=await discoverWorkflowRuns({home},local);for(const warning of found.warnings)local.warn?.(warning);
         const results=await reconcileWorkflowControllers({entries:found.entries,now:local.now?.()??Date.now()},local);
-        for(const row of results)if(row.code==='fleet_client_required')local.warn?.(fleetRequired().message);else if(row.code==='herdr_not_found')local.warn?.(row.message);
+        for(const row of results)if(row.code==='fleet_client_required')local.warn?.(fleetRequired().message);else if(['herdr_not_found','launch_budget'].includes(row.code))local.warn?.(row.message);
       }
       catch{ports.warn?.('recovery_pass_failed');}
       if(!signal.aborted)await (ports.wait??wait)(30000,signal);

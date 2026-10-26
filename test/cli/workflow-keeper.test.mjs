@@ -165,3 +165,23 @@ for(const middleLock of ['held','unknown','error','free'])test(`C18 unsettled lo
   assert.equal(f.calls[0].runtime,f.state.runtime);
   assert.deepEqual(f.state,saved,'lock observations cannot change the saved stage or prompt intent');
 });
+
+
+test('C21 keeper exempts planned history and preserves budget reset through original-intent reconciliation',async()=>{
+ const f=fixture();f.launches.push({admission:1,admittedAt:1000,decision:null,phase:'exited'},{admission:2,admittedAt:2000,decision:{decision:'approve',id:runId,rev:2},phase:'exited'},{admission:3,admittedAt:3000,decision:{decision:'approve',id:runId,rev:3},phase:'exited'});
+ await f.pass(30000);assert.equal((await f.pass(60000))[0].state,'started');assert.equal(f.calls.length,1);
+ for(const pending of [false,true]){
+  const g=fixture();g.launches.push(...[1000,2000,3000].map(admittedAt=>({admittedAt,phase:'exited'})));
+  if(pending){g.launches[2].phase='pane.run.intent';g.ports.startWorkflowController=async()=>({state:'refused',code:'launch_budget',resetAt:3601000,message:'Retry available at 1970-01-01T01:00:01.000Z.'});}
+  await g.pass(30000);const row=(await g.pass(60000))[0];assert.equal(row.state,'needs_you');assert.equal(row.code,'launch_budget');assert.equal(row.resetAt,3601000);assert.match(row.message,/1970-01-01T01:00:01.000Z/);
+  if(pending)assert.equal(row.inspectOriginal,true);else assert.equal(g.calls.length,0);
+ }
+});
+
+test('C20 absent server needs the person and clears prior continuity without launching',async()=>{
+ const f=fixture();const rows=[];f.ports.appendKeeperDecision=async row=>{rows.push(row);return {ok:true};};
+ await f.pass(30000);
+ f.ports.observeHerdr=async()=>({complete:false,code:'herdr_not_found',reason:'server_absent',message:'Herdr is not running. Run pdd setup to start the Herdr service, then inspect pdd workflow status before resuming the saved run.'});
+ const [row]=await f.pass(60000);assert.equal(row.state,'needs_you');assert.equal(row.code,'herdr_not_found');assert.match(row.message,/Herdr is not running.*pdd setup/);assert.equal(row.reason,'server_absent');assert.equal(f.calls.length,0);assert.equal(f.ports.observations.size,0);assert.equal(rows.at(-1).reason,'server_absent');
+ f.ports.observeHerdr=async()=>({complete:true,upSince:0,stableSince:0});assert.equal((await f.pass(90000))[0].code,'observing_lock');assert.equal(f.calls.length,0);
+});

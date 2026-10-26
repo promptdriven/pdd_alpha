@@ -1,7 +1,8 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: cf357b9f290aec734a69518263887d14bc09b4b203f03632385aeea8cd0a9992).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: 17506bf774b40a9f1a9a56fb936fe0595f4b8227a3098fda793de266f9fef47b).
 // Release tooling only: the caller supplies already reviewed, immutable inputs.
 import { readFile, writeFile } from 'node:fs/promises';
-export async function buildBootstrap({ descriptor, destination }) {
+import { createHash, createPublicKey, verify } from 'node:crypto';
+export async function buildBootstrap({ descriptor, destination, custody }) {
   const safeId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
   const supportedNode = value => {
     if (!/^\d+\.\d+\.\d+$/.test(value ?? '')) return false;
@@ -19,11 +20,31 @@ export async function buildBootstrap({ descriptor, destination }) {
     rows.push([match[1], match[2], node.version, node.url, node.sha256, descriptor.alpha.url, descriptor.alpha.sha256, encoded].join('|'));
   }
   if (!rows.length) throw new TypeError('No runtime artifacts');
+  let custodyDescriptor = '', custodySignature = '', custodyRoot = '';
+  if (custody !== undefined) {
+    try {
+      const {descriptorBytes, signature, publicTrust} = custody;
+      if (!Buffer.isBuffer(descriptorBytes) || JSON.stringify(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(descriptorBytes))) !== encoded ||
+          descriptor.environment !== 'staging' || publicTrust?.environment !== 'staging' || publicTrust.keyId !== descriptor.keyId ||
+          !safeId(publicTrust.keyId) || !/staging/i.test(publicTrust.keyId) || /lab/i.test(publicTrust.keyId) ||
+          typeof publicTrust.publicKeyPem !== 'string' || !/^\s*-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+\r?\n-----END PUBLIC KEY-----\s*$/.test(publicTrust.publicKeyPem) ||
+          typeof signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(signature) || Buffer.from(signature, 'base64url').toString('base64url') !== signature) throw new Error();
+      const key = createPublicKey({key: publicTrust.publicKeyPem, format: 'pem', type: 'spki'});
+      if (key.asymmetricKeyType !== 'ed25519' || !verify(null, descriptorBytes, key, Buffer.from(signature, 'base64url'))) throw new Error();
+      const root = {schema: 'pdd/staging-release-root/v1', purpose: 'u4-user-release-root', environment: 'staging', keyId: publicTrust.keyId, algorithm: 'Ed25519', publicKeyPem: key.export({type: 'spki', format: 'pem'}).toString(),
+        publicKeyDerSha256: createHash('sha256').update(key.export({type: 'spki', format: 'der'})).digest('hex')};
+      custodyDescriptor = descriptorBytes.toString('base64'); custodySignature = signature;
+      custodyRoot = Buffer.from(JSON.stringify(root, null, 2)+'\n').toString('base64');
+    } catch { throw new TypeError('Verified signed staging custody required'); }
+  }
   const template = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
   const cleanup = await readFile(new URL('./npm-cleanup.mjs', import.meta.url), 'utf8');
   const cleanupScript = cleanup + '\ntry { await cleanupLegacyNpm(); } catch { process.exitCode = 1; }\n';
   const quote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
   const installer = template.replace("pdd_release_table='__PDD_RELEASE_TABLE__'", `pdd_release_table='${rows.join('\n')}'`)
+    .replace("pdd_trust_descriptor='__PDD_TRUST_DESCRIPTOR__'", () => `pdd_trust_descriptor='${custodyDescriptor}'`)
+    .replace("pdd_trust_signature='__PDD_TRUST_SIGNATURE__'", () => `pdd_trust_signature='${custodySignature}'`)
+    .replace("pdd_trust_root='__PDD_TRUST_ROOT__'", () => `pdd_trust_root='${custodyRoot}'`)
     .replace("pdd_npm_cleanup='__PDD_NPM_CLEANUP__'", () => `pdd_npm_cleanup=${quote(cleanupScript)}`);
   await writeFile(destination, installer, { mode: 0o755, flag: 'wx' });
 }

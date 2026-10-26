@@ -402,3 +402,62 @@ test('duplicate listed workspace identities cannot admit a new tab or controller
   await startWorkflowController(f.spec,f.ports);
   assert.equal(f.calls.filter(x=>x[0]==='tab').length,1);
 });
+
+
+test('C21 planned start and human decisions leave all three crash slots available and report exact reset',async t=>{
+ const f=await fixture(t,''),read=f.ports.herdr.processInfo,send=f.ports.herdr.paneRun;
+ let clock=1000,dead=false;f.ports.now=()=>clock;
+ f.ports.herdr.processInfo=async()=>dead?null:read();
+ f.ports.herdr.inspectProcessExit=async input=>({...input,exited:true,reason:'pid_gone'});
+ f.ports.herdr.paneRun=async input=>{dead=false;f.state.controlState='running';await send(input);};
+ const launch=()=>startWorkflowController(f.spec,f.ports);
+ assert.equal((await launch()).state,'started');
+ async function approve(rev){dead=true;f.state.controlState='waiting_person';f.state.rev=rev;f.state.waitingPerson={decisions:['approve']};f.spec.decision={decision:'approve',id:runId,rev};return launch();}
+ for(const rev of [2,3,4,5]){clock+=1000;assert.equal((await approve(rev)).state,'started');}
+ f.spec.decision=null; // A resume request does not resubmit the already accepted approval.
+ const crashTimes=[];
+ for(let i=0;i<3;i++){clock+=1000;crashTimes.push(clock);dead=true;assert.equal((await launch()).state,'started');}
+ clock+=1000;dead=true;const blocked=await launch();
+ assert.equal(blocked.state,'refused');assert.equal(blocked.code,'launch_budget');assert.equal(blocked.resetAt,crashTimes[0]+3600000);
+ assert.ok(blocked.message.includes(new Date(blocked.resetAt).toISOString()));assert.match(blocked.message,/pdd workflow status.*pdd doctor.*resume the saved run/);
+ assert.equal(f.calls.filter(x=>x[0]==='run').length,8);
+ const history=await readControllerLaunches(f.spec);
+ assert.deepEqual(history.map(x=>x.launchKind),['initial','decision','decision','decision','decision','recovery','recovery','recovery']);
+ assert.equal((await approve(6)).state,'started','planned approval remains allowed even when crash budget is full');
+ f.spec.decision=null;clock=blocked.resetAt-1;dead=true;assert.equal((await launch()).code,'launch_budget');
+ clock++;assert.equal((await launch()).state,'started','exact one-hour boundary admits one recovery');
+ assert.equal(f.calls.filter(x=>x[0]==='run').length,10);
+});
+
+test('C21 legacy admission history excludes proven planned launches without rewriting it',async t=>{
+ const {controllerLaunchBudget}=await import('../../src/workflow-controller.mjs');
+ const d={decision:'approve',id:runId,rev:2};
+ const history=[{admission:1,admittedAt:1000,decision:null},{admission:2,admittedAt:2000,decision:null},{admission:3,admittedAt:3000,decision:d},{admission:4,admittedAt:4000,decision:d}];
+ const before=JSON.stringify(history);assert.equal(controllerLaunchBudget(history,60000).used,2);assert.equal(JSON.stringify(history),before);
+ assert.equal(controllerLaunchBudget([{admittedAt:1},{admittedAt:2},{admittedAt:3}],60000).used,3,'unclassified legacy entries remain conservative');
+ const f=await fixture(t,'');await startWorkflowController(f.spec,f.ports);
+ const launch=(await readControllerLaunches(f.spec))[0],dir=join(f.spec.runDir,'controller-launch',launch.launchId);
+ const names=(await fs.readdir(dir)).sort();const path=join(dir,names.at(-1)),row=JSON.parse(await fs.readFile(path,'utf8'));row.launchKind='recovery';await fs.writeFile(path,JSON.stringify(row));
+ await assert.rejects(readControllerLaunches(f.spec),/launch binding changed/);
+ assert.equal((await startWorkflowController(f.spec,f.ports)).code,'launch_history_invalid');assert.equal(f.calls.filter(x=>x[0]==='run').length,1);
+});
+
+
+test('C21 keeper recovers a consumed approval as an unplanned drive without repeating the decision',async t=>{
+ const {reconcileWorkflowControllers}=await import('../../src/workflow-keeper.mjs');
+ const f=await fixture(t,''),read=f.ports.herdr.processInfo,send=f.ports.herdr.paneRun;
+ let dead=false;f.ports.herdr.processInfo=async()=>dead?null:read();
+ f.ports.herdr.inspectProcessExit=async input=>({...input,exited:true,reason:'pid_gone'});
+ f.ports.herdr.paneRun=async input=>{dead=false;f.state.controlState='running';delete f.state.waitingPerson;await send(input);};
+ assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+ dead=true;f.state.controlState='waiting_person';f.state.waitingPerson={decisions:['approve']};f.state.rev=2;
+ const decision={decision:'approve',id:runId,rev:2};assert.equal((await startWorkflowController({...f.spec,decision},f.ports)).state,'started');
+ const before=await readControllerLaunches(f.spec);dead=true;
+ const ports={...f.ports,observations:new Map(),validateLocator:async()=>true,observeHerdr:async()=>({complete:true,upSince:0,stableSince:0}),inspectWorkflowLock:async()=> 'free',checkWorkflowRuntime:async()=>({ok:true}),appendKeeperDecision:async()=>({ok:true})};
+ const entries=[{...f.spec}];await reconcileWorkflowControllers({entries,now:30000},ports);
+ const [recovered]=await reconcileWorkflowControllers({entries,now:60000},ports);assert.equal(recovered.state,'started');
+ const after=await readControllerLaunches(f.spec);assert.equal(after.length,3);assert.deepEqual(after[1].decision,before[1].decision);assert.equal(after[2].decision,null);assert.equal(after[2].launchKind,'recovery');assert.equal(after[2].argv.includes('--decision'),false);
+ assert.equal(f.calls.filter(x=>x[0]==='run').length,3);
+ // Reconciliation of the same live replacement cannot create another drive.
+ assert.equal((await reconcileWorkflowControllers({entries,now:90000},ports))[0].state,'started');assert.equal(f.calls.filter(x=>x[0]==='run').length,3);
+});
