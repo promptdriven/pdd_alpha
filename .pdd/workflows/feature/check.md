@@ -10,7 +10,9 @@ pdd check <scenario>
 
 Record the verdict, failed criteria, expected versus observed values and the HTTPS
 result link. Run `pdd replay <run-id>` with the returned id and record its replay
-link; never invent a link. A zero exit is a pass.
+link; never invent a link. In the stage report, optionally add returned links:
+`links:[{stage:'<current stage id>',kind:'check|try|replay',url:'https://...',verdict:'passed|failed|unknown|null'}]`.
+Use `verdict:null` for try; include only HTTPS links from pdd check/try/replay output. A zero exit is a pass.
 
 For exit 1, fix the accepted scope, run `pdd lint` again and rerun
 `pdd check <scenario>`. Allow at most two fix-and-recheck attempts after the
