@@ -99,7 +99,7 @@ printf '%s\\n' '{"result":{"workspaces":[]}}'
     for(const [k,v] of Object.entries(c.expected.canonicalAdditions))assert.deepEqual(frozen.runtime[k],v,k);
     assert.deepEqual(prepared.runtime,frozen.runtime);assert.deepEqual((await readWorkflowJournal({runDir:prepared.runDir})).state.runtime,frozen.runtime);
     const controller=JSON.parse(await fs.readFile(paths.CONTROLLER));assert.deepEqual(controller.runtime,selected);assert.deepEqual(controller.input.runtime,frozen.runtime);
-    assert.equal(result.code,1);assert.match(result.stderr,/Workflow controller launch unconfirmed/);
+    assert.equal(result.code,1);assert.match(result.stderr,/Workflow controller not started: refused \(unsupported\)/);
     // No Herdr/process authority is supplied: the real controller must refuse.
     assert.equal((await git('worktree','list','--porcelain')).match(/^worktree /gm).length,2);
   } else {

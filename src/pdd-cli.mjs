@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 57e1770ae2f922c5bf2f4a1fed4af73375f607e442b9e9effdc8651af468ea3e).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 4fbd5d53c6c516973dd994db67b217edf4e5c05149b553d9dc929bc8b123f079).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -220,7 +220,13 @@ export async function runPdd(argv, dependencies = {}) {
         const controllerInput={...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null};
         const result=await traceHerdrRequest({operation:'controller.start',request:controllerInput},()=>controller.startWorkflowController(controllerInput,controllerPorts),controllerPorts);
         const started=result?.state==='started';
-        line(started?stdout:stderr,started?`Started workflow ${prepared.runId}.`:'Workflow controller launch unconfirmed. Inspect the saved run before retrying.');
+        if(started) line(stdout,`Started workflow ${prepared.runId}.`);
+        else {
+          const state=safeLabel(result?.state)||'unknown';
+          const code=result?.code===null?'null':safeLabel(result?.code)||'unknown';
+          const missing=Array.isArray(result?.missingPorts)?result.missingPorts.filter(name=>typeof name==='string'&&/^[A-Za-z][A-Za-z0-9_.]*$/.test(name)):[];
+          line(stderr,`Workflow controller not started: ${state} (${code}).${missing.length?` Missing ports: ${missing.join(', ')}.`:''} Inspect the saved run before retrying.`);
+        }
         return started?0:1;
       } catch {line(stderr,'The local workflow operation could not be confirmed. Inspect saved state before retrying.');return 1;}
     }

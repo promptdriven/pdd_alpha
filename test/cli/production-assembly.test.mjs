@@ -83,7 +83,7 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
  f.stdout.text='';assert.equal(await runPdd(['projects'],f.deps),0);assert.match(f.stdout.text,/project/);
  f.stdout.text='';f.stderr.text='';
  assert.equal(await runPdd(['workflow','run','small-change','17'],f.deps),1,f.stderr.text);
- assert.match(f.stderr.text,/launch unconfirmed/);
+ assert.match(f.stderr.text,/Workflow controller not started: refused \(unsupported\)/);
  const index=await readRunIndex({home:f.home});assert.equal(index.entries.length,1);const entry=index.entries[0];
  const spec={runDir:entry.runDir},journal=await readWorkflowJournal(spec);
  assert.equal(journal.state.controlState,'running');assert.equal(journal.state.runtime.node,f.runtime.node);
@@ -91,7 +91,7 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
  assert.equal((await readControllerLaunches(spec)).length,0,'empty capability refuses before controller intent');
  const before=await fs.readFile(join(entry.runDir,'journal.jsonl'));
  f.stderr.text='';f.setBroken(true);
- assert.equal(await runPdd(['workflow','resume',entry.runId],f.deps),1);assert.match(f.stderr.text,/launch unconfirmed/);
+ assert.equal(await runPdd(['workflow','resume',entry.runId],f.deps),1);assert.match(f.stderr.text,/Workflow controller not started: refused \(unsupported\)/);
  assert.deepEqual(await fs.readFile(join(entry.runDir,'journal.jsonl')),before);
  assert.equal((await readRunIndex({home:f.home})).entries.length,1,'resume retains original allocation');
  const rows=readHerdrTrace({home:f.home});

@@ -97,6 +97,17 @@ unsupported-platform refusal or replaces controller identity, lifecycle, lock or
 durable generation proof. Stage
 agents use panes in that run tab.
 
+When controller start returns anything other than `started`, exit 1 and print
+`Workflow controller not started: STATE (CODE).` once on stderr, followed by
+`Inspect the saved run before retrying.` Preserve the actual returned state and
+code, including unfamiliar codes; strip terminal control characters, use
+`unknown` for missing/empty values, and render an explicit null code as `null`.
+If the result supplies `missingPorts`, include `Missing ports: NAME, NAME.` for
+its nonempty identifier names (letters, digits, underscores and dots, starting
+with a letter). Do not infer missing dependencies from `unsupported`, dump the
+result/message/private DTO, probe capabilities again, retry or weaken a guard.
+The existing started message/exit 0 and thrown-failure diagnostic stay unchanged.
+
 Help must explain that human waits stop the controller and require a current decision;
 local recovery reconciles stopped non-human work. Session and direct conversation
 shortcuts remain foreground with existing native settings. Stage agents must not
