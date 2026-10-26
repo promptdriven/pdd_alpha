@@ -68,7 +68,7 @@ test('isolated packed Alpha: public runtime, complete guidance, specifications a
     await fs.mkdir(isolated); await fs.mkdir(cwd);
     const marker = join(isolated, 'started.json'), collision = join(isolated, 'collision');
     const script = join(isolated, 'native-stand-in.mjs');
-    await put(script, "import{writeFileSync}from'node:fs';writeFileSync(process.argv[2],JSON.stringify({cwd:process.cwd(),args:process.argv.slice(3)}));setInterval(()=>{},1000);\n");
+    await put(script, "import{writeFileSync,renameSync}from'node:fs';const pending=process.argv[2]+'.pending';writeFileSync(pending,JSON.stringify({cwd:process.cwd(),args:process.argv.slice(3)}));renameSync(pending,process.argv[2]);setInterval(()=>{},1000);\n");
     const entry = join(packageRoot, 'bin/pdd-claim.mjs'), key = 'codex:12345678-1234-4123-8123-123456789abc';
     const env = { ...process.env, HOME: isolated };
     const holder = spawn(process.execPath, [entry, key, '--', process.execPath, script, marker, 'literal space', '$(touch forbidden)'], { cwd, env, stdio: 'ignore' });
