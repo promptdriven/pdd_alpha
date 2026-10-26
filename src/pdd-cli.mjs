@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: a7ed5262e4cb839c7f09f76c7cd19f4957d01dcf8d333db14489aed1b65d82e0).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: b0044a038ebcb7bb39772e313340e396ebbd7a9a0fa24591fbf8da7654bcac74).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -66,7 +66,7 @@ export async function runPdd(argv, dependencies = {}) {
   const {stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
     nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages, workflowDecider,
     phoneCli, clientAdapter = phoneCli, workflowController, workflowHerdrBoot, workflowKeeper, workflowCleaner, workflowRuntime, nativeAgentAuth,
-    workflowRecords, workflowProjects, workflowModels, workflowPlacement, machinePlacement,
+    workflowRecords, workflowProjects, workflowModels, workflowPlacement, machinePlacement, runtimeClient,
     machineId = 'local', home = homedir(), projectPorts, modelPorts, settings,
     updateModule, doctorModule, doctorDeps = {}, ports: suppliedPorts = {}} = dependencies;
   const ports = {...suppliedPorts,stdout,stderr,home,machinePlacement,
@@ -200,6 +200,27 @@ export async function runPdd(argv, dependencies = {}) {
     case 'skill':
       try { line(stdout, loadGuidance({ packageRoot, cwd }));return 0; }
       catch { return guidanceError(stderr); }
+    case 'runtime-lint': case 'runtime-check': case 'runtime-try': case 'runtime-try-stop':
+    case 'runtime-replay': case 'runtime-call': case 'runtime-runs': case 'runtime-runs-show': case 'runtime-usage': {
+      try {
+        const client=runtimeClient??await import('./runtime-client.mjs');
+        if(typeof client.runRuntimeCommand!=='function') throw Error();
+        const input={stdout,stderr,env:dependencies.env??process.env,input:dependencies.input??process.stdin,
+          ...(plan.local==='runtime-lint'?{path:plan.operands[0]}:{}),
+          ...(plan.local==='runtime-check'?{scenario:plan.operands[0],maxCalls:plan.options['--max-calls'],json:!!plan.options['--json']}:{}),
+          ...(plan.local==='runtime-try'?{terminal:!!plan.options['--terminal'],from:plan.options['--from']}:{}),
+          ...(plan.local==='runtime-try-stop'?{id:plan.operands[0]}:{}),
+          ...(plan.local==='runtime-replay'?{id:plan.operands[0]}:{}),
+          ...(plan.local==='runtime-call'?{prompt:plan.operands[0],op:plan.operands[1],json:plan.operands[2],session:plan.options['--session']}:{}),
+          ...(plan.local==='runtime-runs-show'?{id:plan.operands[0]}:{})};
+        const command={
+          'runtime-lint':'lint','runtime-check':'check','runtime-try':'try','runtime-try-stop':'try-stop',
+          'runtime-replay':'replay','runtime-call':'call','runtime-runs':'runs','runtime-runs-show':'runs-show','runtime-usage':'usage'}[plan.local];
+        const result=await client.runRuntimeCommand(command,input,{...ports,...dependencies});
+        if(!Number.isInteger(result)||result<0||result>255) throw Error();
+        return result;
+      } catch { line(stderr,'The runtime command could not be confirmed. Inspect the recovery record before retrying.'); return 3; }
+    }
     case 'workflow-run': case 'workflow-resume': case 'workflow-drive': case 'workflow-adopt': case 'workflow-attach': {
       try {
         const runner=workflowRunner??await import('./workflow-runner.mjs');

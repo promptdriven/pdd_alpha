@@ -1,4 +1,4 @@
-# Alpha local command catalog
+# Alpha command catalog
 
 Own `src/command-catalog.mjs`; export only `PUBLIC_COMMAND_ROUTES`, `PUBLIC_COMMAND_IDS`, `PUBLIC_COMMAND_MANIFEST`, and `BUNDLED_WORKFLOW_NAMES` (feature, bug, small-change). Catalog the complete small alpha surface: root help, --version, --skill, completion bash|zsh workflow list [--json], and session [--agent codex|claude] [request text]. Each route has stable id, exact prefix, local disposition, operand/option specs and plain help forms. Expose no excluded command, private schema/type, service flag or hosted execution operation. Help, parser and completion share this one authority.
 
@@ -24,5 +24,6 @@ Catalog workflow.decide (`workflow decide`): `pdd workflow decide RUN_ID --decis
 ## Phone and Link
 
 Catalog phone (`phone`): `pdd phone [--relay URL] [--name NAME] [--codex PATH] [--claude PATH] [--no-integrations]`; the first four are value options, `--no-integrations` is a flag, each at most once. Catalog doctor (`doctor [--json | --report | --check-only | --cleanup]`): four flags, at most one; `--json`, `--report` and `--check-only` are read-only, `--cleanup` is the explicit interactive inventory of old PDD LaunchAgents, units and pocket helpers. `--check-only` must work on an Alpha-only install because the detached updater runs it for the candidate's self-check; client-owned checks are SKIP there. Catalog link.status (`link status [--json]`), link.restart, link.stop, link.logs, link.devices, link.revoke (`link revoke ID_OR_NAME`, one operand), link.uninstall (`link uninstall [--forget]`) and link.reset-identity, each with a help form; link.run (`link run`) is the service entry point and has no help form. Each route accepts only these options and operands; anything else is a usage error (exit 2). Behavior belongs to the [phone CLI](../phone/cli.prompt.md).
+The open runtime client is the sole hosted-service exception. Catalog `lint [PATH]`, `check SCENARIO [--max-calls N] [--json]`, `try [--terminal] [--from ID]`, `try stop ID`, `replay ID`, `call PROMPT OP JSON [--session S]`, `runs [show ID]` and `usage`. These routes use the runtime client module and expose no service URL, token or transport option.
 
 **Acceptance evidence.** This is a preserved Alpha module that the build updates in place. Its existing tests under `repo/test/` are the acceptance evidence; there is no separate Story or cases file. The P1 command routes in [pdd-cli](pdd-cli.prompt.md) are the complete list of new commands and options.
