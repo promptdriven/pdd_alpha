@@ -52,6 +52,37 @@ notifications and deadline delivery all reconcile through S; they cannot count
 one attempt twice. Local success and deadline arbitration use the rules below.
 
 <details>
+<summary><strong>Private Link payload admission before a new attempt</strong></summary>
+
+`src/pdd-launch.mjs:prepareLinkStart({home}, ports={})` preserves generic Runtime
+validation and the legacy non-null archive `clientDigest`/credential-helper route.
+A bundled private client may instead use null/null legacy fields: optional Accounts
+helper availability is not a Link startup gate. Do not put a directory digest in
+the archive field or change updater, rollback or retained-reference semantics.
+
+After prior-attempt reconciliation, before creating any new attempt or deadline,
+under the same install lease, require the actual install record's
+`installedClients[runtime.releaseId]` to name exactly the selected physical
+`runtime.versionRoot/client`, algorithm `pdd-directory-sha256-v1`, and a 64-character
+lowercase hex digest equal to a fresh `directoryDigest` of that tree. Require a
+canonical physical client directory, regular canonical `src/phone/link/main.mjs`
+and regular canonical client `package.json` with `type: module`. Packaging supplies
+the verified dependency/resource closure; mere Main existence or adjacent release
+metadata cannot replace recorded provenance. This is installed-payload evidence,
+not membership authority or new binary authentication. Never select another root
+through cwd or a later current lookup, cache a prior digest result, repair files,
+or probe credentials to satisfy admission.
+
+Missing, changed, aliased or inconsistent bundled evidence returns
+`client_not_installed` without a new attempt, ready-marker removal or deadline.
+Invalid enclosing Runtime remains `runtime_unavailable`; install-record errors
+retain their own refusal. Keep previous-live/unknown reconciliation and platform
+deadline refusal precedence. No adoption, Accounts readiness or Main startupReady
+change is included.
+
+</details>
+
+<details>
 <summary><strong>Attempt identity, ten-minute deadline and startup success</strong></summary>
 
 Before exec, hold the install lock for a short record update: persist the exact

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-launch.prompt.md (sha256: df97942d481fffe8e12f078eb034b628cbc049f63074219a02d00652d9d85878).
+// Generated from prompts/cli/pdd-launch.prompt.md (sha256: 5d009640b4a0c7043c54d65d672f789f647e19097c526acc13ce37626ba17681).
 import * as fs from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,7 @@ import { readInstallRecord, writeInstallRecord, initialInstallRecord } from './i
 import { durableJson } from './install-record.mjs';
 import { fileURLToPath } from 'node:url';
 import { resolveRuntime } from './versions.mjs';
+import { directoryDigest } from './owned-node.mjs';
 import { ensurePrivateDirectory, repairPrivateTree } from './pdd-directory.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -173,16 +174,31 @@ export async function reconcileStartup({ home, attemptId, deadline = false }, po
   try { return await (ports.withUpdateLock ?? withUpdateLock)({ home }, lease => reconcileLocked({ home, lease, attemptId, deadline }, ports), ports); }
   catch { return fail('recovery_required'); }
 }
+async function bundledLinkInstalled(runtime, record) {
+  if (runtime.clientDigest !== null || runtime.credentialHelper !== null) return false;
+  const root = join(runtime.versionRoot, 'client');
+  const installed = record.installedClients?.[runtime.releaseId];
+  if (installed?.path !== root || installed.algorithm !== 'pdd-directory-sha256-v1' || typeof installed.digest !== 'string' || !/^[a-f0-9]{64}$/.test(installed.digest)) return false;
+  try {
+    if (await fs.realpath(root) !== root || !(await fs.lstat(root)).isDirectory()) return false;
+    const main = join(root, 'src/phone/link/main.mjs'), pkg = join(root, 'package.json');
+    for (const path of [main, pkg]) {
+      if (await fs.realpath(path) !== path || !(await fs.lstat(path)).isFile()) return false;
+    }
+    if (JSON.parse(await fs.readFile(pkg, 'utf8')).type !== 'module') return false;
+    return await directoryDigest(root) === installed.digest;
+  } catch { return false; }
+}
 export async function prepareLinkStart({ home }, ports = {}) {
   if (!ports.armStartupDeadline && process.platform !== 'linux') return fail('startup_deadline_unavailable');
   return (ports.withUpdateLock ?? withUpdateLock)({ home }, async lease => {
     const previous = await reconcileLocked({ home, lease }, ports);
     if (previous.code || previous.live) return previous;
     const runtime = previous.runtime;
-    if (!runtime.clientDigest) return fail('client_not_installed');
     const read = await readInstallRecord({ home }, ports);
     if (read.code) return read;
     const record = read.value ?? initialInstallRecord();
+    if (!runtime.clientDigest && !await bundledLinkInstalled(runtime, record)) return fail('client_not_installed');
     const proof = ports.selfProof ? await ports.selfProof() : await localProcessProof(process.pid, ports);
     if (!proof) return fail('recovery_required');
     const now = ports.now ? await ports.now() : { bootId: proof.bootId, elapsedMs: uptime() * 1000 };

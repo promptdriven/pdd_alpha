@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-launch.prompt.md (sha256: c0b65e50aa93bc642f892c1c73388d60a676b58efac3699a7d747b3acf201c63).
+// Generated from prompts/cli/pdd-launch.prompt.md (sha256: 5d009640b4a0c7043c54d65d672f789f647e19097c526acc13ce37626ba17681).
 import { resolveRuntime } from '../src/versions.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
