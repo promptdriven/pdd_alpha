@@ -689,3 +689,76 @@ test('artifact checkpoint excludes a concurrent Git index writer while publishin
   assert.equal(await f.git('status','--porcelain'),'');
   assert.equal(await f.git('rev-parse','HEAD^'),f.input.expectedHead);
 });
+
+
+const publicationDescription = () => ({
+  issue: {number:12, url:'https://github.com/Acme/Project/issues/12', title:'Use the requested value'},
+  summary:'Change the value.\nKeep the existing interface.',
+  checks:[{argv:['node','check.mjs'],exitCode:0}]
+});
+
+test('C12 issue description preserves authored body and remains marker-idempotent', async t => {
+  const f = await fixture(t), description = publicationDescription();
+  await writeFile(f.bodyFile, 'Authored rationale\n');
+  const input = {...f.input,description};
+  const intent = await prepareWorkflowPr(input,f.ports);
+  assert.equal(intent.title,'Use the requested value');
+  const body = await readFile(f.bodyFile,'utf8');
+  assert.ok(body.startsWith('Authored rationale\n'));
+  assert.match(body,/Closes #12/);
+  assert.match(body,/Change the value\. Keep the existing interface\./);
+  assert.ok(body.includes('PASS (exit 0): ["node","check.mjs"]'));
+  assert.equal(body.split(intent.marker).length-1,1);
+  assert.deepEqual(await prepareWorkflowPr(input,f.ports),intent);
+  assert.equal(await readFile(f.bodyFile,'utf8'),body);
+  assert.equal(effects(f.calls).length,0);
+});
+
+test('C12 description refuses foreign identity, invalid evidence and injected markers without overwriting authored text', async t => {
+  const invalid = [
+    d => d.issue.url='https://github.com/Other/Project/issues/12',
+    d => d.issue.number=0,
+    d => d.issue.title='Bad\ntitle',
+    d => d.issue.title='x'.repeat(257),
+    d => d.summary='<!-- pdd-workflow:other:stage -->',
+    d => d.checks[0].exitCode=null,
+    d => d.checks[0].argv=['node','pdd-workflow:other:stage']
+  ];
+  for(const mutate of invalid) {
+    const f = await fixture(t), description = publicationDescription(); mutate(description);
+    await writeFile(f.bodyFile,'Preserve this authored text\n');
+    await assert.rejects(prepareWorkflowPr({...f.input,description},f.ports),/workflow_github_/);
+    assert.equal(await readFile(f.bodyFile,'utf8'),'Preserve this authored text\n');
+    assert.equal(effects(f.calls).length,0);
+  }
+});
+
+test('C12 description bounds long summaries and reports failed results without copying raw output', async t => {
+  const f=await fixture(t),description=publicationDescription();
+  description.summary='x'.repeat(600);
+  description.checks=[{argv:['node','check.mjs'],exitCode:1,stdout:'private stdout',stderr:'private stderr'}];
+  const intent=await prepareWorkflowPr({...f.input,description},f.ports),body=await readFile(intent.bodyFile,'utf8');
+  assert.ok(body.includes('x'.repeat(499)+'…'));
+  assert.ok(!body.includes('x'.repeat(500)));
+  assert.ok(body.includes('FAIL (exit 1): ["node","check.mjs"]'));
+  assert.doesNotMatch(body,/private stdout|private stderr/);
+});
+
+
+test('C12 sparse verification evidence refuses before changing the authored body', async t => {
+  const cases = [
+    ['missing check', d => { d.checks = Array(1); }],
+    ['hole after a valid check', d => { d.checks.length = 2; }],
+    ['missing executable', d => { d.checks[0].argv = Array(1); }],
+    ['hole after executable', d => { d.checks[0].argv = ['node', , 'check.mjs']; }]
+  ];
+  for (const [name, change] of cases) await t.test(name, async t => {
+    const f = await fixture(t), description = publicationDescription(); change(description);
+    await writeFile(f.bodyFile, 'Preserve independently authored text\n');
+    await assert.rejects(prepareWorkflowPr({...f.input, description}, f.ports),
+      {code:'workflow_github_description_invalid'});
+    assert.equal(await readFile(f.bodyFile, 'utf8'), 'Preserve independently authored text\n');
+    assert.equal(effects(f.calls).length, 0);
+    assert.equal(f.state.headSha, headSha);
+  });
+});

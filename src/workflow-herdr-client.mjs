@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: da6068f8028e84d1ee9feffc7cc65dd48a76697f6389ed91b94898e5bfe31649).
+// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: 1f152c73189a4d2753b886604d9bd2bd9d50efbfc4aab954b83be1db39960bd5).
 import * as nodeFs from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
@@ -60,6 +60,7 @@ export async function createWorkflowHerdrPorts(ports={}){
       let response;try{response=await p.execFile(binary,['--session','default',...args],{cwd:p.cwd??p.home,env:p.env,shell:false,encoding:'utf8',timeout:5000,maxBuffer:1024*1024});}catch(error){if(error?.code==='ENOENT')throw Object.assign(Error(`Herdr not found at ${binary}`),{code:'herdr_not_found'});throw error;}
       if(exit(response)!==0)throw Object.assign(fault('herdr_command_uncertain'),{exitCode:exit(response)});
       if(typeof response?.stdout!=='string'||Buffer.byteLength(response.stdout)>1024*1024)throw fault('herdr_invalid_reply');
+      if(operation==='pane.run'&&response.stdout==='')return {result:{}};
       let reply;try{reply=JSON.parse(response.stdout);}catch{throw fault('herdr_invalid_reply');}
       if(!reply||reply.error||!reply.result||typeof reply.result!=='object')throw fault('herdr_invalid_reply');
       return reply;
@@ -77,6 +78,18 @@ export async function createWorkflowHerdrPorts(ports={}){
     const info=r.process_info;
     if(info?.pane_id!==paneId||!Array.isArray(info.foreground_processes))throw fault('process_unproved');
     return info;
+  }
+  function foregroundLeader(info){
+    const rows=info.foreground_processes;
+    let candidates;
+    if(Object.hasOwn(info,'foreground_process_group_id')){
+      if(!positive(info.foreground_process_group_id))throw fault('process_unproved');
+      candidates=rows.filter(x=>x?.pid===info.foreground_process_group_id);
+    }else candidates=rows;
+    if(candidates.length!==1)throw fault('process_unproved');
+    const candidate=candidates[0];
+    if(!positive(candidate?.pid)||!Array.isArray(candidate.argv)||candidate.argv.length===0||!candidate.argv.every(v=>typeof v==='string'&&!v.includes('\0'))||!isAbsolute(candidate.argv[0]))throw fault('process_unproved');
+    return candidate;
   }
   async function capability(paneId){
     const info=await rawProcess(paneId);
@@ -114,20 +127,50 @@ export async function createWorkflowHerdrPorts(ports={}){
       return {tabId:t.tab_id,paneId:pane.pane_id,terminalId:pane.terminal_id};
     },
     async paneRun(r){session(r);return request('pane.run',['pane','run',operand(r.paneId,P),text(r.command)]);},
+    async inspectProcessExit(r){
+      try{
+        session(r);operand(r?.paneId,P);
+        if(!positive(r.pid)||typeof r.startIdentity!=='string'||!r.startIdentity||typeof identity!=='function'||!['linux','darwin'].includes(p.platform))return {exited:false};
+        const exited=(reason,extra={})=>({exited:true,pid:r.pid,startIdentity:r.startIdentity,paneId:r.paneId,reason,...extra});
+        const present=ports.processExists===undefined?async({pid})=>{
+          try{process.kill(pid,0);return true;}catch(error){return error?.code==='ESRCH'?false:null;}
+        }:ports.processExists;
+        const sample=async()=>{
+          const current=await identity({pid:r.pid,paneId:r.paneId});
+          if(typeof current==='string'&&current)return {identity:current};
+          return {gone:typeof present==='function'&&await present({pid:r.pid})===false};
+        };
+        const first=await sample();
+        if(first.gone){if((await sample()).gone)return exited('pid_gone');return {exited:false};}
+        if(first.identity&&first.identity!==r.startIdentity){
+          const second=await sample();return second.identity===first.identity?exited('identity_changed',{observedStartIdentity:first.identity}):{exited:false};
+        }
+        const ownShell=info=>{
+          const rows=info.foreground_processes.filter(x=>x?.pid===info.shell_pid);
+          if(!positive(info.shell_pid)||info.foreground_process_group_id!==info.shell_pid||rows.length!==1)return null;
+          const shell=rows[0];return Array.isArray(shell.argv)&&shell.argv.length>0&&shell.argv.every(v=>typeof v==='string'&&!v.includes('\0'))&&isAbsolute(shell.argv[0])?shell:null;
+        };
+        const before=await rawProcess(r.paneId),shell=ownShell(before);if(!shell)return {exited:false};
+        const shellIdentity=await identity({pid:shell.pid,paneId:r.paneId});if(typeof shellIdentity!=='string'||!shellIdentity)return {exited:false};
+        const after=await rawProcess(r.paneId),confirmed=ownShell(after);
+        if(!confirmed||confirmed.pid!==shell.pid||!isDeepStrictEqual(shell.argv,confirmed.argv)||await identity({pid:shell.pid,paneId:r.paneId})!==shellIdentity)return {exited:false};
+        return exited('pane_shell',{shell:{pid:shell.pid,startIdentity:shellIdentity,argv:[...shell.argv]}});
+      }catch(error){if(error?.code==='herdr_not_found')throw error;return {exited:false};}
+    },
     async processInfo(r){
       try{
       session(r);operand(r.paneId,P);
       const info=await rawProcess(r.paneId);
-      const usable=info.foreground_processes.filter(x=>positive(x?.pid)&&Array.isArray(x.argv)&&x.argv.length>0&&x.argv.every(v=>typeof v==='string'&&!v.includes('\0'))&&isAbsolute(x.argv[0]));
-      if(usable.length!==1||info.foreground_processes.length!==1||typeof identity!=='function')throw fault('process_unproved');
-      const candidate=usable[0],startIdentity=await identity({pid:candidate.pid,paneId:r.paneId});
+      const candidate=foregroundLeader(info);
+      if(typeof identity!=='function')throw fault('process_unproved');
+      const startIdentity=await identity({pid:candidate.pid,paneId:r.paneId});
       if(typeof startIdentity!=='string'||!startIdentity)throw fault('process_unproved');
       const executable=candidate.argv[0];
       const physical=await p.fs.realpath(executable);
       if(p.platform==='linux'&&await p.fs.realpath(`/proc/${candidate.pid}/exe`)!==physical)throw fault('process_unproved');
       if(!['linux','darwin'].includes(p.platform))throw fault('process_unproved');
-      const after=await rawProcess(r.paneId);
-      if(after.foreground_processes.length!==1||after.foreground_processes[0]?.pid!==candidate.pid||!isDeepStrictEqual(candidate.argv,after.foreground_processes[0]?.argv)||await identity({pid:candidate.pid,paneId:r.paneId})!==startIdentity)throw fault('process_unproved');
+      const after=await rawProcess(r.paneId),confirmed=foregroundLeader(after);
+      if(after.foreground_process_group_id!==info.foreground_process_group_id||confirmed.pid!==candidate.pid||!isDeepStrictEqual(candidate.argv,confirmed.argv)||await identity({pid:candidate.pid,paneId:r.paneId})!==startIdentity)throw fault('process_unproved');
       return {pid:candidate.pid,startIdentity,paneId:r.paneId,executable,argv:[...candidate.argv]};
       }catch(error){if(error?.code==='herdr_not_found')throw error;throw fault('process_unproved');}
     }

@@ -92,19 +92,44 @@ existing proof boundary; list order cannot change the binding. Agent idle alone
 is insufficient: startup dialogs or launch_pending are blocked. On startup
 refusal, read the exact saved agent and retain any supplied native id/sequence
 before returning `native_start_person_action_required` with normal attach
-instructions. No terminal scraping, autoanswer or alternate launch.
+instructions, except for the known sign-in dialog below. No terminal scraping
+for process/readiness/acceptance proof, autoanswer or alternate launch.
 
 Explicit progress may continue only the SAME `start_intent` or `ready` backend
 when no prompt/submission/working/acceptance/cleanup evidence exists and the
 original digest matches. It may recheck readiness and perform the ONE initial
 prompt; it cannot create/start another pane or agent. A saved prompt_intent or
-later phase is always inspection-only. Lost prompt reply, vanished agent or
+later phase never repeats the original prompt; the settled continuation below
+is the only additional delivery authority. Lost prompt reply, vanished agent or
 unknown identity preserves the phase and ids and never starts again.
 
 </details>
 
 <details>
 <summary>Observation, attachment and cleanup</summary>
+
+At guarded startup, immediately before first prompt, on normal inspection and
+after native-history resume, read only this backend's visible pane using
+`pane read <paneId> --source visible --format text`. Classify at most 64 KiB from
+`result.read.text` only when `result.read.pane_id` equals the saved pane; any
+supplied workspace/tab must also match. Recognize anchored numbered native login
+choices, allowing terminal styling and selection markers: Codex `Sign in with
+ChatGPT`, `Sign in with Device Code`, `Provide your own API key`; Claude
+`Sign in to Claude`, `Claude account with subscription`, `Anthropic Console
+account`. Ordinary prose quoting login guidance is not a dialog. Ignore numbered
+choices inside Markdown backtick/tilde fenced examples, including quoted or
+unclosed fences; a native menu outside a closed example remains eligible.
+A known dialog
+returns blocked with code `agent_sign_in_required` and reason `agent is waiting
+for sign-in`, retaining the backend and its original prompt phase. Report a safe
+attach/sign-in next step; never save or expose screen text. It wins over idle
+alarm and working/settled classification, including an apparently ready agent.
+Current agent/cwd/native claim and any saved process proof must still pass before
+classifying an observation; a dialog cannot hide changed identity. A missing,
+malformed, oversized or failed read is unknown screen evidence and leaves the
+existing lifecycle/identity rules in force, never proving sign-in or readiness.
+Preserve a known missing executable error. This bounded diagnostic never types,
+starts login, resends a prompt, resumes history, closes a pane or accepts a stage.
 
 Observe the same agent working after the prompt, then ready/settled at a later
 lifecycle sequence. Preserve the initial ready and candidate sequences; never
@@ -170,6 +195,28 @@ handoff needs its own intent, permission and stopped-predecessor proof. Never
 blindly retry the resume. The controller revalidates frozen context, original prompt history and uncertain
 effects before separately admitting any once-only recovery continuation.
 A prompt_intent without proved delivery remains uncertain even after native resume.
+
+## Continue a settled turn without a handoff
+
+Export module functions `readSettledHerdrStageError({backend},ports)` and
+`retrySettledHerdrStage({backend,settledSeq},ports)`. Both require the shared guard,
+exact candidate lifecycle sequence, owned native claim, current pane/terminal/cwd
+and saved OS process/start identity. Neither starts or replaces an agent.
+The reader uses documented `pane read <pane> --source visible --format text`;
+require a matching pane ID and string text, examine only the last 4096 characters,
+and return only `busy_429`, `capacity`, `quota`, or `unknown`. Unavailable reads
+are unknown, never evidence of delivery or acceptance. Raw text is not retained.
+
+The retry caller has already durably admitted the same original attempt and
+unchanged work at the retry boundary. Recheck the exact settled sequence and
+selection before sending a short instruction to continue the original stage and
+write its original handoff without repeating completed work. Checkpoint the
+settled-sequence retry fence and new ready evidence before the ONE continuation.
+Keep original prompt digest, input, native identity, generation and process proof.
+A repeated fence or an uncertain send only inspects; it never resends. Subsequent
+acceptance requires a new working sequence followed by a later settled sequence.
+A failed checkpoint, changed process, attachment guard or non-quiescent agent
+prevents the continuation. Preserve partial project work and the original pane.
 
 ## Opt-in transport tracing
 

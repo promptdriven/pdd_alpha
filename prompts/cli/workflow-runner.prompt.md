@@ -56,8 +56,8 @@ the shared guard. Blocked setup remains blocked with the original attach guidanc
 actual ready may checkpoint its first actual nativeSession and ready sequence, then
 durable prompt_intent before its ONE first prompt.
 
-Any prompt_intent, submitted, candidate or later backend stays inspection-only and never
-resends. Legacy no-decision reconciliation remains read-only. It may be hosted in a
+Any prompt_intent, submitted, candidate or later backend never resends the original
+request. The settled missing-handoff continuation below is a separate fenced effect. Legacy no-decision reconciliation remains read-only. It may be hosted in a
 pane, but it grants no new effect. Snapshot/source/currentness and all established
 checkpoint identity pins remain unchanged. A blocked stage pauses with its existing
 identity.
@@ -204,7 +204,41 @@ duplicates, stale input or missing artifacts. Verify actual output HEAD and reta
 hashes as a real handoff. Uncertain native delivery or exceptions cannot trigger a new
 launch. A saved attempt is inspected under its original identity; only an explicit
 advance may accept a fresh valid candidate for that same attempt. Unknown transport
-never becomes pass, and no resume resends its prompt.
+never becomes pass, and no resume resends its original prompt.
+
+### Settled without a handoff
+
+A positively settled original stage whose exact handoff file is absent remains
+waiting, with its worktree, frozen input, attempt and native identity preserved.
+An invalid existing handoff or absent referenced artifact still fails validation.
+Read only the owned settled pane through `readSettledHerdrStageError`; keep a
+bounded classification, never raw pane text. For 429/capacity/quota, durably
+schedule a retry sixty seconds later and explain, for example, “Codex is busy
+(429); PDD retries the stage at <time>.” An unknown cause says the stage ended
+without a handoff and schedules the same delayed continuation; explicit approve
+may continue that unknown-cause wait early. Do not expose raw ENOENT.
+
+On an advancing resume/drive, recheck the same settled evidence and attachment
+epoch, frozen input, assignment, accepted artifacts, starting ancestry and the
+worktree fingerprint captured when waiting. A valid handoff that arrived meanwhile
+wins. Once due, use `retrySettledHerdrStage` for one short continuation of that
+same conversation and original task; never redeliver the original prompt or
+allocate/start another stage. Persist retry intent before delivery. Unknown
+acknowledgement is inspection-only and cannot resend. Require a new observed
+working-to-settled sequence before accepting any subsequent handoff. A new settled
+turn without a handoff may schedule another independently fenced retry. Account
+switching remains solely with the existing quota policy/proof ports; a pane error
+alone cannot authorize account changes or fabricate the quota owner's turn key.
+An active drive keeps its controller lock and heartbeat while waiting for a
+scheduled retry and while observing the admitted continuation. Poll the original
+stage, checkpoint changed continuation observations under the same stage guard,
+stop on blocked/unproved observation/stall or a human boundary, and keep the waiting
+reason visible in derived status. A blocked observation ends this drive before
+another scheduled sleep or advance, even with an unsent retry deadline; retain
+the same pending stage and retry fence for person action. Do not rely on a later keeper launch to execute
+an advertised retry while this controller's native claim still keeps it alive.
+No-decision legacy inspection sends nothing. These production stage functions
+are bound by the runner; injected test ports do not supply the only implementation.
 
 Report protocol stages may retain their substantive handoff summary in the journal
 artifact without claiming executable evidence. Work stages still require project files.
@@ -258,6 +292,14 @@ checks refuse inspection/resume after an unrecorded commit, without repeating it
 No-decision inspection performs no checkpoint. A completed checkpoint is idempotent:
 already committed files are not committed again and remote publication keeps its
 existing durable intent, one-call and read-only recovery rules.
+
+Supply PR preparation with the saved resolved issue and the latest completed work
+handoff summary, falling back to the latest proposal summary before work exists.
+For verified publication only, include the actual argv/exit statuses from the
+successful verify record whose source binding was checked above. Proposal PRs
+report tests not run for that publication; never borrow stale verification results.
+The GitHub owner formats the issue title, closing reference, summary and test result;
+the artifact checkpoint subject is internal bookkeeping, not the PR description.
 
 A later agent edit, including a report stage writing files, cannot reuse earlier test
 results for changed source. Proposal publication keeps its independently accepted

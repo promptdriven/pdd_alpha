@@ -1,5 +1,6 @@
-// Generated from prompts/cli/install-record.prompt.md (sha256: f2ec339ca5c6dcf85d809e9c1983c577bdfceae867937b9884ed34c7290b31ec).
+// Generated from prompts/cli/install-record.prompt.md (sha256: 78ea416443b1a7cefb15d9bd3e29fcf92a4179797c5ba8e56e3819d029d1db9f).
 import * as fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validUpdateLease } from './update-lock.mjs';
@@ -22,10 +23,14 @@ function inspect(v) {
 }
 export async function readInstallRecord({ home }, ports = {}) {
   const io = ports.fs ?? fs;
+  let file;
   try {
-    const value = JSON.parse(await io.readFile(join(home, '.pdd/install/record.json'), 'utf8'));
+    file = await io.open(join(home, '.pdd/install/record.json'), constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+    if (!(await file.stat()).isFile()) return { value: null, code: 'record_io' };
+    const value = JSON.parse(await file.readFile('utf8'));
     return { value, code: inspect(value) };
   } catch (e) { return { value: null, code: e.code === 'ENOENT' ? null : e instanceof SyntaxError ? 'record_damaged' : 'record_io' }; }
+  finally { await file?.close().catch(() => {}); }
 }
 function merge(old, next) {
   if (!object(old) || !object(next)) return structuredClone(next);

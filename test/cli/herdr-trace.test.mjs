@@ -137,3 +137,56 @@ test('diagnostic projection failures preserve the exact rejected value without r
  await assert.rejects(traceHerdrRequest({operation:'workspace.list'},()=>{calls++;return Promise.reject(error);},p),e=>e===error);
  assert.equal(calls,1);
 });
+
+test('issue21 C11 waits for another process writer then retains both request and outcome without warning or redelivery',async t=>{
+ const {spawn}=await import('node:child_process');
+ for(const outcome of ['reply','error']){
+  const p=fixture(t),warnings=[];p.stderr={write:text=>{warnings.push(text);return true;}};
+  fs.mkdirSync(join(p.home,'.pdd/logs'),{recursive:true,mode:0o700});
+  const lock=path(p)+'.lock';
+  // An independent process holds the same exclusive lock as a CLI/drive writer.
+  // IPC releases it only after the contender has started waiting.
+  const child=spawn(process.execPath,['--input-type=module','-e',`import * as fs from 'node:fs';const lock=process.argv[1];const fd=fs.openSync(lock,'wx',0o600);process.send('locked');process.on('message',()=>{fs.closeSync(fd);fs.unlinkSync(lock);process.disconnect();});`,lock],{stdio:['ignore','ignore','pipe','ipc']});
+  t.after(()=>{if(child.exitCode===null)child.kill();});
+  await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);child.once('exit',code=>{if(code!==null&&code!==0)reject(Error(`writer exited ${code}`));});});
+  let calls=0;const value={same:true},error=Object.assign(Error('synthetic private error'),{code:'EACCES'});
+  const pending=traceHerdrRequest({operation:'pane.run'},()=>{calls++;assert.equal(fs.existsSync(lock),false);if(outcome==='error')throw error;return value;},p);
+  assert.equal(calls,0,'contender yields without invoking the operation before its request record');
+  child.send('release');
+  if(outcome==='reply')assert.equal(await pending,value);else await assert.rejects(pending,e=>e===error);
+  assert.equal(calls,1);assert.deepEqual(warnings,[]);
+  const rows=readHerdrTrace(p);assert.deepEqual(rows.map(r=>r.phase),['request',outcome]);assert.equal(rows[0].traceId,rows[1].traceId);
+  await new Promise((resolve,reject)=>{if(child.exitCode!==null)return child.exitCode===0?resolve():reject(Error('writer exit'));child.once('exit',code=>code===0?resolve():reject(Error('writer exit')));});
+ }
+});
+
+test('issue21 C11 persistent contention remains bounded, warns once and never steals a lock or retries an effect',async t=>{
+ const p=fixture(t),warnings=[];p.stderr={write:text=>{warnings.push(text);return true;}};
+ fs.mkdirSync(join(p.home,'.pdd/logs'),{recursive:true,mode:0o700});
+ const lock=path(p)+'.lock';fs.writeFileSync(lock,'another writer',{mode:0o600});const before=fs.statSync(lock);
+ let calls=0;const value={same:true},started=performance.now();
+ assert.equal(await traceHerdrRequest({operation:'pane.run'},()=>{calls++;return value;},p),value);
+ const elapsed=performance.now()-started;assert.ok(elapsed>=450);assert.ok(elapsed<2000,`bounded contention took ${elapsed}ms`);
+ assert.equal(calls,1);assert.equal(warnings.length,1);assert.match(warnings[0],/busy.*Fix:/);
+ assert.equal(fs.statSync(lock).ino,before.ino);assert.equal(fs.readFileSync(lock,'utf8'),'another writer');assert.deepEqual(readHerdrTrace(p),[]);
+});
+
+test('issue21 C11 revalidates safety after contention instead of writing through changed directories',async t=>{
+ const p=fixture(t),warnings=[];p.stderr={write:text=>{warnings.push(text);return true;}};
+ const logs=join(p.home,'.pdd/logs');fs.mkdirSync(logs,{recursive:true,mode:0o700});
+ const lock=path(p)+'.lock';fs.writeFileSync(lock,'retained',{mode:0o600});
+ let calls=0;const pending=traceHerdrRequest({operation:'pane.run'},()=>{calls++;return 'ok';},p);
+ fs.chmodSync(logs,0o775);
+ assert.equal(await pending,'ok');assert.equal(calls,1);assert.equal(warnings.length,1);assert.match(warnings[0],/permissions/);
+ assert.equal(fs.existsSync(path(p)),false);assert.equal(fs.readFileSync(lock,'utf8'),'retained');
+});
+
+test('issue21 C11 waits on outcome-record contention and preserves the original rejected value',async t=>{
+ const p=fixture(t),warnings=[];p.stderr={write:text=>{warnings.push(text);return true;}};
+ const error=Object.assign(Error('synthetic private error'),{code:'EACCES'});let calls=0;
+ await assert.rejects(traceHerdrRequest({operation:'pane.run'},()=>{
+  calls++;const lock=path(p)+'.lock';fs.writeFileSync(lock,'reply writer',{mode:0o600});
+  setTimeout(()=>fs.unlinkSync(lock),20);throw error;
+ },p),e=>e===error);
+ assert.equal(calls,1);assert.deepEqual(warnings,[]);assert.deepEqual(readHerdrTrace(p).map(r=>r.phase),['request','error']);
+});

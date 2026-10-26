@@ -151,6 +151,18 @@ end, for example a no-decision resume or a `next-advance` proposal.
 
 </details>
 
+### Honest recovery display
+
+After reading a valid running status, consult `readKeeperDecision` for that run.
+Only a diagnostic with the same journal sequence and timestamp no older than the
+status may refine its display. A positively free controller lock means display
+`recovery_required` and “controller not running; recovery: <code>”; unknown
+controller ownership means `unknown` and “controller status unknown; recovery:
+<code>”. A held lock or newly started controller does not claim absence. Preserve
+terminal/human-wait results, current identities and journalSeq. This overlay
+changes only the returned view, never files or state. Missing, invalid, older or
+unavailable diagnostics leave the existing view intact; they grant no action.
+
 <details>
 <summary><strong>Journal and assignment readers (for runs without a status file)</strong></summary>
 
@@ -197,6 +209,8 @@ All readers only read. One bad line or file never hides the others.
 </details>
 
 ## Dependencies
+
+- [Keeper decisions](workflow-keeper-log.prompt.md): required generation/runtime for the read-only recovery diagnostic overlay.
 
 - [Journal codec](workflow-journal.prompt.md): required generation/runtime/verification context for snapshot and delta replay.
 

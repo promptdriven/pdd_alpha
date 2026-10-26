@@ -1,11 +1,12 @@
 #!/bin/sh
-# Generated from prompts/cli/bootstrap.prompt.md (sha256: b4716bbd06c91a122df8403b0cf352e4676439489aa53c59ee394a492594f45b).
+# Generated from prompts/cli/bootstrap.prompt.md (sha256: cf357b9f290aec734a69518263887d14bc09b4b203f03632385aeea8cd0a9992).
 set -eu
 # This installer is a child process; never change the invoking shell's umask.
 umask 077
 # Release CI replaces this empty, pinned table in its verified installer. A
 # checkout deliberately contains no production URL, key or fabricated artifact.
 pdd_release_table='__PDD_RELEASE_TABLE__'
+pdd_npm_cleanup='__PDD_NPM_CLEANUP__'
 pdd_bootstrap_fail() { printf '%s\n' "$1" 'Next: Obtain the verified GitHub release installer, then rerun pdd setup.' >&2; exit 1; }
 case "$pdd_release_table" in '__PDD_RELEASE_TABLE__') pdd_bootstrap_fail 'verification_error: trusted release descriptor is unavailable.' ;; esac
 for pdd_tool in uname curl openssl tar gzip awk df mktemp mkdir chmod cat cp; do
@@ -67,6 +68,9 @@ pdd_normalize_fresh_tree() {
 if [ -e "$HOME/.pdd/current" ] || [ -L "$HOME/.pdd/current" ] || [ -e "$HOME/.pdd/install/record.json" ]; then
   if [ -x "$HOME/.pdd/launcher/pdd-launch" ]; then
     printf '%s\n' 'This installer did not install a new release. The existing PDD runtime is retained.' 'Continue with pdd setup to check that existing installation.'
+    if [ -x "$HOME/.pdd/launcher/support/node" ]; then
+      "$HOME/.pdd/launcher/support/node" --input-type=module -e "$pdd_npm_cleanup" || pdd_bootstrap_fail 'legacy_npm_cleanup_failed: Remove the identified old global npm pdd, then rerun pdd setup.'
+    fi
     exec "$HOME/.pdd/launcher/pdd-launch" cli setup "$@"
   fi
   # Re-enter only through this verified installer. Its Node entry must reconcile

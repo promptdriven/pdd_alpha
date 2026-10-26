@@ -8,7 +8,7 @@ refinement preserves file contents, file modes, install identities and user data
 Module function `ensurePrivateDirectory(directory, io)` creates the requested
 directory at exactly 0700, independent of umask. On existing paths, repair only
 `.pdd` itself and its direct mutable children `logs`, `runs`, `fleet`, `accounts`,
-`claims`, `install` and `link`; preserve other existing directory modes. Do not
+`claims`, `install`, `link` and `update`; preserve other existing directory modes. Do not
 chmod HOME or ancestors outside PDD. A private `.pdd` parent already excludes
 other users from existing immutable runtimes.
 Create absent outer parents when needed, preserving their existing modes; an

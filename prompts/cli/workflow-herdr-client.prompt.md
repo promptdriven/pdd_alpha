@@ -44,9 +44,13 @@ retain exact spelling and compare exact workspace/tab/pane bindings.
 Use the bound absolute executable below, supplied env/home/cwd,
 UTF-8, 1 MiB output limit and a 5000ms timeout. Never interpolate a shell command
 around the transport. `pane run` receives the caller's already-owned controller
-command as one positional operand, unmodified. Rejected or nonzero calls and
-JSON errors/malformed envelopes throw fixed safe errors after tracing; never
-automatically issue another create/tab/run call.
+command as one positional operand, unmodified. For `paneRun` only, a successful
+exit with exactly empty stdout acknowledges delivery and returns `{}`: Herdr
+0.9.1 does not print a JSON reply for this operation. This acknowledgment is not
+controller start, process identity or journal proof. Nonempty stdout still
+requires a valid JSON envelope; empty replies for other operations remain invalid.
+Rejected or nonzero calls and JSON errors/malformed envelopes throw fixed safe
+errors after tracing; never automatically issue another create/tab/run call.
 
 Normalize `result.workspaces` to `{workspaceId,cwd}` rows from actual
 `workspace_id`/`cwd`; Herdr 0.9.1 lists omit cwd, which stays null and cannot
@@ -62,20 +66,54 @@ argv; paths/argv remain local authority inputs, not public diagnostics.
 
 ```mermaid
 flowchart TD
-    R[Read actual pane process info] -->|Exactly one usable foreground process| O[Read OS identity and executable]
+    R[Read actual pane process info] -->|Unique usable foreground group leader| O[Read OS identity and executable]
     R -->|Missing or ambiguous| U([Unproved])
     O -->|Identity and executable agree on repeated read| P([Normalized process proof])
     O -->|Missing or changed evidence| U
 ```
 
-`processInfo` returns `{pid,startIdentity,paneId,executable,argv}` only when one
-foreground process has a positive PID and nonempty absolute executable argv[0],
-the OS identity is present and unchanged, and a second actual Herdr read has the
-same PID/full argv. Resolve the OS executable (`/proc/<pid>/exe` on Linux;
+`processInfo` selects the unique foreground row whose positive PID equals the
+positive `foreground_process_group_id`. Other group members may be present and
+may change order or disappear; they supply no controller authority. A missing,
+duplicate or unusable leader is unproved, with no child/name fallback. For legacy
+replies that omit the group-id field entirely, retain the single-foreground-row
+compatibility rule; a present malformed group id never enables that fallback.
+
+Return `{pid,startIdentity,paneId,executable,argv}` only when the selected row has
+nonempty full argv with an absolute executable argv[0], the OS identity is
+present and unchanged, and a second actual Herdr read selects the same leader
+with the same group id, PID and full argv. Resolve the OS executable (`/proc/<pid>/exe` on Linux;
 the absolute argv[0] on macOS) against argv[0] without replacing its public path
 spelling. Ambiguity, disappearance, mismatch or unreadability throws a fixed
 unproved error; absence is not a stopped-process proof. This never asserts
 launch ID, generation or durable journal state: the controller must match those.
+
+## Saved controller exit observation
+
+The returned `herdr` also exposes async instance method
+`inspectProcessExit({session,paneId,pid,startIdentity})`. It observes the original
+positive PID and nonempty saved OS start identity; it never treats a generic
+identity-read failure as absence. Return `{exited:false}` for unknown evidence.
+Positive replies are `{exited:true,pid,startIdentity,paneId,reason}` with optional
+observed identity or shell identity evidence. These are local proof inputs, never
+public diagnostics or permission to relaunch by themselves.
+
+Accept `pid_gone` only when two OS presence checks explicitly report absence;
+the default uses signal zero and recognizes only ESRCH. EPERM, EACCES and other
+errors remain unknown. Accept `identity_changed` only when two nonempty OS start
+identities agree with each other and differ from the saved identity. The normal
+shared identity reader still owns platform identity semantics. Optional
+`ports.processExists({pid})` supplies true, false or null for isolated adapters;
+only false proves absence, and explicit supplied references remain authoritative.
+
+Accept `pane_shell` only from two successful reads of the exact saved pane whose
+positive shell_pid equals foreground_process_group_id and uniquely identifies a
+usable foreground row. That shell's PID/full argv and nonempty OS identity must
+remain unchanged around the repeated pane read. No name/idle-text heuristic,
+unrelated foreground process or empty list proves exit. Missing-path errors
+retain their known Herdr code/message; other failed reads remain unknown. Perform
+no mutation, cleanup, login or retries of Herdr effects. The controller still
+requires the bound journal, deadline, frozen proof and free lifetime lock.
 
 ## Read-only capability and keeper observation
 

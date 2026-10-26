@@ -1,4 +1,4 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: b4716bbd06c91a122df8403b0cf352e4676439489aa53c59ee394a492594f45b).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: cf357b9f290aec734a69518263887d14bc09b4b203f03632385aeea8cd0a9992).
 // Release tooling only: the caller supplies already reviewed, immutable inputs.
 import { readFile, writeFile } from 'node:fs/promises';
 export async function buildBootstrap({ descriptor, destination }) {
@@ -20,5 +20,10 @@ export async function buildBootstrap({ descriptor, destination }) {
   }
   if (!rows.length) throw new TypeError('No runtime artifacts');
   const template = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
-  await writeFile(destination, template.replace("pdd_release_table='__PDD_RELEASE_TABLE__'", `pdd_release_table='${rows.join('\n')}'`), { mode: 0o755, flag: 'wx' });
+  const cleanup = await readFile(new URL('./npm-cleanup.mjs', import.meta.url), 'utf8');
+  const cleanupScript = cleanup + '\ntry { await cleanupLegacyNpm(); } catch { process.exitCode = 1; }\n';
+  const quote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+  const installer = template.replace("pdd_release_table='__PDD_RELEASE_TABLE__'", `pdd_release_table='${rows.join('\n')}'`)
+    .replace("pdd_npm_cleanup='__PDD_NPM_CLEANUP__'", () => `pdd_npm_cleanup=${quote(cleanupScript)}`);
+  await writeFile(destination, installer, { mode: 0o755, flag: 'wx' });
 }

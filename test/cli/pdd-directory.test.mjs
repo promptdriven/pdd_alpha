@@ -192,3 +192,18 @@ for (const variant of ['existing-child-symlink', 'absent-child-symlink', 'existi
     }
   });
 }
+
+test('C9 setup repairs only the mutable update root to 0700 and creates private update staging', async t => {
+  const home = await temporary(t), root = join(home, '.pdd'), update = join(root, 'update');
+  await fs.mkdir(join(update, 'existing'), { recursive: true }); await fs.chmod(update, 0o775); await fs.chmod(join(update, 'existing'), 0o750);
+  await fs.writeFile(join(update, 'existing/retained'), 'owned update bytes', { mode: 0o600 });
+  const inode = (await fs.stat(update)).ino;
+  await withUpdateLock({ home }, async () => {
+    assert.equal((await fs.stat(update)).mode & 0o7777, 0o700);
+    await ensurePrivateDirectory(join(update, 'staging/new-transaction'));
+  });
+  assert.equal((await fs.stat(update)).ino, inode);
+  assert.equal((await fs.stat(join(update, 'existing'))).mode & 0o7777, 0o750);
+  assert.equal(await fs.readFile(join(update, 'existing/retained'), 'utf8'), 'owned update bytes');
+  for (const path of ['staging', 'staging/new-transaction']) assert.equal((await fs.stat(join(update, path))).mode & 0o7777, 0o700);
+});

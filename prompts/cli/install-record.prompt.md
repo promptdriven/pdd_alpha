@@ -11,6 +11,15 @@ read and compare-and-replace one record. Code is null on success; writes require
 the real install lease. A stale revision gives `stale_record` without mutation.
 No unlocked writer, including Link, may edit this file. Private helpers are free.
 
+Reads accept only a regular record file, without following a final symlink.
+A FIFO or other non-regular entry must return `{value:null, code:'record_io'}`
+without waiting for a writer or reading its contents. Bind the type check and
+read to the same opened file so replacement cannot redirect the read to a
+blocking stream. Close the file on every outcome; refusal must not repair,
+replace or mutate local state. Missing files remain `{value:null, code:null}`;
+malformed JSON remains `record_damaged`. This lets local status display an
+unreadable record and finish while preserving the evidence for recovery.
+
 <details>
 <summary><strong>Required record fields and durable replacement</strong></summary>
 

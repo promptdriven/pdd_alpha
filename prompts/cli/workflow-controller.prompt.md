@@ -20,9 +20,9 @@ flowchart TD
     C -->|No| F([Refused: herdr_identity_unavailable])
     T -->|Reply or reply lost| R
     R -->|Exact live process proved| S([Started])
-    R -->|Bound start, stopped or human wait, lifetime lock free| E[Save exited proof]
-    E -->|New decision, current admission valid| W
-    E -->|Same request| X([Exited, inspect only])
+    R -->|Bound start, confirmed exit or human wait, lifetime lock free| E[Save exited proof]
+    E -->|New decision or recoverable exit, admission valid| W
+    E -->|Same request without recoverable exit| X([Exited, inspect only])
     R -->|Not yet bound, within 15 seconds| R
     R -->|Still unproved or conflicting| U([May be running, retain intent])
 ```
@@ -99,10 +99,25 @@ never started. Persist both the process and journal proof. A typed-line
 acknowledgement is insufficient. If the controller already exited, a validated
 journal record for this launch/decision can prove it ran, but not that it is live.
 Poll fresh journal and process evidence for up to 15 seconds after delivery or inspection, allowing controller.started to become durable after the process begins. Each read remains bound to the same saved pane/launch; never redeliver during polling. Recheck the monotonic deadline after awaited observations and lifetime-lock results and before accepting or persisting either live or exited proof: an elapsed time greater than 15000 ms returns `uncertain` without proof persistence or replacement admission, even if an overdue timer callback has not run. Evidence completed at exactly 15000 ms remains eligible for the same strict proof checks. Missing or conflicting proof at the deadline gives `uncertain`, even after an ok type reply. Its message says `Workflow controller may be running; check pdd workflow status RUN_ID.` rather than asserting it did not start.
-Before comparing a new decision with a prior non-exited launch, reconcile that prior launch against its own saved argv and decision. A matching live process remains owned: a different request refuses controller_busy, while the same request returns its proof. A strict journal controller.started for that prior launch, together with a free controller lifetime lock and either a proved stopped original process or the journal's current human wait, permits a durable exited phase before admitting a new current decision. Unknown lock, unbound journal, changed frozen proof or runtime/run conflict never authorizes replacement. A human wait does not override positive matching live process evidence. Recheck current revision, accepted artifacts, assignment, runtime and free lifetime lock through the existing admission authority for the new launch. Same-decision retries remain inspect-only.
+Before comparing a new decision with a prior non-exited launch, reconcile that prior launch against its own saved argv and decision. A matching live process remains owned: a different request refuses controller_busy, while the same request returns its proof. A strict journal controller.started for that prior launch, together with a free controller lifetime lock and either confirmed original-process exit or the journal's current human wait, permits a durable exited phase before admitting a new current decision. Unknown lock, unbound journal, changed frozen proof or runtime/run conflict never authorizes replacement. A human wait does not override positive matching live process evidence. Recheck current revision, accepted artifacts, assignment, runtime and free lifetime lock through the existing admission authority for the new launch. Unknown same-decision retries remain inspect-only. A recoverable exit means positive exit-observer evidence in a non-human wait.
+For that exit, the same request may admit one fresh launch immediately after
+saving the exited proof; this is a new launch/generation, never re-delivery of the
+old intent. A human wait still needs its current accepted decision.
+
+Confirmed exit accepts the existing exact stopped-process proof, or the public
+Herdr client's optional instance method `inspectProcessExit` bound to this
+journal's `{pid,startIdentity,paneId}` and default session. Its positive exit
+reasons are `pid_gone`, `identity_changed` or `pane_shell`; validate its returned
+PID/start/pane against the saved start before using it. The client owns fresh OS
+absence/reuse and repeated own-shell observations. A generic null identity,
+missing foreground row, unrelated process, transport failure or unknown observer
+is not exit evidence. A matching live process wins. Changed frozen journal proof,
+unknown/busy lifetime lock and an expired proof deadline still refuse replacement.
+Bound this additional awaited observation by the same deadline and recheck after
+it. Persist the exit evidence with the original controller proof before admission.
 
 An uncertain launch is inspect-only until journal/process evidence settles it;
-absence from one read is not permission to type again.
+absence from one foreground read is not permission to type again.
 
 Every tab/pane mutation follows its own durable intent. A failed pre-effect
 check gives `refused`; an explicit creation refusal gives `failed`; missing,

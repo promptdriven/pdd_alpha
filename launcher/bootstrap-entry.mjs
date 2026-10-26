@@ -1,5 +1,6 @@
-// Generated from prompts/cli/bootstrap.prompt.md (sha256: b4716bbd06c91a122df8403b0cf352e4676439489aa53c59ee394a492594f45b).
+// Generated from prompts/cli/bootstrap.prompt.md (sha256: cf357b9f290aec734a69518263887d14bc09b4b203f03632385aeea8cd0a9992).
 import * as fs from 'node:fs/promises';
+import { cleanupLegacyNpm } from './npm-cleanup.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -112,6 +113,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const [home, stage, ...args] = process.argv.slice(2);
   try {
     const { runtime } = await completeBootstrap({ home, stage });
+    await cleanupLegacyNpm({ node: runtime.node });
     process.stdout.write('Continue with pdd setup\n');
     process.execve(runtime.node, [runtime.node, runtime.bin, 'setup', ...args], process.env);
   } catch (e) {

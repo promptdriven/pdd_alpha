@@ -86,6 +86,19 @@ Other arbitrary controller error text is not a diagnostic contract.
 None of this changes eligibility, quota/fleet prerequisites,
 restore provider refusal, physical authority, lock observations or launch proof.
 
+## Explain every recovery decision
+
+Every reconciliation pass records one bounded JSONL decision for each supplied run
+through `appendKeeperDecision` in `~/.pdd/logs/keeper.jsonl`: runId, decision,
+code, timestamp, observed journal sequence and whether its controller lock was
+positively free. Include stopped, skipped, refused, uncertain and started outcomes;
+errors also produce one decision. A free lock is an observation, never permission
+to skip the existing two-observation, lifecycle, runtime or process proof gates.
+No arbitrary controller message, pane text, paths, context or credentials enter
+this log. Recording failure warns safely and cannot alter recovery or repeat an
+effect. `PDD_TRACE=herdr` additionally uses the existing redacted trace facility.
+The log is diagnostic only and never read as launch authority.
+
 ## Public recovery service and restore scope
 
 Alpha owns the boot/login recovery service `pdd runs-keeper`, installed by
@@ -154,6 +167,8 @@ recovery must preserve its separate service/context, including when initially ab
 update, with one current stage process and no repeated first prompt.
 
 ## Dependencies
+
+- [Keeper decisions](workflow-keeper-log.prompt.md): required generation/runtime for bounded per-pass diagnostics; no launch authority.
 
 - [Story](../../story/cli/WORKFLOW-KEEPER.md) and [cases](../../vectors/cli/workflow-keeper.json): verification; expected outcomes, not observed results.
 - [Runner journal reader](workflow-runner.prompt.md): required generation/runtime

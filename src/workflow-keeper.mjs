@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: c8ed16c0ba38e7079cb938a7992e53ad887221438513ea482995daf6e7bb8e4f).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: d1b3de96f690f4fdb4f3149dd228c57585503cb249a5241ed83ec3e51f25df96).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
@@ -7,6 +7,7 @@ import { withWorkflowLock, inspectWorkflowLock, claimWorkflowSession } from './w
 import { startWorkflowController, readControllerLaunches, createLocalWorkflowControllerPorts } from './workflow-controller.mjs';
 import { checkWorkflowRuntime } from './workflow-runtime.mjs';
 import { readRunIndex } from './workflow-run-records.mjs';
+import {appendKeeperDecision} from './workflow-keeper-log.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const observations=new Map();
 const compositions=new WeakMap();
@@ -49,13 +50,13 @@ export async function discoverWorkflowRuns({home},ports={}){
 export async function reconcileWorkflowControllers({entries,now},ports={}){
   const results=[],memo=ports.observations??observations,passPorts=ports;
   for(const entry of entries??[]){
-    let ports=passPorts;
-    const finish=(state,code,extra={})=>results.push({runId:entry?.runId??null,state,code,...extra});
+    let ports=passPorts,journalSeq=null,controller='unknown',decision;
+    const finish=(state,code,extra={})=>{decision={runId:entry?.runId??null,state,code,...extra};if(state==='started')controller='started';results.push(decision);};
     try{
       if(entry?.recoveryRegistry==='missing_or_invalid'){finish('stopped','registry_missing_or_invalid');continue;}
       if(!UUID.test(entry?.runId??'')||!isAbsolute(entry.runDir??'')||typeof ports.validateLocator!=='function'||await ports.validateLocator(entry)!==true){finish('stopped','locator_invalid');continue;}
       if(!ports.readWorkflowJournal){finish('stopped','unsupported');continue;}
-      const journal=await ports.readWorkflowJournal({runDir:entry.runDir}),s=journal?.state;
+      const journal=await ports.readWorkflowJournal({runDir:entry.runDir}),s=journal?.state;journalSeq=journal?.seq??s?.seq??null;
       if(s?.runId!==entry.runId||!eligible(s)){memo.delete(entry.runId);finish('stopped','ineligible');continue;}
       if(s.controlState==='WAIT'){
         if(!Number.isFinite(s.quota?.until)||now<s.quota.until){finish('WAIT','renewal_not_due');continue;}
@@ -79,7 +80,7 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
       if(herdr?.code==='herdr_not_found'){memo.delete(entry.runId);finish('needs_you',herdr.code,{message:herdr.message});continue;}
       if(!herdr?.complete||!Number.isFinite(herdr.upSince)||!Number.isFinite(herdr.stableSince)||now-herdr.upSince<30000||now-herdr.stableSince<5000){memo.delete(entry.runId);finish('stopped','herdr_unsettled');continue;}
       const inspect=ports.inspectWorkflowLock??((spec)=>inspectWorkflowLock(spec,ports));
-      const lock=await inspect({path:join(entry.runDir,'controller.lock')});
+      const lock=await inspect({path:join(entry.runDir,'controller.lock')});controller=lock==='free'?'absent':lock==='held'?'held':'unknown';
       if(lock!=='free'){memo.delete(entry.runId);finish('stopped',lock==='held'?'controller_busy':'lock_unknown');continue;}
       const first=memo.get(entry.runId);
       if(!first||first.runDir!==entry.runDir||first.upSince!==herdr.upSince||first.at>now){memo.set(entry.runId,{at:now,runDir:entry.runDir,upSince:herdr.upSince});finish('stopped','observing_lock');continue;}
@@ -89,14 +90,19 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
       const runtime=await (ports.checkWorkflowRuntime??(spec=>checkWorkflowRuntime(spec,ports)))({runDir:entry.runDir});
       if(!runtime.ok){finish('needs_you',runtime.code,runtime.message?{message:runtime.message}:{});continue;}
       if(prior&&prior.phase!=='exited'){
+        controller='unknown';
         const seen=await (ports.startWorkflowController??(spec=>startWorkflowController(spec,ports)))({runId:s.runId,runDir:entry.runDir,root:s.root??entry.root,workflow:s.name,issueNumber:s.issue?.number,runtime:s.runtime,decision:prior.decision});
         finish(seen.state,seen.code,{...controllerMessage(seen),inspectOriginal:true});continue;
       }
       if(launches.filter(l=>now-l.admittedAt<3600000).length>=3){finish('needs_you','launch_budget');continue;}
       // Launcher performs a fresh strict read and lock recheck under its admission gate.
+      controller='unknown';
       const seen=await (ports.startWorkflowController??(spec=>startWorkflowController(spec,ports)))({runId:s.runId,runDir:entry.runDir,root:s.root??entry.root,workflow:s.name,issueNumber:s.issue?.number,runtime:s.runtime});
       memo.delete(entry.runId);finish(seen.state,seen.code,controllerMessage(seen));
     }catch(error){memo.delete(entry?.runId);if(error?.code==='herdr_not_found')finish('needs_you',error.code,{message:error.message});else finish('stopped','recovery_inspection_failed');}
+    finally{
+      if(decision)try{await (passPorts.appendKeeperDecision??appendKeeperDecision)({runId:UUID.test(entry?.runId??'')?entry.runId:null,decision:decision.state,code:decision.code??null,at:now,journalSeq,controller},passPorts);}catch{/* Diagnostic failure cannot change recovery. */}
+    }
   }
   return results;
 }

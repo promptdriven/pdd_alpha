@@ -1,4 +1,4 @@
-// Generated from prompts/cli/herdr-trace.prompt.md (sha256: 6d1147477e9ec77a0651dfd005aebea737c7160ebdac5845dee73024a06fde79).
+// Generated from prompts/cli/herdr-trace.prompt.md (sha256: c714b7119e299f777d0075e32a8e247729bf00a5472b7b33e238383dd1981514).
 import {constants,closeSync,fstatSync,ftruncateSync,lstatSync,mkdirSync,openSync,readSync,realpathSync,unlinkSync,writeSync} from 'node:fs';
 import {join,isAbsolute} from 'node:path';
 import {homedir} from 'node:os';
@@ -94,10 +94,22 @@ function readBounded(fd){
   while(size<bytes.length&&(count=readSync(fd,bytes,size,bytes.length-size,size))>0)size+=count;
   if(size>LIMIT)throw traceFault('oversized');return bytes.subarray(0,size).toString('utf8');
 }
-function append(value,ports){
+async function append(value,ports){
   let lock,fd,path,stage;
   try{
-    path=location(ports,true);stage='lock';lock=openSync(path+'.lock',constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);regular(fstatSync(lock));stage='file';
+    const deadline=performance.now()+250;
+    for(;;){
+      path=location(ports,true);stage='lock';
+      if(performance.now()>deadline)throw traceFault('busy');
+      try{lock=openSync(path+'.lock',constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);break;}
+      catch(error){
+        if(error?.code!=='EEXIST')throw error;
+        const left=deadline-performance.now();if(left<=0)throw traceFault('busy');
+        await new Promise(resolve=>setTimeout(resolve,Math.min(10,left)));
+        if(performance.now()>deadline)throw traceFault('busy');
+      }
+    }
+    regular(fstatSync(lock));stage='file';
     fd=openSync(path,constants.O_RDWR|constants.O_CREAT|constants.O_APPEND|(constants.O_NOFOLLOW??0),0o600);const stat=fstatSync(fd);regular(stat);
     const row=record(value);if(!row)throw traceFault('invalid_record');let text=JSON.stringify(row)+'\n';if(Buffer.byteLength(text)>ROW_LIMIT)text=JSON.stringify({...row,payload:{}})+'\n';
     if(stat.size+Buffer.byteLength(text)>LIMIT){
@@ -114,10 +126,10 @@ function append(value,ports){
 export async function traceHerdrRequest({operation,request},invoke,ports={}){
   let trace;try{const selector=ports.env?.PDD_TRACE??process.env.PDD_TRACE;if(typeof selector==='string'&&selector.split(',').some(token=>token.trim()==='herdr'))trace={v:1,traceId:randomUUID(),operation:OPS.has(operation)?operation:'other'};}catch{}
   if(!trace)return invoke();
-  const start=performance.now();append({...trace,phase:'request',at:Date.now(),monotonicMs:start,payload:request},ports);
+  const start=performance.now();await append({...trace,phase:'request',at:Date.now(),monotonicMs:start,payload:request},ports);
   try{
-    const reply=await invoke();const end=performance.now();append({...trace,phase:'reply',at:Date.now(),monotonicMs:end,durationMs:Math.max(0,end-start),payload:reply},ports);return reply;
-  }catch(error){const end=performance.now();append({...trace,phase:'error',at:Date.now(),monotonicMs:end,durationMs:Math.max(0,end-start),payload:{error}},ports);throw error;}
+    const reply=await invoke();const end=performance.now();await append({...trace,phase:'reply',at:Date.now(),monotonicMs:end,durationMs:Math.max(0,end-start),payload:reply},ports);return reply;
+  }catch(error){const end=performance.now();await append({...trace,phase:'error',at:Date.now(),monotonicMs:end,durationMs:Math.max(0,end-start),payload:{error}},ports);throw error;}
 }
 export function readHerdrTrace(ports={}){
   let fd;try{const path=location(ports,false);fd=openSync(path,constants.O_RDONLY|constants.O_NONBLOCK|(constants.O_NOFOLLOW??0));regular(fstatSync(fd));return parseRows(readBounded(fd));}

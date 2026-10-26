@@ -250,7 +250,7 @@ test('whitespace changes in a space-bearing filename remain in the input fingerp
   assert.equal(next.state, 'failed'); assert.equal(f.native.length, 1);
 });
 
-for (const [label, options] of [['missing', { missingHandoff: true }], ['stale', { staleHandoff: true }]]) {
+for (const [label, options] of [['stale', { staleHandoff: true }]]) {
   test(`native zero with ${label} handoff does not complete its stage or automatically relaunch`, async t => {
     const f = await fixture(t, options); const first = await f.run(); assert.equal(first.state, 'failed');
     assert.equal(f.saved(first.runId).index, 0); const again = await f.resume(first.runId, 'approve');
@@ -1309,6 +1309,9 @@ test('P1 enabled trace observes actual controller process request without replac
 
 test('C3 one hour of unchanged backend checkpoints at 4Hz stays below 5 MB and recovers exact work',async t=>{
   const f=await fixture(t);let checkpoints=0,original,dir,stableSeq,now=Date.now();
+  // Keep the real guide intact; synthetic padding makes the stress size independent of checkout paths.
+  const loadGuidance=f.ports.loadGuidance;
+  f.ports.loadGuidance=async input=>{const guidance=await loadGuidance(input);return guidance+'\n# Synthetic C3 size fixture\n'+'x'.repeat(Math.max(0,60_000-Buffer.byteLength(guidance)));};
   f.ports.now=()=>now;
   f.ports.observeWorkflowActivity=async()=>({observable:true,idle:true,rolloutBytes:100});
   f.ports.runHerdrStage=async(input,ports)=>{
@@ -1516,4 +1519,158 @@ test('C3 journal observers cannot mutate authoritative replay or later observati
   await f.resume(first.runId);
   assert.deepEqual(readFileSync(path), before, 'read-only recovery preserves history');
   assert.equal(f.native.length, deliveries, 'observation and recovery never redeliver work');
+});
+
+
+test('C12 composition publishes the issue and accepted change/check results after the internal artifact checkpoint', async t => {
+  const f = await fixture(t, { leaveScopeUncommitted: true });
+  const first = await f.run(), opened = await f.resume(first.runId, 'approve');
+  assert.equal(opened.stage, 'wait-merge', opened.message);
+  assert.match(await f.git('log', '-1', '--format=%s'), /^pdd: record accepted artifacts for /);
+  assert.equal(f.pr.title, 'Use value two');
+  assert.match(f.pr.body, /^Closes #17\n/m);
+  assert.match(f.pr.body, /Completed current change; observable expectations remain independent\./);
+  assert.doesNotMatch(f.pr.body, /pdd: record accepted artifacts|Completed current verify/);
+  const saved = f.saved(first.runId), checked = saved.completed.find(step => step.id === 'verify');
+  for (const check of checked.handoff.checks) {
+    assert.equal(check.exitCode, 0);
+    assert.ok(f.pr.body.includes('PASS (exit 0): ' + JSON.stringify(check.argv)));
+  }
+  const marker = '<!-- pdd-workflow:' + first.runId + ':open-pr -->';
+  assert.equal(f.pr.body.split(marker).length - 1, 1);
+  assert.equal(f.pr.headRefOid, saved.expected.head);
+  const before = {head: saved.expected.head, body:f.pr.body, title:f.pr.title};
+  await f.resume(first.runId);
+  assert.equal(await f.git('rev-parse', 'HEAD'), before.head);
+  assert.equal(f.pr.body, before.body); assert.equal(f.pr.title, before.title);
+  assert.equal(f.calls.filter(c => c.file === 'git' && c.args[0] === 'push').length, 1);
+  assert.equal(f.calls.filter(c => c.file === 'gh' && c.args[1] === 'create').length, 1);
+});
+
+test('C12 proposal PR describes accepted scope without claiming unexecuted verification', async t => {
+  const f = await fixture(t); let state = await f.run('feature');
+  state = await f.resume(state.runId, 'skip'); state = await f.resume(state.runId, 'skip');
+  state = await f.resume(state.runId, 'approve'); state = await f.resume(state.runId, 'approve');
+  assert.equal(state.stage, 'prompt-merge', state.message);
+  assert.equal(f.pr.title, 'Use value two');
+  assert.match(f.pr.body, /^Closes #17\n/m);
+  assert.match(f.pr.body, /Completed current prompt-story/);
+  assert.match(f.pr.body, /Not run for this publication\./);
+  assert.doesNotMatch(f.pr.body, /PASS/);
+});
+
+
+test('C13 settled missing handoff waits with a plain message and read-only resume never redelivers',async t=>{
+  const f=await fixture(t,{missingHandoff:true});
+  f.ports.readSettledHerdrStageError=async()=>({code:'unknown'});
+  const first=await f.run();assert.equal(first.state,'waiting',first.message);assert.match(first.message,/ended without a handoff/);assert.doesNotMatch(first.message,/ENOENT/);
+  const before=f.saved(first.runId);const again=await f.resume(first.runId);
+  assert.equal(again.state,'waiting');assert.equal(f.native.length,1);assert.equal(f.closes,0);assert.equal(f.saved(first.runId).pending.attemptId,before.pending.attemptId);
+});
+test('C13 busy retry waits until due and fences an uncertain continuation across resume',async t=>{
+  const f=await fixture(t,{missingHandoff:true});let clock=1000,retries=0;
+  f.ports.now=()=>clock;f.ports.readSettledHerdrStageError=async()=>({code:'busy_429'});
+  f.ports.retrySettledHerdrStage=async({backend,settledSeq})=>{retries++;assert.equal(settledSeq,3);assert.equal(f.saved(backend.runId).pending.handoffWait.sent,true);throw Error('lost reply');};
+  const first=await f.run('small-change','codex');assert.equal(first.state,'waiting');assert.match(first.message,/Codex is busy \(429\); PDD retries/);
+  const original=f.saved(first.runId).pending;await f.resume(first.runId,'approve');assert.equal(retries,0);
+  clock=61000;const retry=await f.resume(first.runId,'approve');assert.equal(retry.state,'waiting');assert.equal(retries,1);
+  await f.resume(first.runId,'approve');assert.equal(retries,1);assert.equal(f.native.length,1);
+  const saved=f.saved(first.runId);assert.deepEqual(saved.pending.input,original.input);assert.equal(saved.pending.instructions,original.instructions);assert.equal(saved.pending.attemptId,original.attemptId);
+});
+test('C13 a late valid handoff is accepted without a retry and missing artifact remains invalid',async t=>{
+  const f=await fixture(t,{missingHandoff:true});f.ports.readSettledHerdrStageError=async()=>({code:'busy_429'});let retries=0;f.ports.retrySettledHerdrStage=async()=>{retries++;throw Error();};
+  const first=await f.run();f.options.missingHandoff=false;
+  await f.ports.launchNativeSession(f.native[0]);
+  const accepted=await f.resume(first.runId,'approve');assert.equal(accepted.state,'waiting',accepted.message);assert.equal(retries,0);assert.ok(f.saved(first.runId).completed.some(x=>x.id==='scope'));
+  const g=await fixture(t,{missingHandoff:true});g.ports.readSettledHerdrStageError=async()=>({code:'unknown'});const pending=await g.run();g.options.missingHandoff=false;await g.ports.launchNativeSession(g.native[0]);
+  unlinkSync(join(g.cwd,'cases.json'));const invalid=await g.resume(pending.runId,'approve');assert.equal(invalid.state,'failed');assert.equal(g.saved(pending.runId).index,0);
+});
+test('C13 changed partial work fences continuation and preserves the original files',async t=>{
+  const f=await fixture(t,{missingHandoff:true});f.ports.readSettledHerdrStageError=async()=>({code:'unknown'});let retries=0;f.ports.retrySettledHerdrStage=async()=>{retries++;throw Error();};
+  const first=await f.run();writeFileSync(join(f.cwd,'partial.txt'),'preserve');const next=await f.resume(first.runId,'approve');
+  assert.equal(next.state,'recovery_required',next.message);assert.equal(retries,0);assert.equal(readFileSync(join(f.cwd,'partial.txt'),'utf8'),'preserve');
+});
+
+
+for(const diagnosis of ['busy_429','unknown','lost_reply'])test(`C13 live drive keeps its controller lock through ${diagnosis} retry and observes the same continuation`,async t=>{
+  const f=await p1Fixture(t,{missingHandoff:true});let clock=0,retries=0,sleeps=0,continued=false,workingObserved=false;
+  f.ports.now=()=>clock;f.ports.readSettledHerdrStageError=async()=>({code:diagnosis==='lost_reply'?'busy_429':diagnosis});
+  f.ports.sleep=async ms=>{clock+=ms;sleeps++;assert.ok(sleeps<65);assert.equal(await inspectWorkflowLock({path:join(f.gitDir,'pdd/workflows',f.activeId,'controller.lock')}),'held');};
+  const inspect=f.ports.inspectHerdrStage;
+  f.ports.retrySettledHerdrStage=async({backend},ports)=>{
+    retries++;assert.equal(clock,60000);const b={...backend,phase:diagnosis==='lost_reply'?'prompt_intent':'submitted',handoffRetry:{settledSeq:3},evidence:diagnosis==='lost_reply'?{readySeq:3}:{readySeq:3,workingSeq:4}};await ports.checkpoint(b);continued=true;
+    return {state:diagnosis==='lost_reply'?'recovery_required':'active',backend:b,evidence:b.evidence};
+  };
+  f.ports.inspectHerdrStage=async(input,ports)=>{
+    if(!continued)return inspect(input,ports);
+    if(diagnosis==='lost_reply'&&!workingObserved){workingObserved=true;const b={...input.backend,evidence:{readySeq:3,workingSeq:4}};return {state:'active',backend:b,evidence:b.evidence};}
+    if(diagnosis==='lost_reply')assert.equal(input.backend.evidence.workingSeq,4,'working observation survived to the next poll');
+    f.options.missingHandoff=false;await f.ports.launchNativeSession(f.native[0]);continued=false;
+    const b={...input.backend,phase:'candidate',evidence:{readySeq:3,workingSeq:4,settledSeq:5}};await ports.checkpoint(b);
+    return {state:'settled',backend:b,evidence:b.evidence};
+  };
+  const prepared=await f.prepare();const result=await f.drive();assert.equal(result.state,'waiting',result.message);assert.equal(result.stage,'change');assert.equal(retries,1);assert.equal(sleeps,diagnosis==='lost_reply'?62:61);assert.equal(f.saved(prepared.runId).completed[0].id,'scope');assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
+});
+
+import {claimWorkflowSession as realC13Claim} from '../src/workflow-claims.mjs';
+test('C13 blocked observation exits scheduled drive without another poll',async t=>{
+ const f=await p1Fixture(t,{missingHandoff:true});let clock=0,sleeps=0,diagnosed=false,name,delivered=false,blocked=false;const handles=[];const transportCalls=[];
+ t.after(async()=>{for(const h of handles)await h.release?.();});
+ f.ports.runHerdrStage=runHerdrStage;f.ports.inspectHerdrStage=inspectHerdrStage;f.ports.closeHerdrStage=closeHerdrStage;
+ f.ports.now=()=>clock;f.ports.pollMs=1;f.ports.observeMs=10;f.ports.processStartIdentity=async()=> 'same-start';
+ f.ports.claimWorkflowSession=async(...args)=>{const h=await realC13Claim(...args);handles.push(h);return h;};
+ f.ports.sleep=async ms=>{clock+=ms;if(diagnosed){sleeps++;blocked=true;if(sleeps>1)throw Error('bounded-probe-stop: scheduler polled after blocked');}};
+ const edge=f.ports.execFile;f.ports.execFile=async(file,args,opts)=>{
+  if(file!==f.herdrExecutable||(args[2]==='pane'&&args[3]==='process-info'&&args.at(-1)==='controller'))return edge(file,args,opts);
+  const a=args.slice(2);transportCalls.push(a.slice(0,3));const encode=x=>({stdout:JSON.stringify(x)});
+  const agent=(status=blocked?'blocked':delivered?'done':'idle',seq=blocked?4:delivered?3:1)=>({workspace_id:'workspace',tab_id:'run-tab',pane_id:'stage',terminal_id:'stage-terminal',name,agent:'claude',cwd:f.cwd,agent_status:status,interactive_ready:['done','idle'].includes(status),launch_pending:false,state_change_seq:seq,agent_session:null});
+  if(a[0]==='pane'&&a[1]==='split')return encode({result:{pane:{workspace_id:'workspace',tab_id:'run-tab',pane_id:'stage',terminal_id:'stage-terminal'}}});
+  if(a[0]==='pane'&&a[1]==='process-info')return encode({result:{process_info:{pane_id:'stage',foreground_processes:[{pid:123,name:'claude',cwd:f.cwd,argv:['claude']}]}}});
+  if(a[0]==='agent'&&a[1]==='start'){name=a[2];return encode({result:{agent:agent()}});}
+  if(a[0]==='agent'&&a[1]==='get')return encode({result:{agent:agent()}});
+  if(a[0]==='agent'&&a[1]==='prompt'){assert.equal(delivered,false,'no continuation before due');delivered=true;return encode({result:{agent:agent('working',2)}});}
+  if(a[0]==='pane'&&a[1]==='read'){diagnosed=true;return encode({result:{read:{pane_id:'stage',text:'429 Too Many Requests'}}});}
+  assert.fail(JSON.stringify(a));
+ };
+ const prepared=await f.prepare();assert.equal(prepared.state,'prepared',prepared.message);const result=await f.drive();
+ assert.equal(sleeps,1,'stop at the first blocked observation; do not poll again');assert.equal(result.state,'waiting');assert.match(result.message,/person|blocked/);
+ assert.equal(await inspectWorkflowLock({path:join(prepared.runDir,'controller.lock')}),'free');
+ assert.equal(transportCalls.filter(a=>a[0]==='agent'&&a[1]==='prompt').length,1,'only the original prompt is delivered');
+ const pending=f.saved(prepared.runId).pending;assert.equal(pending.kind,'agent');assert.equal(pending.backend.paneId,'stage');assert.equal(pending.handoffWait.code,'busy_429');assert.notEqual(pending.handoffWait.sent,true);
+});
+
+test('native zero with missing handoff does not complete its stage or automatically relaunch', async t => {
+  const f = await fixture(t, { missingHandoff: true });
+  let clock = 1000, retries = 0;
+  f.ports.now = () => clock;
+  f.ports.readSettledHerdrStageError = async () => ({ code: 'busy_429' });
+  f.ports.retrySettledHerdrStage = async () => { retries++; assert.fail('no continuation before the retry deadline'); };
+  const first = await f.run('small-change', 'codex');
+  assert.equal(first.state, 'waiting', first.message);
+  assert.match(first.message, /Codex is busy \(429\); PDD retries/);
+  assert.doesNotMatch(first.message, /ENOENT/);
+  const before = f.saved(first.runId);
+  assert.equal(before.index, 0);
+  assert.deepEqual(before.completed, []);
+  assert.equal(before.pending.kind, 'agent');
+  assert.equal(before.pending.handoffWait.retryAt, 61000);
+  const journal = join(f.gitDir, 'pdd/workflows', first.runId, 'journal.jsonl');
+  const bytes = readFileSync(journal);
+  const inspected = await f.resume(first.runId);
+  assert.equal(inspected.state, 'waiting', inspected.message);
+  assert.deepEqual(readFileSync(journal), bytes, 'read-only resume leaves durable history unchanged');
+  clock = 60999;
+  const approved = await f.resume(first.runId, 'approve');
+  assert.equal(approved.state, 'waiting', approved.message);
+  const after = f.saved(first.runId);
+  assert.equal(after.index, 0);
+  assert.deepEqual(after.completed, []);
+  assert.equal(after.pending.attemptId, before.pending.attemptId);
+  assert.deepEqual(after.pending.input, before.pending.input);
+  assert.deepEqual(after.pending.backend, before.pending.backend);
+  assert.equal(after.pending.instructions, before.pending.instructions);
+  assert.notEqual(after.pending.handoffWait.sent, true);
+  assert.equal(retries, 0);
+  assert.equal(f.native.length, 1);
+  assert.equal(f.closes, 0);
 });

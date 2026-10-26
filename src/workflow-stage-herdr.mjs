@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: b43800dd2fbe6976e98f285f1d2291cfb5c7e2c9c897c0ed57d44b9b691a5679).
+// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: 04d2535edd7168b403fe4c40d9e90f029b9ef6dd958df0ace389580706ab81d7).
 import {execFile as callbackExec,spawn} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
@@ -109,9 +109,27 @@ function launchArgs(b,ports,resume){
   if(b.launchSelection&&b.launchSelection.source!=='native-defaults'&&isDeepStrictEqual(args,encode({...input,selection:undefined})))throw fault('unsupported');
   return args;
 }
+async function signInScreen(r,b){
+  try{
+    const screen=(await command(r,b,['pane','read',b.paneId,'--source','visible','--format','text'])).result?.read;
+    if(screen?.pane_id!==b.paneId||typeof screen.text!=='string'||Buffer.byteLength(screen.text)>65536
+      ||screen.workspace_id!==undefined&&screen.workspace_id!==b.workspaceId||screen.tab_id!==undefined&&screen.tab_id!==b.tabId)return false;
+    const choice=b.agent==='codex'?/^(?:sign in with chatgpt|sign in with device code|provide your own api key)$/i:/^(?:sign in to claude|claude account with subscription|anthropic console account)$/i;
+    let fence=null;
+    for(const line of screen.text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').split(/\r?\n/)){
+      const marker=/^\s*(?:>\s*)?(`{3,}|~{3,})(.*)$/u.exec(line);
+      if(fence){if(marker&&marker[1][0]===fence.kind&&marker[1].length>=fence.length&&!marker[2].trim())fence=null;continue;}
+      if(marker){fence={kind:marker[1][0],length:marker[1].length};continue;}
+      const menu=/^\s*(?:[>›❯●○]\s*)?\d+[.)]\s*(.*?)\s*$/u.exec(line);if(menu!==null&&choice.test(menu[1]))return true;
+    }
+    return false;
+  }catch(e){if(e.code==='herdr_not_found')throw e;return false;}
+}
+const needsSignIn=b=>({...outcome(b,'agent is waiting for sign-in','blocked'),code:'agent_sign_in_required',message:'Agent is waiting for sign-in. Attach to the original stage to sign in, then inspect it again.'});
 async function observed(r,b,save) {
   try{return await r.guard(b,async()=>{
     const a=await agent(r,b);await rememberAndClaim(r,b,a,save??r.p.checkpoint);if(b.processProof)await processProof(r,b);
+    if(await signInScreen(r,b))return needsSignIn(b);
     if((await r.p.onStageObservation?.({backend:copy(b),status:a.agent_status,reason:a.agent_status==='blocked'?'native_person_action_required':null}))?.pause)return outcome(b,'stage_idle_alarm','active');
     if(a.agent_status==='blocked'||a.launch_pending){if(save)await checkpoint(b,save);return outcome(b,'native_person_action_required','blocked');}
     if(a.agent_status==='working') {
@@ -155,12 +173,15 @@ export async function runHerdrStage(input={},ports={}) {
         b.paneId=created.pane_id;b.terminalId=created.terminal_id;b.phase='start_intent';await checkpoint(b,input.checkpoint);
         let started;
         try{started=await command(r,b,['agent','start',b.agentName,'--kind',b.agent,'--pane',b.paneId,'--timeout',String(r.startupMs),'--',...args]);}
-        catch(e){if(e.code!=='agent_not_ready')throw e;const actual=await agent(r,b);await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);return outcome(b,'native_start_person_action_required','blocked');}
+        catch(e){if(e.code!=='agent_not_ready')throw e;const actual=await agent(r,b);await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);if(b.processProof)await processProof(r,b);return await signInScreen(r,b)?needsSignIn(b):outcome(b,'native_start_person_action_required','blocked');}
         const actual=await agent(r,b,agentValue(started));await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);
       }
       const actual=await agent(r,b);await rememberAndClaim(r,b,actual,input.checkpoint);await checkpoint(b,input.checkpoint);
+      if(b.processProof)await processProof(r,b);
+      if(await signInScreen(r,b))return needsSignIn(b);
       if(!ready(actual))return outcome(b,'native_start_person_action_required','blocked');
       await promote(r,b);b.processProof=await processProof(r,b);b.phase='ready';b.evidence.readySeq=actual.state_change_seq;await checkpoint(b,input.checkpoint);
+      if(await signInScreen(r,b))return needsSignIn(b);
       const fresh=await agent(r,b);await rememberAndClaim(r,b,fresh,input.checkpoint);if(!ready(fresh)||fresh.state_change_seq!==b.evidence.readySeq)throw fault('fresh_agent_changed_before_prompt');await processProof(r,b);
       b.phase='prompt_intent';await checkpoint(b,input.checkpoint);
       const delivered=await agent(r,b,agentValue(await command(r,b,['agent','prompt',b.agentName,prompt])));await rememberAndClaim(r,b,delivered,input.checkpoint);
@@ -183,6 +204,45 @@ export async function inspectHerdrStage({backend,cwd}={},ports={}) {
   const b=copy(backend),r=rt(ports);
   try{validate(b);if(await realpath(cwd??b.cwd)!==b.cwd)throw fault('stage_cwd_changed');if(['closed','close_intent','resume_intent'].includes(b.phase))return outcome(b,b.phase==='closed'?'stage_archived':'stage_effect_unconfirmed');return await observed(r,b);}
   catch(e){return stageFailure(b,e,'stage_inspection_unavailable');}
+}
+async function settledIdentity(r,b) {
+  validate(b);
+  if(b.phase!=='candidate'||!b.processProof||!Number.isSafeInteger(b.evidence?.settledSeq))throw fault('stage_not_quiescent');
+  const a=await agent(r,b);await rememberAndClaim(r,b,a,r.p.checkpoint);
+  if(!ready(a)||a.state_change_seq!==b.evidence.settledSeq)throw fault('stage_not_quiescent');
+  await processProof(r,b);
+  return a;
+}
+export async function readSettledHerdrStageError({backend}={},ports={}) {
+  const b=copy(backend),r=rt(ports);
+  try{return await r.guard(b,async()=>{
+    await settledIdentity(r,b);
+    const read=(await command(r,b,['pane','read',b.paneId,'--source','visible','--format','text'])).result?.read;
+    if(read?.pane_id!==b.paneId||typeof read.text!=='string')return {code:'unknown'};
+    const tail=read.text.slice(-4096);
+    const lines=tail.split(/\r?\n/).filter(line=>/429|capacity|quota|rate.?limit|too many requests/i.test(line));
+    const last=lines.at(-1)??'';
+    return {code:/429|too many requests/i.test(last)?'busy_429':/capacity/i.test(last)?'capacity':/quota|rate.?limit/i.test(last)?'quota':'unknown'};
+  });}catch{return {code:'unknown'};}
+}
+export async function retrySettledHerdrStage({backend,settledSeq}={},ports={}) {
+  const b=copy(backend),r=rt(ports);
+  try {
+    validate(b);
+    if(b.handoffRetry?.settledSeq===settledSeq)return inspectHerdrStage({backend:b},ports);
+    return await r.guard(b,async()=>{
+      if(b.evidence?.settledSeq!==settledSeq||!await supportedSelection(b,ports))throw fault('stage_retry_unproved');
+      const a=await settledIdentity(r,b);
+      b.handoffRetry={settledSeq};b.evidence={readySeq:a.state_change_seq};b.phase='prompt_intent';
+      await checkpoint(b,ports.checkpoint);
+      const prompt='Continue the same original workflow stage with its unchanged input and handoff path. Preserve all completed work; do not repeat completed actions or start another stage. Finish the remaining work and write the originally requested handoff.';
+      const delivered=await agent(r,b,agentValue(await command(r,b,['agent','prompt',b.agentName,prompt])));
+      await rememberAndClaim(r,b,delivered,ports.checkpoint);
+      if(delivered.agent_status==='working'&&delivered.state_change_seq>b.evidence.readySeq)b.evidence.workingSeq=delivered.state_change_seq;
+      b.phase='submitted';await checkpoint(b,ports.checkpoint);
+      return outcome(b,'stage_continuation_pending','active');
+    });
+  }catch(e){return stageFailure(b,e,'stage_continuation_uncertain');}
 }
 export async function attachHerdrStage({backend}={},ports={}) {
   const b=copy(backend),r=rt(ports);
@@ -229,6 +289,7 @@ export async function resumeHerdrStage({backend,cwd,resumeIntent,checkpoint:save
       await checkpoint(b,save);
       const response=await command(r,b,['agent','start',b.agentName,'--kind',b.agent,'--pane',b.paneId,'--timeout',String(r.startupMs),'--',...args]);
       const a=await agent(r,b,agentValue(response));remember(b,a);await checkpoint(b,save);
+      if(await signInScreen(r,b))return needsSignIn(b);
       if(!ready(await agent(r,b)))return outcome(b,'native_resume_needs_you','blocked');
       b.processProof=await processProof(r,b);b.evidence={readySeq:a.state_change_seq};b.phase='history_resumed';await checkpoint(b,save);return outcome(b,null,'active');
     });

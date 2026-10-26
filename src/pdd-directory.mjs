@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-directory.prompt.md (sha256: a02141327e515cca3833751894481b0c8af2cdd9a099660c31fa39b9bec3f701).
+// Generated from prompts/cli/pdd-directory.prompt.md (sha256: 01e9c23423b34ec0481fb571410b726615dc63baee9f2bde337ffbfa380c3202).
 import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -8,7 +8,7 @@ import { resolve, dirname, join } from 'node:path';
 
 const execute = promisify(execFile);
 const helper = fileURLToPath(new URL(`../launcher/native/${process.platform}-${process.arch}/pdd-directory`, import.meta.url));
-const mutableChildren = new Set(['logs', 'runs', 'fleet', 'accounts', 'claims', 'install', 'link']);
+const mutableChildren = new Set(['logs', 'runs', 'fleet', 'accounts', 'claims', 'install', 'link', 'update']);
 const same = (a, b) => String(a.dev) === String(b.dev) && String(a.ino) === String(b.ino);
 const owned = s => s.isDirectory() && String(s.uid) === String(process.geteuid());
 const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK;

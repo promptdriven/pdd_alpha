@@ -26,8 +26,12 @@ nonregular/multiply linked files, foreign ownership, writable parent directories
 permissive log directories/files and oversized input; never repair, follow or
 replace such a target. Bound the trace to 1 MiB and each record to 4096 bytes.
 When compacting, retain at most the last 200 positively projected records within
-that bound. A busy or unavailable sink may omit diagnostics, but each selected write
-failure must call `warnTraceWriteFailure(error, ports)` with a safe classified
+that bound. An existing writer lock is transient contention: asynchronously wait for at most
+250 monotonic milliseconds per record, retrying only exclusive lock acquisition
+at intervals of at most 10ms and revalidating directory safety after each wait.
+Do not block the event loop, steal/remove another writer's lock, or retry file
+writes or API effects. A lock still busy at the deadline or an unavailable sink
+may omit diagnostics, but each selected write failure must call `warnTraceWriteFailure(error, ports)` with a safe classified
 reason. The shared reporter emits one stderr warning with repair guidance per
 stream/process across both Herdr and Git sinks. Keep unsafe-directory/file,
 invalid-home, oversized trace and busy-lock reasons distinct; filesystem errors

@@ -89,8 +89,13 @@ files are not rewritten. A Link restart requires an actual service/runtime chang
 and the activation barrier. No browser or phone is needed for bootstrap itself.
 Closing the invoking SSH session cannot stop an already accepted detached update.
 Before detach acceptance, report failure honestly; do not leave an untracked job.
-Keep setup short: old LaunchAgent/unit and legacy wrapper cleanup belongs to
-pdd doctor --cleanup, not a required inventory wizard. Setup must prove the PDD shim wins
+After the managed runtime and stable launcher are available, retire only the
+identified legacy global npm Alpha through the [npm cleanup owner](npm-cleanup.prompt.md)
+before entering setup. Embed that same reviewed cleanup module in the generated
+installer for existing installs; they use their retained support Node and never
+a system/PATH Node. Preserve Python pdd-cli and unrelated npm packages.
+Keep setup short: old LaunchAgent/unit and other legacy wrapper cleanup belongs
+to pdd doctor --cleanup, not a required inventory wizard. Setup must prove the PDD shim wins
 in a fresh zsh/bash/fish shell and a Herdr pane, or show the actual winner and one
 repair step. For optional client setup, preserve the
 [wrapper boundary](../accounts/wrapper.prompt.md): setup changes no stock sign-in
@@ -106,6 +111,8 @@ setup-owned.
   [install lock](update-lock.prompt.md), [install record](install-record.prompt.md)
   and [detached updater](detached-updater.prompt.md): required for generation and
   verification; bootstrap must meet their contracts before the Node modules run.
+- [Legacy npm cleanup](npm-cleanup.prompt.md): generation/runtime; only the
+  identified global npm Alpha is retired after managed support is available.
 - [Public doctor](doctor.prompt.md): required for generation/verification;
   diagnostic/cleanup modes are separate from checkpoint continuation.
 - [Wrapper boundary](../accounts/wrapper.prompt.md): required generation/verification

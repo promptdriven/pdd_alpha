@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 32b51fb409a470f72dbbebbfa857d129059ad63b895257ee5183749eddea566b).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: ee10e1fd37c7beaa757b12e03cd0438a3ee64d585b62566f5e541a8912ac7fba).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -349,10 +349,20 @@ export async function runPdd(argv, dependencies = {}) {
       }catch {line(stderr,'Machine Settings unavailable. Check the settings adapter.');return 1;}
     }
     case 'update': {
-      try {const mod=updateModule??await import('./updates/updater.mjs');const action=Object.keys(plan.options).find(k=>!['--fleet','--force'].includes(k));
-        const result=await mod.runUpdateCommand({action:action?.slice(2)??null,value:action && plan.options[action]!==true?plan.options[action]:null,fleet:!!plan.options['--fleet'],force:!!plan.options['--force']},ports);
-        if(!result || ![0,1,2].includes(result.code) || typeof result.message!=='string')throw Error();line(result.code===0?stdout:stderr,result.message);return result.code;
-      }catch {line(stderr,'Update operation unconfirmed. Inspect local update state before retrying.');return 1;}
+      const action=Object.keys(plan.options).find(k=>!['--fleet','--force'].includes(k));
+      const input={action:action?.slice(2)??null,value:action && plan.options[action]!==true?plan.options[action]:null,fleet:!!plan.options['--fleet'],force:!!plan.options['--force']};
+      const plainShow=input.action===null&&!input.fleet;
+      try {const mod=updateModule??await import('./update-command.mjs');
+        const result=await mod.runUpdateCommand(input,ports);
+        if(!result || ![0,1,2].includes(result.code) || typeof result.message!=='string' || !result.message.trim())throw Object.assign(new Error(),{code:'update_invalid_result'});
+        if(plainShow&&result.code!==0){const local=await import('./update-command.mjs');const status=await local.runUpdateCommand({},ports);line(stdout,status.message);line(stderr,safeLabel(result.message));return 0;}
+        line(result.code===0?stdout:stderr,result.message);return result.code;
+      }catch(error) {
+        const reasons={ENOENT:'A required update file is missing.',ERR_MODULE_NOT_FOUND:'The release selector is not installed.',EACCES:'Permission to read local update state was denied.',EPERM:'Permission to read local update state was denied.',ENOTFOUND:'The release host could not be reached.',ECONNREFUSED:'The release host refused the connection.',ETIMEDOUT:'The release check timed out.',update_invalid_result:'The update adapter returned an invalid result.'};
+        const reason=reasons[error?.code]??'The update adapter failed; its result could not be confirmed.';
+        if(plainShow){const local=await import('./update-command.mjs');const result=await local.runUpdateCommand({},ports);line(stdout,result.message);line(stderr,reason+' Run pdd doctor.');return 0;}
+        line(stderr,reason+' No update was confirmed. Run pdd doctor before changing the installation.');return 1;
+      }
     }
     case 'session': {
       let launch;

@@ -104,3 +104,26 @@ test('stock installer preserves a genuine service failure after ready runtime pu
   assert.equal(await fs.realpath(join(f.home, '.pdd/current')), record.transaction.to.versionRoot);
   assert.equal((await fs.stat(join(f.home, '.pdd'))).mode & 0o7777, 0o700);
 });
+
+
+test('fresh stock installer removes only old global npm Alpha after the managed runtime is ready', { timeout: 120000 }, async t => {
+  const f = await stockRuntime(t), legacy = join(f.home, 'legacy global'), calls = join(f.home, 'npm-calls');
+  await put(join(legacy, 'pdd/package.json'), JSON.stringify({ name: 'pdd', repository: { url: 'git+https://github.com/promptdriven/pdd_alpha.git' } }));
+  await put(join(legacy, 'unrelated/kept'), 'unrelated package');
+  await put(join(f.tools, 'pdd'), '#!/bin/sh\nprintf "Python pdd-cli\\n"\n', 0o755);
+  await put(join(f.tools, 'npm'), `#!/bin/sh
+printf '%s\\n' "$*" >> "$S66_CALLS"
+if [ "$*" = 'root --global' ]; then printf '%s\\n' "$S66_ROOT"; exit 0; fi
+[ "$*" = 'uninstall --global --ignore-scripts --no-audit --no-fund pdd' ] || exit 97
+node --input-type=module -e 'import{readFileSync,realpathSync}from"node:fs";const r=JSON.parse(readFileSync(process.env.HOME+"/.pdd/install/record.json"));if(r.transaction.phase!=="ready"||realpathSync(process.env.HOME+"/.pdd/current")!==r.transaction.to.versionRoot)process.exit(96);' || exit 95
+/bin/rm -r "$S66_ROOT/pdd"
+`, 0o755);
+  const result = await f.run({ S66_ROOT: legacy, S66_CALLS: calls });
+  assert.equal(result.stdout.split('Removed old global npm pdd (promptdriven/pdd_alpha).').length, 2);
+  assert.match(result.stdout, /Public recovery service ready/);
+  assert.deepEqual((await fs.readFile(calls, 'utf8')).trim().split('\n'), ['root --global', 'uninstall --global --ignore-scripts --no-audit --no-fund pdd']);
+  await assert.rejects(fs.access(join(legacy, 'pdd')), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(join(legacy, 'unrelated/kept'), 'utf8'), 'unrelated package');
+  assert.equal((await execute(join(f.tools, 'pdd'), [], { env: { HOME: f.home, PATH: f.tools } })).stdout, 'Python pdd-cli\n');
+  assert.equal((await fs.stat(join(f.home, '.pdd'))).mode & 0o7777, 0o700);
+});

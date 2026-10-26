@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-github.prompt.md (sha256: 420934d5b784327eb1259a1336d85f502e8f69adecd404772c08f636b5551b33).
+// Generated from prompts/cli/workflow-github.prompt.md (sha256: 12b9eac8f772e16813aa74be770829ec5c451165ff1f46a45db716815f9dfb5b).
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, mkdtemp, open, readFile, realpath, rename, rm } from 'node:fs/promises';
@@ -310,20 +310,44 @@ async function localTopic(cwd, baseBranch, bodyFile, deps) {
   return { headBranch, headSha };
 }
 
+function publicationText(description, repository) {
+  if (!description || typeof description !== 'object') fail('workflow_github_description_invalid');
+  const {issue, summary, checks} = description;
+  if (!Number.isSafeInteger(issue?.number) || issue.number < 1
+    || !canonicalUrl(issue.url, repository, 'issues', issue.number)
+    || !text(issue.title) || !issue.title.trim() || issue.title.trim().length > 256)
+    fail('workflow_github_description_invalid');
+  if (typeof summary !== 'string' || !summary.trim() || summary.includes('pdd-workflow:')
+    || !Array.isArray(checks) || Array.from(checks).some(check => !Array.isArray(check?.argv) || !check.argv.length
+      || Array.from(check.argv).some(arg => typeof arg !== 'string' || arg.includes('\0') || arg.includes('pdd-workflow:'))
+      || !check.argv[0].trim() || !Number.isInteger(check.exitCode) || check.exitCode < 0 || check.exitCode > 255))
+    fail('workflow_github_description_invalid');
+  const normalized = summary.trim().replace(/\s+/gu, ' ');
+  const short = normalized.length > 500 ? normalized.slice(0,499) + '…' : normalized;
+  const tests = checks.length ? checks.map(check =>
+    `- ${check.exitCode === 0 ? 'PASS' : 'FAIL'} (exit ${check.exitCode}): ${JSON.stringify(check.argv)}`).join('\n')
+    : 'Not run for this publication.';
+  return {title:issue.title.trim(), body:`Closes #${issue.number}\n\n## Summary\n\n${short}\n\n## Tests\n\n${tests}\n`};
+}
+
 export async function prepareWorkflowPr(input, ports = {}) {
-  const { cwd, runId, stageId, repository, baseBranch, bodyFile } = structuredClone(input ?? {});
+  const { cwd, runId, stageId, repository, baseBranch, bodyFile, description } = structuredClone(input ?? {});
   if (!identifier(runId) || !identifier(stageId) || !repositoryName(repository) || !text(bodyFile))
     fail('workflow_github_intent_invalid');
   const deps = dependencies(ports), actual = await repositoryAt(cwd, deps);
   if (!sameRepo(repository, actual.repository)) fail('workflow_github_repository_mismatch');
   const file = resolve(cwd, bodyFile), topic = await localTopic(cwd, baseBranch, file, deps);
-  const title = (await deps.command(cwd, 'git', ['log', '-1', '--format=%s'])).trim();
+  const descriptionText = description === undefined ? null : publicationText(description, actual.repository);
+  const title = descriptionText?.title ?? (await deps.command(cwd, 'git', ['log', '-1', '--format=%s'])).trim();
   if (!text(title) || title.length > 256) fail('workflow_github_title_invalid');
   const marker = `pdd-workflow:${runId}:${stageId}`;
   let body;
   try { body = await deps.readFile(file, 'utf8'); }
-  catch (error) { if (error?.code !== 'ENOENT') throw error; body = title + '\n'; }
-  if (!markerBody(body, marker)) body += (body.endsWith('\n') ? '\n' : '\n\n') + `<!-- ${marker} -->\n`;
+  catch (error) { if (error?.code !== 'ENOENT') throw error; body = descriptionText ? '' : title + '\n'; }
+  const marked = markerBody(body, marker);
+  if (descriptionText && !body.includes(descriptionText.body))
+    body += (body ? (body.endsWith('\n') ? '\n' : '\n\n') : '') + descriptionText.body;
+  if (!marked) body += (body.endsWith('\n') ? '\n' : '\n\n') + `<!-- ${marker} -->\n`;
   await deps.writeFile(file, body, 'utf8');
   return { repository: actual.repository, runId, stageId, ...topic, baseBranch, marker, title, bodyFile: file };
 }

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 30fd7bd891bef4b58bc13e1f9977bf9ffdfdc93088782bae56a3b4cb762fe540).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: fd04d4430dfa9fc324d9a95fa67c0e0ab914dee6b915da5580620bd2f8a05023).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -17,6 +17,7 @@ import { traceHerdrRequest } from './herdr-trace.mjs';
 import {encodeWorkflowJournalRecord,replayWorkflowJournalRecord} from './workflow-journal.mjs';
 const journalStates=new WeakMap();
 import { resolveHerdrExecutable } from './workflow-herdr-executable.mjs';
+import {readSettledHerdrStageError,retrySettledHerdrStage} from './workflow-stage-herdr.mjs';
 
 const ordinaryExec = promisify(execFileCallback);
 const defaultExec = (file, args, { cwd, env }) => ordinaryExec(file, args, { cwd, env, encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
@@ -365,6 +366,35 @@ async function runAgent(s, stage, r, directory, options, p) {
   if (outcome.state !== 'settled') return result(s, ['blocked','active'].includes(outcome.state) ? 'waiting' : 'recovery_required', outcome.reason || 'The original background stage needs inspection; no resend.');
   return acceptAgent(s, stage, r, directory, options, p, outcome);
 }
+async function missingHandoff(s,stage,r,directory,options,p,observed,outputInput) {
+  const pending=s.pending,seq=observed.evidence.settledSeq,portOptions=nativePorts(s,directory,r,options,p);
+  await sourceValid(s,r);
+  await git(p,r.root,'merge-base','--is-ancestor',pending.input.head,'HEAD');
+  if(!pending.handoffWait||pending.handoffWait.settledSeq!==seq) {
+    const diagnostic=await (p.readSettledHerdrStageError??readSettledHerdrStageError)({backend:observed.backend},portOptions);
+    const code=['busy_429','capacity','quota'].includes(diagnostic?.code)?diagnostic.code:'unknown';
+    pending.handoffWait={settledSeq:seq,code,retryAt:(p.now??Date.now)()+60000,input:outputInput};
+    await record(s,directory,'agent.handoff.wait');
+    return handoffWaitResult(s);
+  }
+  const wait=pending.handoffWait;
+  if(wait.retryAt!==null&&(p.now??Date.now)()<wait.retryAt&&!(wait.code==='unknown'&&options.decision==='approve'))return handoffWaitResult(s);
+  if(wait.retryAt===null&&options.decision!=='approve')return handoffWaitResult(s);
+  if(!isDeepStrictEqual(wait.input,outputInput))return result(s,'recovery_required','Stage work changed while waiting; inspect the original work before retrying.');
+  if(wait.sent)return result(s,'waiting','Stage continuation delivery is uncertain; inspect the original stage. No duplicate was sent.');
+  wait.sent=true;await record(s,directory,'agent.handoff.retry_intent');
+  let next;
+  try{next=await (p.retrySettledHerdrStage??retrySettledHerdrStage)({backend:observed.backend,settledSeq:seq},portOptions);candidateIdentity(s,stage,next);}
+  catch{return result(s,'waiting','Stage continuation delivery is uncertain; inspect the original stage. No duplicate was sent.');}
+  // Checkpoint owns identity transitions, including an uncertain delivery fence.
+  await portOptions.checkpoint(next.backend);
+  pending.transport=next;await record(s,directory,'agent.handoff.retry_observed');
+  return result(s,'waiting',next.state==='active'?'Continuing the original stage; waiting for its handoff.':'Stage continuation is unconfirmed; inspect the original stage. No duplicate was sent.');
+}
+function handoffWaitResult(s) {
+  const w=s.pending.handoffWait,label=s.pending.agent==='codex'?'Codex':'Claude';
+  return result(s,'waiting',w.code==='unknown'?`The stage ended without a handoff. Work is preserved; PDD retries the stage at ${new Date(w.retryAt).toISOString()}. Resume with approve to continue sooner.`:`${label} is busy (${w.code==='busy_429'?'429':w.code}); PDD retries the stage at ${new Date(w.retryAt).toISOString()}.`);
+}
 async function acceptAgent(s, stage, r, directory, options, p, outcome) {
   const portOptions = nativePorts(s, directory, r, options, p);
   return portOptions.withStageGuard(outcome.backend, async () => {
@@ -380,6 +410,11 @@ async function acceptAgent(s, stage, r, directory, options, p, outcome) {
     await validateInput(s, options, p);
     await assignedRepository(s.assignment, p);
     const outputInput = await fingerprint(r, p);
+    try { lstatSync(s.pending.handoffPath); }
+    catch(error) {
+      if(error.code==='ENOENT')return missingHandoff(s,stage,r,directory,options,p,observed,outputInput);
+      throw error;
+    }
   let h;
   try { h = await handoff(s, stage, r, directory); await sourceValid(s, r);
     await git(p, r.root, 'merge-base', '--is-ancestor', s.pending.input.head, 'HEAD'); }
@@ -492,8 +527,14 @@ async function makePr(s, stage, r, directory, p) {
   } else if (!isDeepStrictEqual(previous,updated)) fail('Artifact checkpoint changed the saved source input.');
   s.expected = updated; s.artifactCommitIntent = null;
   await record(s,directory,'publication.artifacts.committed');
+  const work = s.completed.findLast(entry => s.definitions.find(definition => definition.id === entry.id)?.protocol === 'work');
+  const proposal = s.completed.findLast(entry => s.definitions.find(definition => definition.id === entry.id)?.protocol === 'proposal');
+  const checked = stage.publication === 'verified'
+    ? s.completed.findLast(entry => s.definitions.find(definition => definition.id === entry.id)?.protocol === 'verify') : null;
+  const description = {issue:s.issue, summary:(work ?? proposal)?.handoff?.summary,
+    checks:(checked?.handoff?.checks ?? []).map(({argv,exitCode}) => ({argv,exitCode}))};
   const intent = await prepareWorkflowPr({ cwd: r.root, runId: s.runId, stageId: stage.id,
-    repository: s.repo, baseBranch: s.base, bodyFile: join(directory, `pr-${stage.id}.md`) }, p.commandPorts);
+    repository: s.repo, baseBranch: s.base, bodyFile: join(directory, `pr-${stage.id}.md`), description }, p.commandPorts);
   if(typeof p.scanWorkflowPublication==='function'){
     let scan;try{scan=await p.scanWorkflowPublication({cwd:r.root,headSha:intent.headSha,stageId:stage.id,runId:s.runId});}catch{scan={verified:false};}
     if(scan?.findings?.length||scan?.verified===false){const warning=scan?.findings?.length?'Needs you: advisory secret scan found possible sensitive content. Review this publication; matched values are redacted.':'Advisory secret scan unavailable; publication input is unverified by that scan.';
@@ -533,8 +574,14 @@ async function reconcile(s, r, directory, options, p, canAdvance) {
       s.pending.backend = structuredClone(seen.backend); s.pending.transport = seen;
       await record(s, directory, 'agent.transport');
     } else {
-      seen = await p.inspectHerdrStage({ backend: s.pending.backend, cwd: r.root }, portOptions);
-      candidateIdentity(s, stage, seen);
+      const inspect=async()=>{
+        const value=await p.inspectHerdrStage({backend:s.pending.backend,cwd:r.root},portOptions);
+        candidateIdentity(s,stage,value);
+        if(canAdvance&&s.pending.handoffWait&&['active','settled','blocked'].includes(value.state))await portOptions.checkpoint(value.backend);
+        return value;
+      };
+      seen=canAdvance&&s.pending.handoffWait?await portOptions.withStageGuard(s.pending.backend,inspect):await inspect();
+      s.pending.transport=structuredClone(seen);
     }
     if(seen.state!=='settled'){await activity(s,directory,p,seen);if(s.quota||seen.quota)return quotaFlow(s,directory,p,seen.quota??{type:'recover',turnKey:s.quota.turnKey});
       if(canAdvance){const recovered=await recoverStage(s,r,directory,options,p,seen);if(recovered)return recovered;}}
@@ -874,6 +921,21 @@ async function recoverStage(s,r,directory,options,p,seen) {
   return result(s,'waiting',found==='found'?'Original native history restored; observe the same attempt.':'Needs you: recovery continuation delivery is uncertain; no resend.');
 }
 
+async function driveHandoffRecovery(s,r,directory,options,p,first) {
+  let outcome=first;
+  while(options.drive&&outcome?.state==='waiting'&&s.pending?.kind==='agent'&&s.pending.handoffWait&&!s.quota&&!s.stall?.alarmed){
+    const wait=s.pending.handoffWait,transport=s.pending.transport;
+    if(transport?.state==='blocked')break;
+    const scheduled=!wait.sent&&wait.retryAt!==null;
+    const observing=wait.sent&&(transport?.state==='active'||transport?.state==='recovery_required'&&s.pending.backend?.phase==='prompt_intent'&&s.pending.backend.handoffRetry);
+    if(!scheduled&&!observing)break;
+    try{await (p.writeRunStatus??writeRunStatus)(directory,runStatusFromState(s,{phase:'exit',now:(p.now??Date.now)(),outcome,controller:s.controller}),p);}catch{}
+    const delay=scheduled?Math.min(1000,Math.max(1,wait.retryAt-(p.now??Date.now)())):1000;
+    await (p.sleep??(ms=>new Promise(resolve=>setTimeout(resolve,ms))))(delay);
+    outcome=await advance(s,r,directory,options,p,'approve',false);
+  }
+  return outcome;
+}
 async function execute(options, ports, resume) {
   const p = dependencies(ports);
   p.pdd ??= (() => { try { const metadata = JSON.parse(readFileSync(join(options?.packageRoot ?? '', 'package.json'), 'utf8')); return { node: p.nodePath ?? process.execPath, bin: join(options?.packageRoot ?? '', 'bin', 'pdd.mjs'), version: metadata.version ?? null }; } catch { return { node: p.nodePath ?? process.execPath, bin: join(options?.packageRoot ?? '', 'bin', 'pdd.mjs'), version: null }; } })();
@@ -952,7 +1014,8 @@ async function execute(options, ports, resume) {
       if(s.p1&&!options.drive&&!s.waitingPerson)return preparedReceipt(s,directory);
       if(s.p1&&s.waitingPerson&&!options.decision){return result(s,'waiting','Waiting for the person; inspection grants no decision.');}
       if(s.quota)return quotaFlow(s,directory,p,{type:s.quotaAdmission?'decide':s.quota.state==='WAIT'?'observe':'recover',turnKey:s.quota.turnKey,...(s.quotaAdmission??{})});
-      const outcome = await advance(s, r, directory, options, p, options.decision ?? (options.drive && !s.waitingPerson?'approve':undefined), false);
+      const first = await advance(s, r, directory, options, p, options.decision ?? (options.drive && !s.waitingPerson?'approve':undefined), false);
+      const outcome=await driveHandoffRecovery(s,r,directory,options,p,first);
       await saveOutcome(s,r,directory,outcome,p);
       try { await (p.writeRunStatus ?? writeRunStatus)(directory, runStatusFromState(s, { phase:'exit', now:Date.now(), outcome }), p); } catch { /* derived output never steers the run */ }
       return outcome;

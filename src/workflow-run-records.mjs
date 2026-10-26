@@ -1,8 +1,9 @@
-// Generated from prompts/cli/workflow-run-records.prompt.md (sha256: f618f87d91da5c3ca531fb6d0349c33729ef44302c84c501051fbfe156e36f6e).
+// Generated from prompts/cli/workflow-run-records.prompt.md (sha256: e508d2b2a8312f0634c8b93254cd69d9f484607b2784f77d0b41fe1c6885de56).
 import * as nodeFs from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
 import {replayWorkflowJournalRecord} from './workflow-journal.mjs';
+import {readKeeperDecision} from './workflow-keeper-log.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RUN_DIR = id => new RegExp(`/(?:pdd/workflows|runs/archive)/${id}$`);
@@ -127,6 +128,13 @@ export async function readRunStatus(runDir, ports = {}) {
     const value = {}; for (const [k,v] of Object.entries(raw)) { if (!statusFields.has(k)) warnings.push(`unknown_field:${k}`); else value[k] = v; }
     value.waitingFor ??= null; if (value.controlState != null && !CONTROL.has(value.controlState)) value.controlState = 'unknown'; if (!KNOWN_STATUS.has(value.state)) value.state = 'unknown';
     if (Array.isArray(value.steps)) value.steps = value.steps.filter(s => { if (!s || typeof s.id !== 'string') { warnings.push('dropped_item:steps'); return false; } if (!STEP_STATES.has(s.state)) s.state = 'unknown'; return true; });
+    if(value.state==='running'){
+      const recovery=await readKeeperDecision({runId:value.runId},ports);
+      if(recovery&&recovery.journalSeq===value.journalSeq&&Number.isFinite(value.updatedAt)&&recovery.at>=value.updatedAt&&['absent','unknown'].includes(recovery.controller)){
+        value.state=recovery.controller==='absent'?'recovery_required':'unknown';
+        value.message=`controller ${recovery.controller==='absent'?'not running':'status unknown'}; recovery: ${recovery.code??recovery.decision}`;
+      }
+    }
     return { value, warnings };
   } catch (e) { return { value: null, warnings: [e?.code === 'ENOENT' ? 'missing' : 'read_failed'] }; }
 }

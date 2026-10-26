@@ -46,7 +46,31 @@ an interrupted or unexpected source change still requires inspection.
 
 ## Prepare before the runner saves intent
 
-`prepareWorkflowPr({cwd,runId,stageId,repository,baseBranch,bodyFile},ports)` returns exactly `{repository,runId,stageId,headBranch,baseBranch,headSha,marker,title,bodyFile}`. Run/stage identifiers are nonempty ASCII letters/digits/dot/underscore/hyphen, at most160 characters, so the marker is unambiguous. Verify repository matches origin, HEAD is a committed named topic branch different from base, the selected remote base ref exists, and at least one committed change is ahead of it. Refuse staged/unstaged changes and unrelated untracked files. The declared PR body file may itself be untracked metadata; never overwrite a tracked file. Refuse a body path with a symlink at the file or any ancestor, a nonregular file, or a multiply linked file; metadata aliases must not redirect body writes into source. Preserve existing regular authored body files, and leave parent creation to the caller. Preserve an existing authored body, use the actual latest commit subject as title, and write one own-line `<!-- pdd-workflow:<runId>:<stageId> -->` marker. An existing different/duplicate workflow marker refuses rather than replacing another intent. Return its absolute body file path. No push or PR write occurs here.
+`prepareWorkflowPr({cwd,runId,stageId,repository,baseBranch,bodyFile,description?},ports)` returns exactly `{repository,runId,stageId,headBranch,baseBranch,headSha,marker,title,bodyFile}`. Run/stage identifiers are nonempty ASCII letters/digits/dot/underscore/hyphen, at most160 characters, so the marker is unambiguous. Verify repository matches origin, HEAD is a committed named topic branch different from base, the selected remote base ref exists, and at least one committed change is ahead of it. Refuse staged/unstaged changes and unrelated untracked files. The declared PR body file may itself be untracked metadata; never overwrite a tracked file. Refuse a body path with a symlink at the file or any ancestor, a nonregular file, or a multiply linked file; metadata aliases must not redirect body writes into source. Preserve existing regular authored body files, and leave parent creation to the caller. Preserve an existing authored body and write one own-line `<!-- pdd-workflow:<runId>:<stageId> -->` marker. An existing different/duplicate workflow marker refuses rather than replacing another intent. Return its absolute body file path. No push or PR write occurs here.
+
+### Issue-facing title and description
+
+When the runner supplies `description:{issue:{number,url,title},summary,checks}`, use
+that saved same-repository issue title, trimmed, as the PR title. Validate its
+positive issue number and canonical issue URL; a malformed supplied description
+refuses before body writes. The title must be nonempty, single-line and at most256
+characters. Never substitute an internal artifact checkpoint subject for this title.
+For compatible callers without description, retain the actual latest commit subject.
+
+Append a deterministic description block to an authored body if it is not already
+present; when no body exists, use that block alone. It contains `Closes #<number>`,
+a short summary from the accepted work handoff (proposal handoff before a work
+stage), and a test result. Collapse summary whitespace and limit it to500 characters
+with an ellipsis when shortened. `checks` is the actual accepted list of
+`{argv,exitCode}`: render each argv as a JSON array and its integer exit status,
+labeling zero PASS and nonzero FAIL. Empty checks says `Not run for this publication.`
+Never invent a pass or publish raw stdout/stderr. Require dense checks and argv
+arrays: an absent element is malformed evidence, not an omitted test or argument.
+Reject malformed checks or a summary containing a workflow marker before changing
+authored text; summary and test text cannot introduce a
+second marker. Preserve authored text and exactly one original hidden marker on
+repeat preparation. These fields describe already accepted evidence; they grant
+no publication authority and add no fields to the saved intent.
 
 ## Advisory secret scan
 

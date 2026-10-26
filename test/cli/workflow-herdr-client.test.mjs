@@ -130,3 +130,92 @@ test('targeted capability proves a new pane with no inventory and refuses wrong 
   assert.equal(await h.herdr.supportsProcessIdentity({session:'default',paneId:'w1:p7'}),false);
  }
 });
+
+test('issue20 C1 Herdr 0.9.1 empty successful pane run acknowledges delivery once without process proof',async()=>{
+ for(const status of [{code:0},{exitCode:0},{}]){
+  const calls=[],command="'/runtime/node' '/runtime/pdd.mjs' workflow drive synthetic-run";
+  const {herdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,env:{PDD_TRACE:''},execFile:async(file,args,options)=>{
+   calls.push({file,args,options});return {...status,stdout:'',stderr:''};
+  },processStartIdentity:()=>assert.fail('delivery is not process proof')});
+  assert.deepEqual(await herdr.paneRun({session:'default',paneId:'w1:p7',command}),{});
+  assert.equal(calls.length,1);assert.equal(calls[0].file,process.execPath);
+  assert.deepEqual(calls[0].args,['--session','default','pane','run','w1:p7',command]);assert.equal(calls[0].options.shell,false);
+ }
+});
+
+test('issue20 C1 empty success never substitutes for read or creation reply bindings',async()=>{
+ for(const request of [h=>h.listWorkspaces({session:'default'}),h=>h.createWorkspace({session:'default',cwd:'/synthetic'}),h=>h.createTab({session:'default',workspaceId:'w1',cwd:'/synthetic',label:'synthetic'}),h=>h.processInfo({session:'default',paneId:'w1:p7'})]){
+  let calls=0;const {herdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,env:{PDD_TRACE:''},execFile:async()=>{calls++;return {code:0,stdout:''};}});
+  await assert.rejects(request(herdr));assert.equal(calls,1);
+ }
+});
+
+test('issue20 C1 only exactly empty successful pane run bypasses JSON validation without retry',async()=>{
+ const responses=[{code:1,stdout:''},{exitCode:1,stdout:''},{code:0,stdout:'\n'},{code:0,stdout:'synthetic-private-reply'},{code:0,stdout:'{"error":{"message":"synthetic-private-reply"}}'},{code:0},{code:0,stdout:null}];
+ for(const response of responses){
+  let calls=0;const {herdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,env:{PDD_TRACE:''},execFile:async()=>{calls++;return response;}});
+  await assert.rejects(herdr.paneRun({session:'default',paneId:'w1:p7',command:'only once'}),e=>e.code==='herdr_command_uncertain'&&e.message==='herdr_command_uncertain');assert.equal(calls,1);
+ }
+});
+
+// Synthetic counterpart of issue21: a drive group leader and its child are
+// returned together. Operational paths, process IDs and UUIDs are not fixtures.
+const issue21Drive=['/runtime/node','/runtime/pdd.mjs','workflow','drive','123e4567-e89b-42d3-a456-426614174000','--launch-id','223e4567-e89b-42d3-a456-426614174000'];
+const issue21Group=(overrides={})=>processInfo({foreground_process_group_id:123,foreground_processes:[{pid:123,name:'node',argv:[...issue21Drive]},{pid:456}],...overrides});
+
+test('issue21 C10 selects the foreground group leader with child members, preserving full drive binding',async()=>{
+ for(const order of ['leader-first','child-first','child-exits']){
+  const seen=[];const f=fixture({processStartIdentity:async({pid})=>{seen.push(pid);return `linux:${boot}:987`;}});
+  const original=f.ports.execFile;let reads=0;
+  f.ports.execFile=async(...args)=>{
+   const rows=issue21Group();if(order==='child-first')rows.foreground_processes.reverse();
+   if(order==='child-exits'&&reads>0)rows.foreground_processes.pop();
+   f.setInfo(rows);reads++;return original(...args);
+  };
+  const {herdr}=await createWorkflowHerdrPorts(f.ports),proof=await herdr.processInfo({session:'default',paneId:'w1:p7'});
+  assert.deepEqual(proof,{pid:123,startIdentity:`linux:${boot}:987`,paneId:'w1:p7',executable:'/runtime/node',argv:issue21Drive});
+  assert.deepEqual(seen,[123,123]);assert.equal(f.calls.length,2);
+  assert.ok(f.calls.every(c=>c.args[3]==='process-info'));
+ }
+});
+
+test('issue21 C10 never substitutes a child or process name for an unusable or ambiguous group leader',async()=>{
+ const leader={pid:123,name:'node',argv:issue21Drive},child={pid:456,name:'node',argv:issue21Drive};
+ const invalid=[
+  issue21Group({foreground_process_group_id:999}),
+  issue21Group({foreground_processes:[child]}),
+  issue21Group({foreground_processes:[leader,{...leader},child]}),
+  issue21Group({foreground_processes:[{pid:123},child]}),
+  issue21Group({foreground_processes:[{...leader,argv:['relative-node']},child]}),
+  issue21Group({foreground_processes:[{...leader,argv:['/runtime/node','bad\0arg']},child]}),
+  ...[null,0,-1,1.5,'123'].map(foreground_process_group_id=>issue21Group({foreground_process_group_id,foreground_processes:[leader]})),
+  processInfo({foreground_processes:[leader,child]})
+ ];
+ for(const row of invalid){
+  const f=fixture({processStartIdentity:()=>assert.fail('invalid leader cannot reach OS proof')});f.setInfo(row);
+  const {herdr}=await createWorkflowHerdrPorts(f.ports);
+  await assert.rejects(herdr.processInfo({session:'default',paneId:'w1:p7'}),{code:'process_unproved'});assert.equal(f.calls.length,1);
+ }
+});
+
+test('issue21 C10 repeated leader selection refuses changed group, PID, argv, OS identity and executable',async()=>{
+ for(const mode of ['group','missing-leader','duplicate-leader','argv','launch-id','start','executable','pane']){
+  let identities=0;const f=fixture({processStartIdentity:async()=>mode==='start'?String(++identities):'boot:start'}),original=f.ports.execFile;
+  if(mode==='executable')f.ports.fs=os({realpath:async p=>p.startsWith('/proc/')?'/other/node':'/physical/node'});
+  let reads=0;f.ports.execFile=async(...args)=>{
+   const row=issue21Group();
+   if(reads++){
+    if(mode==='group'){row.foreground_process_group_id=456;row.foreground_processes[1].argv=issue21Drive;}
+    if(mode==='missing-leader')row.foreground_processes.shift();
+    if(mode==='duplicate-leader')row.foreground_processes.push({...row.foreground_processes[0]});
+    if(mode==='argv')row.foreground_processes[0].argv.push('--other');
+    if(mode==='launch-id')row.foreground_processes[0].argv[6]='323e4567-e89b-42d3-a456-426614174000';
+    if(mode==='pane')row.pane_id='w1:p8';
+   }
+   f.setInfo(row);return original(...args);
+  };
+  const {herdr}=await createWorkflowHerdrPorts(f.ports);
+  await assert.rejects(herdr.processInfo({session:'default',paneId:'w1:p7'}),{code:'process_unproved'});
+  assert.equal(f.calls.length,mode==='executable'?1:2);assert.ok(f.calls.every(c=>c.args[3]==='process-info'));
+ }
+});

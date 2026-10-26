@@ -6,14 +6,14 @@ import {promisify} from 'node:util';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {runHerdrStage,inspectHerdrStage,closeHerdrStage,attachHerdrStage,resumeHerdrStage} from '../src/workflow-stage-herdr.mjs';
+import {runHerdrStage,inspectHerdrStage,closeHerdrStage,attachHerdrStage,resumeHerdrStage,readSettledHerdrStageError,retrySettledHerdrStage} from '../src/workflow-stage-herdr.mjs';
 import vectors from '../vectors/cli/workflow-stage-herdr.json' with {type:'json'};
 import {readHerdrTrace} from '../src/herdr-trace.mjs';
 const nativeId='11111111-2222-4333-8444-555555555555';
 async function harness(t,options={}) {
   const cwd=await realpath(await mkdtemp(join(tmpdir(),'pdd-stage-')));t.after(()=>rm(cwd,{recursive:true,force:true}));
-  const calls=[],checkpoints=[],runId=randomUUID(),attemptId=randomUUID();let started=false,prompted=false,closed=false,seq=1,name,clock=0;
-  const agent=(status=prompted?'done':'idle',n=prompted?3:1)=>({workspace_id:'w1',tab_id:'w1:t1',pane_id:'w1:p2',terminal_id:'term2',name,agent:'codex',cwd,agent_status:status,state_change_seq:n,interactive_ready:['idle','done'].includes(status),launch_pending:false,agent_session:options.noNative?null:{kind:'id',value:nativeId,agent:'codex'}});
+  const calls=[],checkpoints=[],runId=randomUUID(),attemptId=randomUUID(),tool=options.agent??'codex';let started=false,prompted=false,closed=false,seq=1,name,clock=0;
+  const agent=(status=prompted?'done':'idle',n=prompted?3:1)=>({workspace_id:'w1',tab_id:'w1:t1',pane_id:'w1:p2',terminal_id:'term2',name,agent:tool,cwd,agent_status:status,state_change_seq:n,interactive_ready:['idle','done'].includes(status),launch_pending:false,agent_session:options.noNative?null:{kind:'id',value:nativeId,agent:tool}});
   const encode=value=>({stdout:JSON.stringify(value)});
   const ports={herdrExecutable:process.execPath,controller:{herdrSession:'default',workspaceId:'w1',tabId:'w1:t1',paneId:'w1:p1'},withStageGuard:async(b,action)=>{calls.push(['guard']);return action();},now:()=>clock,sleep:async ms=>{clock+=ms;},pollMs:1,observeMs:5,startupMs:30,
     processStartIdentity:async()=>options.noProof?null:'start-1',claimWorkflowSession:async()=>({state:'owned',release:async()=>{}}),promoteWorkflowClaim:async({claim})=>claim,
@@ -21,7 +21,8 @@ async function harness(t,options={}) {
       assert.equal(file,process.execPath);assert.equal(argv[1],'default');assert.equal(opts.cwd,cwd);assert.equal(opts.shell,false);assert.equal(opts.env,ports.env);
       const args=argv.slice(2);calls.push(args);
       if(args[0]==='pane'&&args[1]==='split')return encode({result:{pane:{workspace_id:'w1',tab_id:'w1:t1',pane_id:'w1:p2',terminal_id:'term2'}}});
-      if(args[0]==='pane'&&args[1]==='process-info')return encode({result:{process_info:{pane_id:'w1:p2',foreground_processes:[{pid:123,name:'codex',cwd,argv:['codex']}]}}});
+      if(args[0]==='pane'&&args[1]==='process-info')return encode({result:{process_info:{pane_id:'w1:p2',foreground_processes:[{pid:123,name:tool,cwd,argv:[tool]}]}}});
+      if(args[0]==='pane'&&args[1]==='read'){assert.deepEqual(args,['pane','read','w1:p2','--source','visible','--format','text']);return encode({result:{read:{pane_id:'w1:p2',workspace_id:'w1',tab_id:'w1:t1',text:options.screen??'',...options.readReply}}});}
       if(args[0]==='agent'&&args[1]==='start') {name=args[2];started=true;if(options.startLost)throw Error('lost');if(options.blocked)throw Object.assign(Error('blocked'),{stderr:JSON.stringify({error:{code:'agent_not_ready'}})});return encode({result:{agent:agent()}});}
       if(args[0]==='agent'&&args[1]==='get') {
         assert.ok(started);let a=options.blocked?{...agent('blocked',1),launch_pending:true}:!prompted?agent():options.working?agent('working',++seq):options.idle?agent('idle',1):seq++===1?agent('working',2):agent('done',3);
@@ -36,7 +37,7 @@ async function harness(t,options={}) {
       if(args[0]==='pane'&&args[1]==='list')return encode({result:{type:'pane_list',panes:[{pane_id:'w1:p1'},{pane_id:'person'},...(options.closeRemains?[{pane_id:'w1:p2'}]:[])]}});
       assert.fail(JSON.stringify(args));
     },spawnAttach:async(session,agentName,path)=>{calls.push(['attach',session,agentName,path]);return 0;}};
-  const input={runId,attemptId,stageId:'check',agent:'codex',cwd,context:'# Entire guide\nActual selected recipe',instructions:'literal $(not shell)',launchSelection:null,checkpoint:async b=>{checkpoints.push(structuredClone(b));if(options.checkpointFails===b.phase)throw Error('fsync failed');}};
+  const input={runId,attemptId,stageId:'check',agent:tool,cwd,context:'# Entire guide\nActual selected recipe',instructions:'literal $(not shell)',launchSelection:null,checkpoint:async b=>{checkpoints.push(structuredClone(b));if(options.checkpointFails===b.phase)throw Error('fsync failed');}};
   return {input,ports,calls,checkpoints,options,closed:()=>closed};
 }
 const acceptance=b=>({runId:b.runId,stageId:b.stageId,attemptId:b.attemptId,promptDigest:b.promptDigest,terminalId:b.terminalId,backendGen:b.backendGen,evidenceDigest:'a'.repeat(64)});
@@ -262,10 +263,11 @@ test('ENOENT with a still executable selected file retains command uncertainty',
  assert.equal(result.reason,'herdr_command_uncertain');assert.equal(result.message,undefined);assert.deepEqual(result.backend,backend);assert.equal(attempts,1);
 });
 for(const removeDuringInspection of [true,false])test(`legacy stage retains first absolute selection across inspection and attachment, removeDuringInspection=${removeDuringInspection}`,async t=>{
- const h=await harness(t),backend=inspectionBackend(h.input.cwd),one=join(h.input.cwd,'one'),two=join(h.input.cwd,'two'),chosen=[];
+ const h=await harness(t),backend=inspectionBackend(h.input.cwd),one=join(h.input.cwd,'one'),two=join(h.input.cwd,'two'),chosen=[],screenCalls=[];
  for(const dir of [one,two]){await mkdir(dir);await writeFile(join(dir,'herdr'),'#!/bin/sh\nexit 99\n',{mode:0o700});}
  backend.processProof={pid:789,startIdentity:'stable-start',paneId:backend.paneId,terminalId:backend.terminalId,backendGen:1};
  const ports={env:{PATH:`${one}:${two}`},withStageGuard:async(_,action)=>action(),processStartIdentity:async()=> 'stable-start',execFile:async(file,args)=>{
+  if(args[2]==='pane'&&args[3]==='read'){screenCalls.push(file);assert.equal(file,join(one,'herdr'));assert.deepEqual(args.slice(2),['pane','read',backend.paneId,'--source','visible','--format','text']);return {stdout:JSON.stringify({result:{read:{pane_id:backend.paneId,text:''}}})};}
   chosen.push(file);
   if(args[2]==='agent'){
    if(removeDuringInspection)await unlink(join(one,'herdr'));
@@ -279,6 +281,7 @@ for(const removeDuringInspection of [true,false])test(`legacy stage retains firs
  const before=chosen.length,again=await inspectHerdrStage({backend},ports);
  assert.equal(again.reason,'herdr_not_found');assert.equal(again.message,`Herdr not found at ${join(one,'herdr')}`);assert.deepEqual(again.backend,backend);
  assert.equal(await attachHerdrStage({backend},ports),1);assert.equal(chosen.length,before);
+ assert.equal(screenCalls.length,removeDuringInspection?0:1);
 });
 
 
@@ -340,4 +343,155 @@ for(const changed of ['leader','start'])test(`npm stage refuses changed ${change
   assert.equal(r.state,'recovery_required');assert.equal(r.reason,'stage_process_changed');
   assert.equal(r.backend.processProof.pid,4101);assert.equal(r.backend.processProof.startIdentity,'stable-start');
   assert.equal(count(h,'agent','prompt'),0);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+});
+
+const loginMenu={codex:'\x1b[1m> 1. Sign in with ChatGPT\x1b[0m\n  2. Sign in with Device Code\n  3. Provide your own API key',claude:'❯ 1. Claude account with subscription\n  2. Anthropic Console account'};
+for(const tool of ['codex','claude'])for(const blocked of [true,false])test(`issue20 C5 ${tool} sign-in menu blocks ${blocked?'startup refusal':'apparently ready agent'} without prompt or replacement`,async t=>{
+  const h=await harness(t,{agent:tool,blocked,screen:loginMenu[tool]}),first=await runHerdrStage(h.input,h.ports);
+  assert.equal(first.state,'blocked');assert.equal(first.code,'agent_sign_in_required');assert.equal(first.reason,'agent is waiting for sign-in');assert.match(first.message,/Attach to the original stage/);
+  assert.equal(first.backend.nativeSession.value,nativeId);assert.equal(first.backend.backendGen,1);assert.equal(first.backend.phase,'start_intent');assert.equal(first.evidence.settledSeq,undefined);
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),0);assert.equal(count(h,'pane','close'),0);
+  h.options.blocked=false;h.options.screen='';const next=await runHerdrStage({...h.input,backend:first.backend},h.ports);
+  assert.equal(next.state,'settled',next.reason);assert.equal(next.backend.attemptId,first.backend.attemptId);assert.equal(next.backend.nativeSession.value,nativeId);
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);
+});
+
+for(const lostPrompt of [false,true])test(`issue20 C5 watcher preserves ${lostPrompt?'uncertain prompt intent':'submitted phase'} and never resends on a sign-in screen`,async t=>{
+  const h=await harness(t,{lostPrompt});const exec=h.ports.execFile;
+  h.ports.execFile=async(...args)=>{if(args[1][2]==='agent'&&args[1][3]==='prompt')h.options.screen=loginMenu.codex;return exec(...args);};
+  const first=await runHerdrStage(h.input,h.ports),phase=lostPrompt?'prompt_intent':'submitted';
+  const seen=await inspectHerdrStage({backend:first.backend},h.ports);
+  assert.equal(seen.state,'blocked');assert.equal(seen.reason,'agent is waiting for sign-in');assert.equal(seen.backend.phase,phase);assert.equal(seen.backend.attemptId,first.backend.attemptId);
+  assert.equal(seen.evidence.settledSeq,undefined);assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+  assert.equal((await runHerdrStage({...h.input,backend:seen.backend},h.ports)).state,'blocked');assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);
+});
+
+test('issue20 C5 new sign-in screen immediately before first prompt retains ready proof without delivery',async t=>{
+  const h=await harness(t);let reads=0;const exec=h.ports.execFile;
+  h.ports.execFile=async(...args)=>{if(args[1][2]==='pane'&&args[1][3]==='read'&&++reads===2)h.options.screen=loginMenu.codex;return exec(...args);};
+  const result=await runHerdrStage(h.input,h.ports);
+  assert.equal(result.state,'blocked');assert.equal(result.backend.phase,'ready');assert.equal(result.backend.processProof.startIdentity,'start-1');assert.equal(count(h,'agent','prompt'),0);assert.equal(count(h,'agent','start'),1);
+  h.ports.processStartIdentity=async()=> 'replacement-start';
+  const changed=await runHerdrStage({...h.input,backend:result.backend},h.ports);
+  assert.equal(changed.state,'recovery_required');assert.equal(changed.reason,'stage_process_changed');assert.equal(count(h,'agent','prompt'),0);assert.equal(count(h,'agent','start'),1);
+});
+
+for(const changed of ['native','process'])test(`issue20 C5 sign-in menu cannot mask changed ${changed} identity`,async t=>{
+  const h=await harness(t,{working:true}),first=await runHerdrStage(h.input,h.ports);h.options.screen=loginMenu.codex;
+  if(changed==='native')h.options.replaced=true;else h.ports.processStartIdentity=async()=> 'replacement-start';
+  const reads=count(h,'pane','read'),seen=await inspectHerdrStage({backend:first.backend},h.ports);
+  assert.equal(seen.state,'recovery_required');assert.equal(seen.reason,changed==='native'?'native_identity_changed':'stage_process_changed');assert.equal(count(h,'pane','read'),reads);
+  assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+});
+
+for(const scenario of [
+  {name:'quoted prose',screen:'The guide says "1. Sign in with ChatGPT" if you need access.'},
+  {name:'unnumbered prose',screen:'Sign in with ChatGPT to use the native CLI.'},
+  {name:'wrong pane',screen:loginMenu.codex,readReply:{pane_id:'w1:p9'}},
+  {name:'wrong workspace',screen:loginMenu.codex,readReply:{workspace_id:'w9'}},
+  {name:'oversized screen',screen:loginMenu.codex+'\n'+'x'.repeat(65536)},
+  {name:'malformed screen',readReply:{text:null}}
+])test(`issue20 C5 ${scenario.name} cannot manufacture sign-in evidence or replace lifecycle proof`,async t=>{
+  const h=await harness(t,scenario),result=await runHerdrStage(h.input,h.ports);
+  assert.equal(result.state,'settled',result.reason);assert.equal(result.backend.processProof.startIdentity,'start-1');assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);
+});
+
+test('issue20 C5 unreadable screen remains unknown with existing strict proof and no extra native effect',async t=>{
+  const h=await harness(t),exec=h.ports.execFile;
+  h.ports.execFile=async(...args)=>{if(args[1][2]==='pane'&&args[1][3]==='read')throw Object.assign(Error('synthetic private screen failure'),{code:'ECONNRESET'});return exec(...args);};
+  const result=await runHerdrStage(h.input,h.ports);assert.equal(result.state,'settled',result.reason);assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);assert.doesNotMatch(JSON.stringify(result),/synthetic private/);
+});
+
+test('issue20 C5 screen read preserves known missing executable path without fallback or repeat',async t=>{
+  const h=await harness(t),exec=h.ports.execFile;
+  h.ports.execFile=async(...args)=>{if(args[1][2]==='pane'&&args[1][3]==='read')throw Object.assign(Error('Herdr not found at /synthetic/selected-herdr'),{code:'herdr_not_found'});return exec(...args);};
+  const result=await runHerdrStage(h.input,h.ports);assert.equal(result.state,'recovery_required');assert.equal(result.reason,'herdr_not_found');assert.equal(result.message,'Herdr not found at /synthetic/selected-herdr');assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),0);
+});
+
+test('issue20 C5 sign-in during proved history resume preserves new generation and never sends original prompt again',async t=>{
+  const h=await harness(t),first=await runHerdrStage(h.input,h.ports);h.options.screen=loginMenu.codex;
+  const resumeIntent={runId:first.backend.runId,stageId:first.backend.stageId,attemptId:first.backend.attemptId,oldGeneration:1,newGeneration:2,nativeSession:first.backend.nativeSession,launchSelection:null,stoppedProof:{complete:true}};
+  const resumed=await resumeHerdrStage({backend:first.backend,resumeIntent,checkpoint:h.input.checkpoint},{...h.ports,verifyStoppedStage:async()=>true,admitStageResume:async()=>({allowed:true})});
+  assert.equal(resumed.state,'blocked');assert.equal(resumed.reason,'agent is waiting for sign-in');assert.equal(resumed.backend.backendGen,2);assert.equal(resumed.backend.phase,'resume_intent');assert.equal(resumed.backend.nativeSession.value,nativeId);
+  assert.equal(count(h,'agent','start'),2);assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'pane','close'),0);
+});
+
+test('issue20 C5 sign-in screen text never enters trace, checkpoint or public result and precedes idle alarm',async t=>{
+  const h=await harness(t,{working:true}),first=await runHerdrStage(h.input,h.ports),privateText='SYNTHETIC_SCREEN_MUST_STAY_LOCAL';h.options.screen=loginMenu.codex+'\n'+privateText;
+  h.ports.home=h.input.cwd;h.ports.env={PDD_TRACE:'herdr'};h.ports.onStageObservation=()=>assert.fail('sign-in wins over the idle alarm');
+  const seen=await inspectHerdrStage({backend:first.backend},h.ports);
+  assert.equal(seen.state,'blocked');assert.equal(seen.reason,'agent is waiting for sign-in');
+  assert.doesNotMatch(JSON.stringify({seen,checkpoints:h.checkpoints,trace:readHerdrTrace({home:h.input.cwd})}),new RegExp(privateText));
+  assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'pane','close'),0);
+});
+
+for(const agent of ['codex','claude'])for(const quote of ['backticks','quoted tildes','unclosed example'])test(`R1-C5-B1 ${agent} ${quote} login documentation preserves working stage without human block`,async t=>{
+  const h=await harness(t,{agent,working:true}),first=await runHerdrStage(h.input,h.ports),label=agent==='codex'?'Sign in with ChatGPT':'Claude account with subscription';
+  assert.equal(first.state,'active');
+  h.options.screen=quote==='backticks'?`Example login guidance (quoted documentation):\n\`\`\`text\n1. ${label}\n\`\`\`\nThis is an example, not a sign-in request.`
+    :quote==='quoted tildes'?`Example login guidance:\n> ~~~~text\n> 1. ${label}\n> ~~~\n> 2. ${label}\n> ~~~~\nExample ended.`
+    :`Example login guidance:\n\`\`\`\`text\n1. ${label}\n~~~\n2. ${label}`;
+  const seen=await inspectHerdrStage({backend:first.backend},h.ports);
+  assert.equal(seen.state,'active',seen.reason);assert.equal(seen.code,undefined);assert.equal(seen.reason,undefined);assert.equal(seen.backend.phase,first.backend.phase);assert.equal(seen.backend.attemptId,first.backend.attemptId);assert.deepEqual(seen.backend.processProof,first.backend.processProof);
+  assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+  assert.ok(!JSON.stringify({seen,checkpoints:h.checkpoints}).includes(h.options.screen));
+});
+
+for(const agent of ['codex','claude'])test(`R1-C5-B1 ${agent} real menu after closed quoted guidance still blocks original without resend`,async t=>{
+  const h=await harness(t,{agent,working:true}),first=await runHerdrStage(h.input,h.ports);
+  h.options.screen='Example only:\n```text\n'+loginMenu[agent]+'\n```\n\n'+loginMenu[agent];
+  const seen=await inspectHerdrStage({backend:first.backend},h.ports);
+  assert.equal(seen.state,'blocked');assert.equal(seen.code,'agent_sign_in_required');assert.equal(seen.reason,'agent is waiting for sign-in');assert.equal(seen.backend.phase,first.backend.phase);assert.equal(seen.backend.attemptId,first.backend.attemptId);
+  assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+});
+
+
+for(const [text,code] of [['exceeded retry limit, last status: 429 Too Many Requests','busy_429'],['model capacity exceeded','capacity'],['quota exceeded','quota'],['done with no report','unknown']])test(`C13 settled pane diagnostic classifies ${code} without retaining text`,async t=>{
+  const h=await harness(t),first=await runHerdrStage(h.input,h.ports),exec=h.ports.execFile;
+  h.ports.execFile=async(file,args,opts)=>args[2]==='pane'&&args[3]==='read'?{stdout:JSON.stringify({result:{read:{pane_id:first.backend.paneId,text}}})}:exec(file,args,opts);
+  const found=await readSettledHerdrStageError({backend:first.backend},{...h.ports,checkpoint:h.input.checkpoint});assert.deepEqual(found,{code});
+  assert.equal(count(h,'agent','prompt'),1);
+});
+test('C13 settled continuation is durable before one send and lost acknowledgement never resends',async t=>{
+  const h=await harness(t),first=await runHerdrStage(h.input,h.ports),exec=h.ports.execFile;let retries=0;
+  h.ports.execFile=async(file,args,opts)=>{
+    if(args[2]==='agent'&&args[3]==='prompt'){retries++;assert.equal(h.checkpoints.at(-1).handoffRetry.settledSeq,3);assert.equal(h.checkpoints.at(-1).phase,'prompt_intent');assert.notEqual(args[5],h.input.instructions);throw Error('lost');}
+    return exec(file,args,opts);
+  };
+  const ports={...h.ports,checkpoint:h.input.checkpoint};
+  const next=await retrySettledHerdrStage({backend:first.backend,settledSeq:3},ports);assert.equal(next.state,'recovery_required');assert.equal(next.backend.phase,'prompt_intent');assert.equal(retries,1);
+  await retrySettledHerdrStage({backend:next.backend,settledSeq:3},ports);assert.equal(retries,1);assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'pane','close'),0);
+});
+for(const fault of ['checkpoint','process','sequence'])test(`C13 continuation refuses ${fault} before delivery`,async t=>{
+  const h=await harness(t),first=await runHerdrStage(h.input,h.ports);const ports={...h.ports,checkpoint:h.input.checkpoint};
+  if(fault==='checkpoint')ports.checkpoint=async()=>{throw Error('disk');};
+  if(fault==='process')ports.processStartIdentity=async()=>'different';
+  if(fault==='sequence')h.options.later=true;
+  const next=await retrySettledHerdrStage({backend:first.backend,settledSeq:3},ports);assert.equal(next.state,'recovery_required');assert.equal(count(h,'agent','prompt'),1);
+});
+
+test('C13 successful continuation preserves identity and requires a fresh working-to-settled sequence',async t=>{
+  const h=await harness(t),first=await runHerdrStage(h.input,h.ports),exec=h.ports.execFile;let retrying=false,delivered=0;
+  h.ports.execFile=async(file,args,opts)=>{
+    if(args[2]==='agent'&&args[3]==='prompt'){
+      delivered++;retrying=true;
+      const reply=JSON.parse((await exec(file,['--session','default','agent','get',first.backend.agentName],opts)).stdout);
+      reply.result.agent.agent_status='working';reply.result.agent.state_change_seq=4;reply.result.agent.interactive_ready=false;
+      return {stdout:JSON.stringify(reply)};
+    }
+    const reply=await exec(file,args,opts);
+    if(retrying&&args[2]==='agent'&&args[3]==='get'){const data=JSON.parse(reply.stdout);data.result.agent.state_change_seq=5;return {stdout:JSON.stringify(data)};}
+    return reply;
+  };
+  const ports={...h.ports,checkpoint:h.input.checkpoint};
+  const next=await retrySettledHerdrStage({backend:first.backend,settledSeq:3},ports);assert.equal(next.state,'active',next.reason);
+  assert.deepEqual(next.backend.nativeSession,first.backend.nativeSession);assert.deepEqual(next.backend.processProof,first.backend.processProof);assert.equal(next.backend.promptDigest,first.backend.promptDigest);
+  const settled=await inspectHerdrStage({backend:next.backend},ports);assert.equal(settled.state,'settled',settled.reason);assert.deepEqual(settled.evidence,{readySeq:3,workingSeq:4,settledSeq:5});
+  await retrySettledHerdrStage({backend:settled.backend,settledSeq:3},ports);assert.equal(delivered,1);assert.equal(count(h,'agent','start'),1);
+});
+
+
+test('C13 continuation needs the saved process proof, not only a fresh matching process',async t=>{
+  const h=await harness(t),first=await runHerdrStage(h.input,h.ports);delete first.backend.processProof;
+  const next=await retrySettledHerdrStage({backend:first.backend,settledSeq:3},{...h.ports,checkpoint:h.input.checkpoint});assert.equal(next.state,'recovery_required');assert.equal(count(h,'agent','prompt'),1);
 });

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: e68ad97a232e63bf03903be3cd8d05f3ddcccf9c3f1fa3ec64ff0b3a7cf4db2c).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: d21d89ec6473283fa677718a9b4118bf0349c0adc4951fb85569562bcc92669f).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
@@ -117,8 +117,21 @@ async function prove(intent,p){
     }
     const stopped=process?.stopped===true&&process.pid===proof?.pid&&process.startIdentity===proof?.startIdentity&&process.paneId===intent.paneId;
     const humanWait=journal?.state.controlState==='waiting_person';
+    let exitEvidence;
+    if(bound&&!stopped&&!humanWait&&typeof p.herdr.inspectProcessExit==='function'){
+      let exitTimer;
+      const observed=await Promise.race([
+        Promise.resolve().then(()=>p.herdr.inspectProcessExit({session:'default',paneId:intent.paneId,pid:proof.pid,startIdentity:proof.startIdentity})).then(value=>({value}),error=>({error})),
+        new Promise(resolve=>{exitTimer=setTimeout(()=>resolve(null),Math.max(0,deadline-now()));})
+      ]).finally(()=>clearTimeout(exitTimer));
+      if(!observed||now()>deadline)return pending;
+      if(observed.error?.code==='herdr_not_found')return {...result('uncertain','herdr_not_found',intent),message:observed.error.message};
+      const value=observed.value;
+      if(value?.exited===true&&value.pid===proof.pid&&value.startIdentity===proof.startIdentity&&value.paneId===intent.paneId&&['pid_gone','identity_changed','pane_shell'].includes(value.reason))exitEvidence=value;
+    }
+    const exited=stopped||exitEvidence!==undefined;
     let lifetimeLock;
-    if(bound&&(stopped||humanWait)){
+    if(bound&&(exited||humanWait)){
       let lockTimer;
       lifetimeLock=await Promise.race([
         Promise.resolve().then(()=>p.inspectControllerLock(intent)).catch(()=> 'unknown'),
@@ -126,9 +139,9 @@ async function prove(intent,p){
       ]).finally(()=>clearTimeout(lockTimer));
       if(now()>deadline)return pending;
     }
-    if(bound&&(stopped||humanWait)&&lifetimeLock==='free'){
+    if(bound&&(exited||humanWait)&&lifetimeLock==='free'){
       if(now()>deadline)return pending;
-      intent={...intent,phase:'exited',step:intent.step+1,exitedProof:{process,controller:proof,journalSeq:journal.seq,humanWait}};
+      intent={...intent,phase:'exited',step:intent.step+1,exitedProof:{process,controller:proof,journalSeq:journal.seq,humanWait,...(exitEvidence?{exitEvidence}:{})}};
       try{await save(intent,p);}catch{return pendingProof(intent,'proof_not_durable');}
       return result('uncertain','controller_exited',intent);
     }
@@ -159,7 +172,8 @@ export async function startWorkflowController(spec,ports={}){
       if(prior.runId!==spec.runId||prior.root!==spec.root||!isDeepStrictEqual(prior.runtime,spec.runtime))return result('refused','launch_binding_conflict',prior);
       if(prior.phase==='herdr.identity_unavailable')return identityRefusal(prior);
       const reconciled=await prove(prior,ports),sameDecision=isDeepStrictEqual(prior.decision,spec.decision);
-      if(reconciled.code!=='controller_exited'||sameDecision)return !sameDecision&&reconciled.state==='started'?result('refused','controller_busy',reconciled.controller):reconciled;
+      const recoveredExit=reconciled.controller?.exitedProof?.exitEvidence&&!reconciled.controller.exitedProof.humanWait;
+      if(reconciled.code!=='controller_exited'||sameDecision&&!recoveredExit)return !sameDecision&&reconciled.state==='started'?result('refused','controller_busy',reconciled.controller):reconciled;
       // The prior proof is now durably exited. A new decision still passes all
       // existing current-state, assignment, revision and lifetime-lock checks.
       prior=reconciled.controller;
