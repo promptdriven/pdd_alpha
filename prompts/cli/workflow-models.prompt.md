@@ -52,7 +52,11 @@ universal effort enum or source-machine catalog may stand in for target evidence
 The returned catalog is `{machineId,agent,cliVersion,revision,models,defaults}`.
 Each model is `{id,label,efforts:[string],defaultEffort:string|null}`. Model ids
 and effort strings are native values, not display labels. A model with no exposed
-effort control has efforts:[] and defaultEffort:null. Defaults is the per-tool
+effort control has efforts:[] and defaultEffort:null. For Claude, when the
+native capability reply lists accepted efforts but supplies no explicit default,
+defaultEffort:null means omit --effort and let that CLI select its default; it
+is not permission to accept an unlisted explicit effort. Codex retains its
+required observed default-effort evidence. Defaults is the per-tool
 Settings pair `{model,effort}`; when unset, use the installed CLI's observed default
 pair. A missing observed default makes default resolution unavailable. Catalog
 revision binds machine, CLI version and current plan/capability observations.
@@ -97,7 +101,7 @@ observations through the same shape. No runtime endpoint is defined here.
 
 ## Local executable composition
 
-Export `createLocalWorkflowModelPorts({machineId,cwd,settings?,executable?,env?,timeoutMs?})`
+Export `createLocalWorkflowModelPorts({machineId,cwd,settings?,executable?,claudeExecutable?,env?,timeoutMs?})`
 as the public local adapter factory. Construction has no effects. The returned
 nativeCatalog rejects a different machine. For Codex, invoke the installed
 `codex --version` and `codex app-server` stdio protocol: initialize with clientInfo
@@ -112,8 +116,43 @@ account/login, config mutation or credential-file operation is permitted.
 
 Bound the probe to 10 seconds by default, 16 model pages and 2 MiB of protocol
 output; stop only the owned probe process on completion/failure. Suppress raw
-stderr/protocol errors. Claude remains unavailable without an explicit verified
-nativeCatalog supplied by the consumer; do not manufacture its capabilities.
+stderr/protocol errors. Preserve explicit executable overrides; without one,
+select codex for Codex and claudeExecutable (default claude) for Claude.
+
+For Claude, require a native `--version` reply of `VERSION (Claude Code)`.
+Start only an owned discovery process with --print --verbose, stream-json input
+and output, --no-session-persistence, --safe-mode, --permission-mode dontAsk,
+--tools with an empty argument, --strict-mcp-config and an empty mcpServers
+object. These disable customization/hooks and external tools while retaining
+native account/model capability discovery. Unsupported discovery flags refuse;
+never silently fall back to an interactive/model turn. Send exactly one SDK
+control_request with a unique request_id and request subtype initialize, empty
+hooks. Never send a user message, prompt, permission response, login command,
+set-model mutation or paid turn. No stock credential-file access by PDD.
+
+Accept only the matching successful control_response's response object, whose
+claude_code_version equals the version probe. Project models from native fields
+value, displayName, supportsEffort and supportedEffortLevels. A hidden row remains
+hidden; absent hidden means the native supported-model list exposes it. Require
+supportsEffort true to have a nonempty unique native effort array; false requires
+no listed efforts. Missing or contradictory metadata refuses, never substitutes
+help examples or a universal list. Ignore descriptions/account/provider output;
+it cannot become logs or catalog authority. Use explicit defaultEffort only when
+it is among that model's native efforts; otherwise missing/null selects omission.
+Choose the uniquely exposed native default alias (value=default) or an explicit
+isDefault row; conflicting or absent defaults refuse strict discovery. Do not
+hard-code any concrete model ID. Settings still overrides native defaults through
+the existing port and receives the same strict validation. Bind the catalog
+revision to machine, tool, CLI version and projected capability observations,
+including native resolvedModel when present so an alias change changes revision.
+Do not expose unrelated account metadata.
+
+Bound version plus initialize to one monotonic budget, default10s, with at most
+2MiB protocol output. Reject late success, wrong IDs, malformed replies, unsolicited
+control requests and premature process exit. Stop only the owned discovery
+process after success/failure; construction has no effects. Missing CLI, unsupported
+protocol or unreadable capabilities produce catalog_unavailable through the
+existing API. Rule10 launch fallback and frozen selection checks remain unchanged.
 The returned toolDefaults reads `settings.read({machineId,agent})` when supplied,
 otherwise explicitly returns null (Settings unset). It reads no private settings
 file and never writes native configuration. Consumers may replace either public
@@ -122,6 +161,6 @@ port, including with a target-local client adapter.
 ## Dependencies
 
 - [Story](../../story/cli/WORKFLOW-MODELS.md) and [cases](../../vectors/cli/workflow-models.json): independent verification expectations.
-- nativeCatalog and toolDefaults required caller interfaces above: generation/runtime/testing inputs. The local Codex transport is declared above; Claude acceptance evidence remains required from a supplied verified adapter. Absence blocks strict discovery; launch availability follows rule 10 above without fabricating capabilities.
+- nativeCatalog and toolDefaults required caller interfaces above: generation/runtime/testing inputs. The local Codex and Claude discovery transports are declared above; caller-supplied verified adapters still win. Absence blocks strict discovery; launch availability follows rule 10 above without fabricating capabilities.
 - [Native flags](native-flags.prompt.md): navigation-only encoding owner for an already validated selection. Its proposed selection parameter is recorded for owner confirmation in lane notes; this module returns no arbitrary argv.
 - [Prompting guide](../../docs/prompting-guide.md): authoring method.
