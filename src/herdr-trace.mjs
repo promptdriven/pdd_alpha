@@ -1,10 +1,12 @@
-// Generated from prompts/cli/herdr-trace.prompt.md (sha256: 7063cffa0cfcd8161a004f2f0a2f06a78a68958e2a84660646ca3f427bf6fe9f).
+// Generated from prompts/cli/herdr-trace.prompt.md (sha256: 6d1147477e9ec77a0651dfd005aebea737c7160ebdac5845dee73024a06fde79).
 import {constants,closeSync,fstatSync,ftruncateSync,lstatSync,mkdirSync,openSync,readSync,realpathSync,unlinkSync,writeSync} from 'node:fs';
 import {join,isAbsolute} from 'node:path';
 import {homedir} from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
+import {warnTraceWriteFailure} from './trace-warning.mjs';
 
+const traceFault=reason=>Object.assign(Error(reason),{traceReason:reason});
 const LIMIT=1024*1024,ROW_LIMIT=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OPS=new Set(['server.start','workspace.list','workspace.create','tab.create','pane.run','pane.process_info','pane.split','pane.close','pane.list','agent.start','agent.prompt','agent.get','agent.attach','agent.resume','workflow.prepare','workflow.resume','controller.start','other']);
@@ -18,17 +20,18 @@ const finite=n=>typeof n==='number'&&Number.isFinite(n)&&n>=0;
 const data=(object,key)=>Object.getOwnPropertyDescriptor(object,key)?.value;
 const uid=()=>typeof process.getuid==='function'?process.getuid():undefined;
 function owned(s){return uid()===undefined||s.uid===uid();}
-function directory(path,create,privateMode=false){
+function directory(path,create,privateMode=false,permissionReason='unsafe_directory'){
   try{if(create)mkdirSync(path,{mode:0o700});}catch(e){if(e.code!=='EEXIST')throw e;}
   const s=lstatSync(path);
-  if(!s.isDirectory()||s.isSymbolicLink()||!owned(s)||(s.mode&0o022)!==0||privateMode&&(s.mode&0o077)!==0)throw Error('unsafe trace directory');
+  if(!s.isDirectory()||s.isSymbolicLink()||!owned(s))throw traceFault('unsafe_directory');
+  if((s.mode&0o022)!==0||privateMode&&(s.mode&0o077)!==0)throw traceFault(permissionReason);
 }
 function location(ports,create){
-  const home=ports.home??homedir();if(typeof home!=='string'||!isAbsolute(home)||realpathSync(home)!==home)throw Error('trace home');
+  const home=ports.home??homedir();if(typeof home!=='string'||!isAbsolute(home)||realpathSync(home)!==home)throw traceFault('unsafe_home');
   directory(home,false);const base=join(home,'.pdd'),logs=join(base,'logs');
-  directory(base,create);directory(logs,create,true);return join(logs,'herdr-trace.jsonl');
+  directory(base,create,false,'pdd_permissions');directory(logs,create,true,'logs_permissions');return join(logs,'herdr-trace.jsonl');
 }
-function regular(s){if(!s.isFile()||s.nlink!==1||!owned(s)||(s.mode&0o077)!==0||s.size>LIMIT)throw Error('unsafe trace file');}
+function regular(s){if(!s.isFile()||s.nlink!==1||!owned(s)||(s.mode&0o077)!==0)throw traceFault('unsafe_file');if(s.size>LIMIT)throw traceFault('oversized');}
 function version(v){const m=typeof v==='string'&&/^v?(\d{1,9})\.(\d{1,9})\.(\d{1,9})(?:[-+][\w.-]+)?$/.exec(v);return m?`${m[1]}.${m[2]}.${m[3]}`:undefined;}
 function identifier(key,v){
   if(typeof v!=='string')return;
@@ -89,20 +92,24 @@ function parseRows(text){return text.split('\n').slice(0,-1).slice(-200).flatMap
 function readBounded(fd){
   const bytes=Buffer.alloc(LIMIT+1);let size=0,count;
   while(size<bytes.length&&(count=readSync(fd,bytes,size,bytes.length-size,size))>0)size+=count;
-  if(size>LIMIT)throw Error('oversized trace');return bytes.subarray(0,size).toString('utf8');
+  if(size>LIMIT)throw traceFault('oversized');return bytes.subarray(0,size).toString('utf8');
 }
 function append(value,ports){
-  let lock,fd,path;
+  let lock,fd,path,stage;
   try{
-    path=location(ports,true);lock=openSync(path+'.lock',constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);regular(fstatSync(lock));
+    path=location(ports,true);stage='lock';lock=openSync(path+'.lock',constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);regular(fstatSync(lock));stage='file';
     fd=openSync(path,constants.O_RDWR|constants.O_CREAT|constants.O_APPEND|(constants.O_NOFOLLOW??0),0o600);const stat=fstatSync(fd);regular(stat);
-    const row=record(value);if(!row)return;let text=JSON.stringify(row)+'\n';if(Buffer.byteLength(text)>ROW_LIMIT)text=JSON.stringify({...row,payload:{}})+'\n';
+    const row=record(value);if(!row)throw traceFault('invalid_record');let text=JSON.stringify(row)+'\n';if(Buffer.byteLength(text)>ROW_LIMIT)text=JSON.stringify({...row,payload:{}})+'\n';
     if(stat.size+Buffer.byteLength(text)>LIMIT){
-      const kept=parseRows(readBounded(fd)).map(r=>JSON.stringify(r)+'\n').join('');ftruncateSync(fd,0);if(kept)writeSync(fd,kept);
+      const kept=parseRows(readBounded(fd)).map(r=>JSON.stringify(r)+'\n').join('');ftruncateSync(fd,0);if(kept&&writeSync(fd,kept)!==Buffer.byteLength(kept))throw traceFault('io');
     }
-    writeSync(fd,text);
-  }catch{/* Diagnostics never replace the operation's result or repeat an effect. */}
-  finally{try{if(fd!==undefined)closeSync(fd);}catch{}try{if(lock!==undefined){closeSync(lock);unlinkSync(path+'.lock');}}catch{}}
+    if(writeSync(fd,text)!==Buffer.byteLength(text))throw traceFault('io');
+  }catch(error){
+    let failure=error;
+    try{if(stage==='lock'&&Object.getOwnPropertyDescriptor(error,'code')?.value==='EEXIST')failure=traceFault('busy');}catch{}
+    warnTraceWriteFailure(failure,ports);
+  }
+  finally{try{if(fd!==undefined)closeSync(fd);}catch(error){warnTraceWriteFailure(error,ports);}try{if(lock!==undefined){closeSync(lock);unlinkSync(path+'.lock');}}catch(error){warnTraceWriteFailure(error,ports);}}
 }
 export async function traceHerdrRequest({operation,request},invoke,ports={}){
   let trace;try{const selector=ports.env?.PDD_TRACE??process.env.PDD_TRACE;if(typeof selector==='string'&&selector.split(',').some(token=>token.trim()==='herdr'))trace={v:1,traceId:randomUUID(),operation:OPS.has(operation)?operation:'other'};}catch{}

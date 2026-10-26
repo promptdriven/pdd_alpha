@@ -26,8 +26,13 @@ nonregular/multiply linked files, foreign ownership, writable parent directories
 permissive log directories/files and oversized input; never repair, follow or
 replace such a target. Bound the trace to 1 MiB and each record to 4096 bytes.
 When compacting, retain at most the last 200 positively projected records within
-that bound. A busy or unavailable sink may omit diagnostics; it never retries an
-API effect. The trace is supplementary evidence, never proof that an unrecorded
+that bound. A busy or unavailable sink may omit diagnostics, but each selected write
+failure must call `warnTraceWriteFailure(error, ports)` with a safe classified
+reason. The shared reporter emits one stderr warning with repair guidance per
+stream/process across both Herdr and Git sinks. Keep unsafe-directory/file,
+invalid-home, oversized trace and busy-lock reasons distinct; filesystem errors
+retain only their safe code. Failed record projection and incomplete writes also
+warn. Read-only trace reads remain silent. Never retry an API effect. The trace is supplementary evidence, never proof that an unrecorded
 request did not occur.
 
 ## Printable observations
@@ -66,6 +71,9 @@ bytes. Opening an unsafe nonregular target such as a FIFO must not block before 
 No directory/file creation, permission repair or network call on reads.
 
 ## Dependencies
+
+- [Trace warning](trace-warning.prompt.md): required generation/runtime for the
+  module function `warnTraceWriteFailure`, shared deduplication and safe guidance.
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
 - [Controller](workflow-controller.prompt.md), [runner](workflow-runner.prompt.md)

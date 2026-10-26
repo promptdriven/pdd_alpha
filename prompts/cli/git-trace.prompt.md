@@ -38,8 +38,13 @@ credential operation or permission to retry. Unknown stderr remains redacted.
 
 Create only the owned `.pdd/logs` directories and private mode0600 trace file.
 Refuse symlink/non-directory ancestors and symlink, hardlinked, non-owned or
-group/world-accessible existing log files. Diagnostic I/O is best-effort and
-never grants worktree, cleanup, network, login or service authority. Disabled
+group/world-accessible existing log files. Selected diagnostic write failures call the shared module function
+`warnTraceWriteFailure(error, ports)` for one stderr warning containing a safe
+reason and repair guidance, shared across both sinks per stream/process. Mark
+unsafe directories/home/files, invalid/oversized records and changed file
+identity distinctly; preserve only known filesystem error codes. Incomplete
+writes also warn, without retry. Read-only report reads stay silent.
+Diagnostic I/O is best-effort and never grants worktree, cleanup, network, login or service authority. Disabled
 tracing does not inspect or create log paths. Never alter existing permissions
 or redirect tracing to another file on failure.
 
@@ -67,6 +72,9 @@ custody rules; [doctor](doctor.prompt.md) owns the report. These caller links ar
 navigation only, not required context for generating this independent helper.
 
 ## Dependencies
+
+- [Trace warning](trace-warning.prompt.md): required generation/runtime for the
+  module function `warnTraceWriteFailure` and its shared safe one-warning policy.
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
 - [Story](../../story/cli/GIT-TRACE.md) and [cases](../../vectors/cli/git-trace.json):

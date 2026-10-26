@@ -1,10 +1,12 @@
-// Generated from prompts/cli/git-trace.prompt.md (sha256: 6f30b1e5d6f4555aa1674c4a3810fe445e57307eab750aff4487995438dcc22b).
+// Generated from prompts/cli/git-trace.prompt.md (sha256: 0a45cfb51a79f5740116a3fcaed7bb499c1c130ccc929c24b0777951c32aef46).
 import {constants} from 'node:fs';
 import {mkdir,lstat,realpath,open} from 'node:fs/promises';
 import {join,isAbsolute,resolve} from 'node:path';
 import {homedir,constants as osConstants} from 'node:os';
 import {performance} from 'node:perf_hooks';
+import {warnTraceWriteFailure} from './trace-warning.mjs';
 
+const traceFault=reason=>Object.assign(Error(reason),{traceReason:reason});
 const REDACTED='[redacted]', MAX_FIELD=8192, MAX_RECORD=32768, MAX_TAIL=8*1024*1024;
 const SIGNALS=new Set(Object.keys(osConstants.signals));
 const ERRORS=new Set([...Object.keys(osConstants.errno),'ERR_CHILD_PROCESS_STDIO_MAXBUFFER','ABORT_ERR']);
@@ -78,29 +80,31 @@ function project(row) {
     errorCode:ERRORS.has(row.errorCode)?row.errorCode:null,
     stderr:stderrOf(row.stderr)};
 }
-async function directory(path,create) {
+async function directory(path,create,permissionReason='unsafe_directory') {
   if(create)try{await mkdir(path,{mode:0o700});}catch(e){if(e.code!=='EEXIST')throw e;}
   const stat=await lstat(path);
-  if(!stat.isDirectory()||stat.isSymbolicLink()||!own(stat)||(stat.mode&0o022)!==0||await realpath(path)!==path)throw Error('unsafe trace directory');
+  if(!stat.isDirectory()||stat.isSymbolicLink()||!own(stat))throw traceFault('unsafe_directory');
+  if((stat.mode&0o022)!==0)throw traceFault(permissionReason);
+  if(await realpath(path)!==path)throw traceFault('unsafe_directory');
 }
 async function tracePath(ports,create) {
   const home=ports.home??homedir();
-  if(typeof home!=='string'||!isAbsolute(home)||resolve(home)!==home)throw Error('unsafe trace home');
+  if(typeof home!=='string'||!isAbsolute(home)||resolve(home)!==home)throw traceFault('unsafe_home');
   await directory(home,false);
   const pdd=join(home,'.pdd'),logs=join(pdd,'logs');
-  await directory(pdd,create);await directory(logs,create);
+  await directory(pdd,create,'pdd_permissions');await directory(logs,create,'logs_permissions');
   return join(logs,'git-trace.jsonl');
 }
 function ordinary(stat) {
-  if(!stat.isFile()||stat.nlink!==1||!own(stat)||(stat.mode&0o077)!==0)throw Error('unsafe trace file');
+  if(!stat.isFile()||stat.nlink!==1||!own(stat)||(stat.mode&0o077)!==0)throw traceFault('unsafe_file');
 }
 async function append(row,ports) {
-  const projected=project(row);if(!projected)return;
-  const bytes=Buffer.from(JSON.stringify(projected)+'\n');if(bytes.length>MAX_RECORD)return;
+  const projected=project(row);if(!projected)throw traceFault('invalid_record');
+  const bytes=Buffer.from(JSON.stringify(projected)+'\n');if(bytes.length>MAX_RECORD)throw traceFault('invalid_record');
   const path=await tracePath(ports,true);
   const h=await open(path,constants.O_WRONLY|constants.O_APPEND|constants.O_CREAT|constants.O_NONBLOCK|(constants.O_NOFOLLOW??0),0o600);
-  try{const stat=await h.stat();ordinary(stat);const named=await lstat(path);if(named.dev!==stat.dev||named.ino!==stat.ino||named.isSymbolicLink())return;
-    await h.write(bytes,0,bytes.length);
+  try{const stat=await h.stat();ordinary(stat);const named=await lstat(path);if(named.dev!==stat.dev||named.ino!==stat.ino||named.isSymbolicLink())throw traceFault('unsafe_file');
+    if((await h.write(bytes,0,bytes.length)).bytesWritten!==bytes.length)throw traceFault('io');
   }finally{await h.close();}
 }
 export async function traceGitCommand({argv,cwd},action,ports={}) {
@@ -118,7 +122,7 @@ export async function traceGitCommand({argv,cwd},action,ports={}) {
       argv:['git',...savedArgv],cwd:savedCwd,outcome,
       exit:Number.isInteger(response?.code)?integer(response.code):outcome==='returned'?0:null,
       signal:response?.signal,errorCode:response?.code,stderr:response?.stderr},ports);
-    }catch{/* Diagnostics never change command results or authority. */}
+    }catch(error){warnTraceWriteFailure(error,ports);}
   }
 }
 export async function readGitTrace(ports={}) {
