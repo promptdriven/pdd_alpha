@@ -1,8 +1,10 @@
-// Generated from prompts/cli/doctor.prompt.md (sha256: 964dcdec2d783436bfd26d5fd89357519e7bd161a9d6baf7b71ad3ff705d42e2).
+// Generated from prompts/cli/doctor.prompt.md (sha256: cd174d64260abaddea57306784eeb1bd940945785079a2d0adac9f2cb3007364).
 import {readFileSync,readdirSync,existsSync,statfsSync,accessSync,constants} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {readHerdrTrace} from './herdr-trace.mjs';
+import {readGitTrace} from './git-trace.mjs';
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const row = (id,state,detail,next=null) => ({id,state,detail,next});
 // Only diagnostic vocabulary is printable from an untrusted support adapter.
@@ -153,6 +155,7 @@ export async function runDoctorCommand(argv,deps={}) {
       }
     }
     const ok=!checks.some(c=>c.state==='fail');
+    if(mode==='report'){report.herdrTrace=readHerdrTrace({home:deps.home});report.gitTrace=await readGitTrace({home:deps.home});}
     if(mode==='json') stdout.write(JSON.stringify({ok,checks})+'\n');
     else if(mode==='report') stdout.write(JSON.stringify({ok,checks:supportChecks(checks),...report})+'\n');
     else for(const c of checks) stdout.write(`${c.state.toUpperCase()} ${c.id}: ${c.detail}\n${c.state==='fail'?`  Next: ${c.next}\n`:''}`);

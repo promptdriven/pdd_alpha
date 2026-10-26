@@ -1,10 +1,11 @@
-// Generated from prompts/cli/workflow-worktree.prompt.md (sha256: 005b22f4e3f03777f4a97879604119afc4440dfc90f2e7a91cf1995abc007065).
+// Generated from prompts/cli/workflow-worktree.prompt.md (sha256: ed59aaf425222d62e5046d5a5fa1ecd88bf63ecedc4e939b0707bf13513a209d).
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, realpath, mkdir, open, link } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { traceGitCommand } from './git-trace.mjs';
 
 const execute = promisify(execFile);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -17,12 +18,12 @@ const result = (state, message, assignment = null) => ({ state, assignment, mess
 const fail = () => { throw new Error('workflow_worktree_identity_unavailable'); };
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-function commands(ports) {
+function commands(ports, trace = false) {
   const run = ports.execFile ?? ((file, args, { cwd }) => execute(file, args,
     { cwd, encoding: 'utf8', shell: false, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }));
   async function raw(cwd, args) {
     let response;
-    try { response = await run('git', args, { cwd }); }
+    try { response = await (trace ? traceGitCommand({argv:args,cwd},()=>run('git', args, { cwd }),ports) : run('git', args, { cwd })); }
     catch (error) {
       if (!Number.isInteger(error?.code) || error.code === 0) fail();
       response = { stdout: error.stdout ?? '', code: error.code };
@@ -197,7 +198,7 @@ export async function allocateIssueWorktree(input, ports = {}) {
     const { cwd, repository, issueNumber, runId, workflowName, baseRef } = structuredClone(input ?? {});
     if (!repoName(repository) || !safe(runId) || !safe(workflowName, 80) || !Number.isSafeInteger(issueNumber)
       || issueNumber < 1 || !plain(baseRef) || baseRef.startsWith('-')) return result('conflict', 'Supply a valid repository, issue, run, workflow and existing local base ref.');
-    const c = commands(ports), ctx = await context(cwd, c);
+    const c = commands(ports, true), ctx = await context(cwd, c);
     if (!sameRepo(ctx.repository, repository)) return result('conflict', 'The requested repository does not match this checkout origin.');
     const p = locations(ctx.commonDir, runId, issueNumber);
     if (await exists(p.run)) {

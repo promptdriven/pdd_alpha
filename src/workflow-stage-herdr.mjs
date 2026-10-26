@@ -1,9 +1,10 @@
-// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: f4c87e02a5d8fb4e77e4134ad720aa6b39b2609054394c4f0216ccced4f750b3).
+// Generated from prompts/cli/workflow-stage-herdr.prompt.md (sha256: 831865a93919f43463c24596a15b7ba5f365a51033f37d78cca51e2abb4de2e7).
 import {execFile as callbackExec,spawn} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
 import {readFile,realpath} from 'node:fs/promises';
 import {basename} from 'node:path';
+import {traceHerdrRequest} from './herdr-trace.mjs';
 import {nativeArgs} from './native-flags.mjs';
 const execute=promisify(callbackExec),UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const STAGE=/^(?=.{1,64}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -13,7 +14,7 @@ const claims=new Map();
 function rt(p) {return {p,now:p.now??Date.now,sleep:p.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),exec:p.execFile??execute,guard:p.withStageGuard??(()=>{throw fault('stage_guard_required');}),pollMs:p.pollMs??100,startupMs:p.startupMs??30000,observeMs:p.observeMs??p.timeoutMs??1800000};}
 const outcome=(b,reason,state='recovery_required')=>({state,backend:b?copy(b):null,evidence:copy(b?.evidence??{}),...(reason?{reason}:{})});
 async function command(r,b,args) {
-  let response;try{response=await r.exec('herdr',['--session',b.session,...args],{cwd:b.cwd,shell:false,encoding:'utf8',timeout:r.startupMs+5000,maxBuffer:1024*1024});}
+  let response;try{response=await traceHerdrRequest({operation:`${args[0]}.${args[1].replaceAll('-','_')}`,request:{argv:['--session',b.session,...args]}},()=>r.exec('herdr',['--session',b.session,...args],{cwd:b.cwd,shell:false,encoding:'utf8',timeout:r.startupMs+5000,maxBuffer:1024*1024}),r.p);}
   catch(e){let error;try{error=JSON.parse(e.stderr)?.error?.code;}catch{}throw fault(typeof error==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(error)?error:'herdr_command_uncertain');}
   let x;try{x=JSON.parse(response.stdout);}catch{throw fault('herdr_invalid_reply');}
   if(response.code!==undefined&&response.code!==0||!x||x.error){const code=x?.error?.code;throw fault(typeof code==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(code)?code:'herdr_command_uncertain');}return x;
@@ -157,8 +158,10 @@ export async function attachHerdrStage({backend}={},ports={}) {
   const b=copy(backend),r=rt(ports);
   try{validate(b);if(b.phase==='closed')return 2;return await r.guard(b,async()=>{
     await rememberAndClaim(r,b,await agent(r,b),ports.checkpoint);if(b.processProof)await processProof(r,b);
-    if(ports.spawnAttach)return ports.spawnAttach(b.session,b.agentName,b.cwd);
-    return new Promise(resolve=>{const child=(ports.spawn??spawn)('herdr',['--session',b.session,'agent','attach',b.agentName],{cwd:b.cwd,stdio:'inherit',shell:false});child.once('error',()=>resolve(1));child.once('close',code=>resolve(Number.isInteger(code)?code:1));});
+    return traceHerdrRequest({operation:'agent.attach',request:{argv:['--session',b.session,'agent','attach',b.agentName]}},()=>{
+      if(ports.spawnAttach)return ports.spawnAttach(b.session,b.agentName,b.cwd);
+      return new Promise(resolve=>{const child=(ports.spawn??spawn)('herdr',['--session',b.session,'agent','attach',b.agentName],{cwd:b.cwd,stdio:'inherit',shell:false});child.once('error',()=>resolve(1));child.once('close',code=>resolve(Number.isInteger(code)?code:1));});
+    },ports);
   });}catch{return 1;}
 }
 export async function closeHerdrStage({backend,acceptance}={},ports={}) {

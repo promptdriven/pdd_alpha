@@ -623,7 +623,20 @@ the attachment guard; attachment exit never grants acceptance or progression.
 
 Do not cap active or unresolved native stages across a repository. Each running stage is a full Codex or Claude session on the person's computer. Distinct issues may retain independent unresolved stages concurrently; this does not promise tested throughput or automatic cleanup. Preserve one assigned run per issue and one active stage per run, controller and attachment exclusion, exact identity/currentness checks and uncertain-delivery refusal. Do not allocate or release repository admission slots. Historical admission metadata and claims may remain on disk; ignore them without clearing or rewriting live journals or claims.
 
+## Opt-in transport tracing
+
+When `PDD_TRACE=herdr` is selected, send actual Herdr requests and their replies
+or failures through the shared trace owner's redacted request/reply/timing
+logging. With tracing absent, no trace file is created. Tracing is diagnostic
+only: preserve each invocation's arguments, receiver, result/error and call
+count, all durable ordering and every identity/lifecycle/refusal gate. Never
+retry a request or infer capability, delivery or acceptance from a trace.
+Prompts, pane command text, paths, environment and arbitrary error text must not
+enter the log; the trace owner defines positive projection and secure bounds.
+
 ## Dependencies
+
+- [Herdr trace](herdr-trace.prompt.md): required generation/runtime for the module function `traceHerdrRequest`, opt-in redaction and bounded diagnostics; it grants no transport or controller authority.
 
 - [Story](../../story/cli/WORKFLOW-RUNNER-P1.md) and [cases](../../vectors/cli/workflow-runner-p1.json): verification; expected outcomes, not observed results.
 - [Artifact handoffs](workflow-artifacts.prompt.md): required helper for closed handoff validation, regular contained files/hash checks and real native test argv. Caller retains HEAD/currentness, accepted source and journal decisions.

@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { runWorkflow, resumeWorkflow, attachWorkflow, prepareWorkflow, driveWorkflow, adoptWorkflow, readWorkflowJournal, WORKFLOW_STAGES } from '../src/workflow-runner.mjs';
 import { loadGuidance as actualGuidance } from '../src/guidance.mjs';
 import { runHerdrStage, inspectHerdrStage, closeHerdrStage, attachHerdrStage } from '../src/workflow-stage-herdr.mjs';
+import {readHerdrTrace} from '../src/herdr-trace.mjs';
 
 import {withWorkflowLock,inspectWorkflowLock} from './cli/workflow-test-lock.mjs';
 const exec = promisify(callbackExec);
@@ -1270,4 +1271,17 @@ for(const settings of [null,{model:'settings-model',effort:'high'}])test(`rule10
   f.ports.toolDefaults.read=async()=>({model:'changed-default',effort:'low'});
   const driven=await f.drive();assert.equal(driven.state,'waiting',driven.message);
   assert.ok(f.native.length>0);assert.deepEqual(f.saved(prepared.runId).launchSelection,saved);
+});
+
+
+test('P1 enabled trace observes actual controller process request without replacing journal proof',async t=>{
+  const f=await p1Fixture(t);f.ports.env={PDD_TRACE:'herdr'};
+  const prepared=await f.prepare();assert.equal(prepared.state,'prepared',prepared.message);
+  assert.deepEqual(readHerdrTrace(f.ports),[]);
+  const request=f.ports.execFile,observed=[];
+  f.ports.execFile=async(file,args,options)=>{if(file==='herdr')observed.push({args:[...args],options:{...options}});return request(file,args,options);};
+  const result=await f.drive();assert.equal(result.state,'waiting',result.message);
+  assert.deepEqual(observed,[{args:['--session','default','pane','process-info','--pane','controller'],options:{cwd:prepared.root}}]);
+  const saved=f.saved(prepared.runId);assert.equal(saved.controller.started,true);assert.equal(saved.controller.generation,1);assert.equal(saved.controller.startIdentity,'controller-process-start');
+  const encoded=JSON.stringify(readHerdrTrace(f.ports));assert.ok(encoded.includes('pane.process_info'));assert.ok(!encoded.includes(prepared.root));assert.ok(!encoded.includes('controller-process-start'));
 });

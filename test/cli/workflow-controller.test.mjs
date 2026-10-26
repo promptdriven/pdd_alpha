@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import vectors from '../../vectors/cli/workflow-controller.json' with {type:'json'};
 import {startWorkflowController,readControllerLaunches} from '../../src/workflow-controller.mjs';
 import {runId,folder,fakeLocks} from './runner-a-fixtures.mjs';
+import {readHerdrTrace} from '../../src/herdr-trace.mjs';
 async function fixture(t,id){
   const runDir=join(await folder(t),runId);await fs.mkdir(runDir);
   const runtime={node:'/saved/node',bin:'/saved/bin/pdd.mjs'};
@@ -63,3 +64,60 @@ test('proved controller exit is reconciled before a new launch generation is adm
 });
 test('failed capability reads and unknown controller locks refuse without launch',async t=>{const f=await fixture(t,'');f.ports.herdr.supportsProcessIdentity=async()=>{throw Error('unavailable');};assert.equal((await startWorkflowController(f.spec,f.ports)).code,'unsupported');f.ports.herdr.supportsProcessIdentity=async()=>true;f.ports.inspectControllerLock=async()=> 'unknown';assert.equal((await startWorkflowController(f.spec,f.ports)).code,'controller_busy');assert.equal(f.calls.length,0);});
 test('controller rejects all unsupported path characters before effects',async t=>{for(const node of ["/saved/path'quote/node",'/saved/back\\slash/node','/saved/line\n/node','/saved/\u0085/node','relative/node']){const f=await fixture(t,'');f.spec.runtime.node=node;assert.equal((await startWorkflowController(f.spec,f.ports)).code,'unsupported');assert.deepEqual(f.calls,[]);}});
+
+
+test('enabled controller trace preserves receivers, once-only calls and saved launch proof',async t=>{
+  const f=await fixture(t,'lost-type-with-proof');
+  f.ports.home=await folder(t);f.ports.env={PDD_TRACE:'herdr'};
+  f.ports.herdr.listWorkspaces=async()=>[];
+  const observed=[];
+  for(const name of ['listWorkspaces','createWorkspace','createTab','paneRun','processInfo']){
+    const original=f.ports.herdr[name];
+    f.ports.herdr[name]=async function(request){
+      assert.equal(this,f.ports.herdr);observed.push([name,structuredClone(request)]);
+      return original.call(this,request);
+    };
+  }
+  const first=await startWorkflowController(f.spec,f.ports);
+  assert.equal(first.state,'started');assert.equal(first.controller.generation,1);
+  assert.deepEqual(observed.map(([name])=>name),['listWorkspaces','createWorkspace','createTab','paneRun','processInfo']);
+  assert.deepEqual(observed[1][1],{session:'default',cwd:f.spec.root,focus:false});
+  assert.deepEqual(observed[2][1],{session:'default',workspaceId:'w2',cwd:f.spec.root,label:'run #7 feature',focus:false});
+  const intent=(await readControllerLaunches(f.spec)).at(-1);
+  assert.equal(observed[3][1].command,intent.line);
+  assert.deepEqual(intent.proof.process.argv,intent.argv);
+  assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+  assert.equal(observed.filter(([name])=>name==='paneRun').length,1);
+  const encoded=JSON.stringify(readHerdrTrace(f.ports));
+  for(const operation of ['workspace.list','workspace.create','tab.create','pane.run','pane.process_info'])assert.ok(encoded.includes(operation),operation);
+  assert.ok(!encoded.includes('/saved/'));assert.ok(!encoded.includes(intent.line));assert.ok(!encoded.includes('run #7 feature'));
+});
+
+test('tracing cannot replace controller identity or generation proof',async t=>{
+  for(const id of ['reused-pid','live-without-generation','wrong-controller-generation']){
+    const f=await fixture(t,id);f.ports.home=await folder(t);f.ports.env={PDD_TRACE:'herdr'};
+    const first=await startWorkflowController(f.spec,f.ports);
+    assert.equal(first.state,'uncertain');assert.equal(first.code,'process_unproved');
+    await startWorkflowController(f.spec,f.ports);
+    assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+  }
+});
+
+test('trace opt-in grants no process capability and creates no file before unsupported refusal',async t=>{
+  const f=await fixture(t,'');f.ports.home=await folder(t);f.ports.env={PDD_TRACE:'herdr'};
+  delete f.ports.herdr.supportsProcessIdentity;
+  assert.deepEqual(await startWorkflowController(f.spec,f.ports),{state:'refused',code:'unsupported',controller:null});
+  assert.deepEqual(f.calls,[]);assert.deepEqual(await readControllerLaunches(f.spec),[]);
+  assert.deepEqual(await fs.readdir(f.ports.home),[]);
+});
+
+test('disabled or unavailable trace storage preserves controller launch result',async t=>{
+  for(const setting of ['', 'herdr']){
+    const f=await fixture(t,'lost-type-with-proof');f.ports.env={PDD_TRACE:setting};
+    f.ports.home=await folder(t);
+    if(setting)await fs.writeFile(join(f.ports.home,'.pdd'),'not a directory');
+    assert.equal((await startWorkflowController(f.spec,f.ports)).state,'started');
+    assert.equal(f.calls.filter(([name])=>name==='run').length,1);
+    if(!setting)assert.deepEqual(await fs.readdir(f.ports.home),[]);
+  }
+});

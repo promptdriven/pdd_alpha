@@ -35,6 +35,13 @@ A verified assignment has exactly `{version:1,runId,repository,issueNumber,workf
 
 `ports.execFile(file,args,{cwd})` optionally replaces ordinary subprocess execution, returning/resolving `{stdout,stderr?,code?}`. Missing code is successful execFile-style completion; nonzero or rejection fails, including rejected numeric code zero. Normal nonzero process exit data can distinguish absent refs; operational rejection cannot become success. Production uses Node execFile, argv arrays, shell:false, normal inherited environment/cwd, finite timeout and bounded output. No auth copies, private dependencies or bypass options. Capture public inputs before awaits. Use finite messages without raw subprocess output; outcome never implies workflow execution, publication or merge.
 
+Exact `PDD_TRACE=git` opts allocator Git calls into the
+[private local Git trace](git-trace.prompt.md). Capture command/location,
+observed result, redacted stderr and timings without changing the command's
+identity, result, refusal, exclusive claims or one-add reconciliation. Diagnostic
+I/O failure never changes allocation or authorizes retry/auth repair. No trace
+with the switch disabled; no raw subprocess output in public allocation messages.
+
 </details>
 
 ## Dependencies
@@ -42,5 +49,9 @@ A verified assignment has exactly `{version:1,runId,repository,issueNumber,workf
 - [Story](../../story/cli/WORKFLOW-WORKTREE.md) and [cases](../../vectors/cli/workflow-worktree.json):
   verification inputs with independent expected outcomes.
 
+- [Private Git trace](git-trace.prompt.md): required generation/runtime for opt-in
+  redacted local diagnostics; optional `ports.home`/`ports.env` isolate its home
+  and switch in tests and grant no command or allocation authority.
+
 - Load the complete [Prompting guide](../../docs/prompting-guide.md) for authoring/generation; it owns module contracts and preservation.
-- Runtime: Node `child_process.execFile`, `crypto.randomUUID`, `fs/promises`, `fs.constants`, `path`, `util`, and installed normal Git. Filesystem metadata creation/reads/fsync are helper-owned; execFile is the sole injected port. Tests use disposable real local repositories and injected command failures, with no live GitHub/native actions.
+- Runtime: Node `child_process.execFile`, `crypto.randomUUID`, `fs/promises`, `fs.constants`, `path`, `util`, and installed normal Git. Filesystem metadata creation/reads/fsync are helper-owned; execFile is the sole injected command port. Tests use disposable real local repositories and injected command failures, with no live GitHub/native actions.

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 013556d18ef46bb3430c00a9578a8ec4887d407bc5171e43e7d4c51f65e10611).
+// Generated from prompts/cli/workflow-runner.prompt.md (sha256: 713f4a4d00424dca1ab691da9f7d6887980884880f33680884646de0d4962613).
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -13,6 +13,7 @@ import { resolveWorkflowIssue, prepareWorkflowPr, publishWorkflowPr, reconcileWo
 import { readWorkflowHandoff, assertWorkflowArtifacts, runWorkflowTestCommands } from './workflow-artifacts.mjs';
 import { appendRunIndex, writeRunStatus, runStatusFromState } from './workflow-run-records.mjs';
 export { WORKFLOW_STAGES } from './workflow-definitions.mjs';
+import { traceHerdrRequest } from './herdr-trace.mjs';
 
 const ordinaryExec = promisify(execFileCallback);
 const defaultExec = (file, args, { cwd }) => ordinaryExec(file, args, { cwd, encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
@@ -27,7 +28,9 @@ function dependencies(ports = {}) {
     stdout: ports.stdout ?? process.stdout, stderr: ports.stderr ?? process.stderr };
 }
 async function command(p, cwd, executable, args, raw = false) {
-  let result;try{result=await p.execFile(executable,args,{cwd});}catch{fail(`${executable} command could not be confirmed.`);}
+  let result;try{result=await (executable==='herdr'
+    ? traceHerdrRequest({operation:'pane.process_info',request:{argv:args}},()=>p.execFile(executable,args,{cwd}),p)
+    : p.execFile(executable,args,{cwd}));}catch{fail(`${executable} command could not be confirmed.`);}
   if (Number.isInteger(result?.code) && result.code !== 0) fail(`${executable} command failed (${result.code}).`);
   const output = String(result?.stdout ?? '');
   return raw ? output : output.replace(/\r?\n$/, '');

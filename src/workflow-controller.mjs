@@ -1,14 +1,16 @@
-// Generated from prompts/cli/workflow-controller.prompt.md (sha256: e7658497a8d5f3624ed4ca12a5d21f57a3f25c962d5b3eedb90c084f043282cf).
+// Generated from prompts/cli/workflow-controller.prompt.md (sha256: eb1916f5d513d865fb66b8c2988548d09b2cc2017d8be6c920ba1e615864ca70).
 import * as nodeFs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, isAbsolute, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { withWorkflowLock } from './workflow-claims.mjs';
+import { traceHerdrRequest } from './herdr-trace.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const NAME=/^(?=.{1,64}$)[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const safePath=p=>typeof p==='string'&&isAbsolute(p)&&!/[\p{Cc}'\\]/u.test(p);
 const fsOf=p=>p.fs??nodeFs;
+const herdrRequest=(p,operation,method,request)=>traceHerdrRequest({operation,request},()=>p.herdr[method](request),p);
 const result=(state,code=null,controller=null)=>({state,code,controller});
 async function syncDir(fs,path){const h=await fs.open(path,'r');try{await h.sync();}finally{await h.close();}}
 async function save(intent,p){
@@ -58,7 +60,7 @@ function admission(state,spec){
 }
 async function prove(intent,p){
   if(!intent.paneId)return result('uncertain','launch_uncertain',intent);
-  let process,journal;try{process=await p.herdr.processInfo({session:'default',paneId:intent.paneId});journal=await strictRead(intent.runDir,p);}catch{return result('uncertain','proof_unavailable',intent);}
+  let process,journal;try{process=await herdrRequest(p,'pane.process_info','processInfo',{session:'default',paneId:intent.paneId});journal=await strictRead(intent.runDir,p);}catch{return result('uncertain','proof_unavailable',intent);}
   const proof=journal.state.controller;
   const bound=proof?.started===true&&proof.launchId===intent.launchId&&proof.paneId===intent.paneId&&Number.isSafeInteger(proof.generation)&&proof.generation>0&&proof.generation===(intent.previousGeneration??0)+1&&Number.isSafeInteger(proof.pid)&&proof.pid>0&&typeof proof.startIdentity==='string'&&proof.startIdentity.length>0;
   const live=bound&&process?.stopped!==true&&process?.pid===proof.pid&&process.startIdentity===proof.startIdentity&&process.paneId===intent.paneId&&process.executable===intent.runtime.node&&isDeepStrictEqual(process.argv,intent.argv);
@@ -104,16 +106,16 @@ export async function startWorkflowController(spec,ports={}){
     let effected=false;
     const checkpoint=async(phase,extra={})=>{intent={...intent,...extra,phase,step:intent.step+1};await save(intent,ports);};
     try{
-      const workspaces=await ports.herdr.listWorkspaces({session:'default'});if(!Array.isArray(workspaces))return result('uncertain','workspace_unknown',intent);
+      const workspaces=await herdrRequest(ports,'workspace.list','listWorkspaces',{session:'default'});if(!Array.isArray(workspaces))return result('uncertain','workspace_unknown',intent);
       let workspace=workspaces.find(w=>w.cwd===spec.root);
-      if(!workspace){await checkpoint('workspace.create.intent');effected=true;workspace=await ports.herdr.createWorkspace({session:'default',cwd:spec.root,focus:false});if(!workspace?.workspaceId)return result(workspace?.refused?'failed':'uncertain','workspace_create_failed',intent);await checkpoint('workspace.created',{workspaceId:workspace.workspaceId,workspaceCreation:workspace});}
+      if(!workspace){await checkpoint('workspace.create.intent');effected=true;workspace=await herdrRequest(ports,'workspace.create','createWorkspace',{session:'default',cwd:spec.root,focus:false});if(!workspace?.workspaceId)return result(workspace?.refused?'failed':'uncertain','workspace_create_failed',intent);await checkpoint('workspace.created',{workspaceId:workspace.workspaceId,workspaceCreation:workspace});}
       else await checkpoint('workspace.selected',{workspaceId:workspace.workspaceId});
       await checkpoint('tab.create.intent');effected=true;
-      const tab=await ports.herdr.createTab({session:'default',workspaceId:intent.workspaceId,cwd:spec.root,label:`run #${spec.issueNumber} ${spec.workflow}`,focus:false});
+      const tab=await herdrRequest(ports,'tab.create','createTab',{session:'default',workspaceId:intent.workspaceId,cwd:spec.root,label:`run #${spec.issueNumber} ${spec.workflow}`,focus:false});
       if(!tab?.tabId||!tab.paneId||!tab.terminalId)return result(tab?.refused?'failed':'uncertain','tab_create_failed',intent);
       await checkpoint('tab.created',{tabId:tab.tabId,paneId:tab.paneId,terminalId:tab.terminalId});
       await checkpoint('pane.run.intent');
-      try{await ports.herdr.paneRun({session:'default',paneId:intent.paneId,command:intent.line});}catch{/* Unknown delivery must be reconciled, never repeated. */}
+      try{await herdrRequest(ports,'pane.run','paneRun',{session:'default',paneId:intent.paneId,command:intent.line});}catch{/* Unknown delivery must be reconciled, never repeated. */}
       return prove(intent,ports);
     }catch{return result(effected?'uncertain':'failed','launch_io',intent);}
   },ports);}catch(e){return result(e.code==='controller_busy'?'refused':'failed',e.code??'launch_io');}

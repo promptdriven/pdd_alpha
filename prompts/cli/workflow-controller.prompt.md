@@ -77,7 +77,20 @@ The exact installed Herdr command/schema for process start identity and pane
 creation/close remains to be proved by the transport spike. If unavailable,
 return `unsupported`; never replace it with idle status, terminal text or `ps`.
 
+## Opt-in transport tracing
+
+When `PDD_TRACE=herdr` is selected, send actual Herdr requests and their replies
+or failures through the shared trace owner's redacted request/reply/timing
+logging. With tracing absent, no trace file is created. Tracing is diagnostic
+only: preserve each invocation's arguments, receiver, result/error and call
+count, all durable ordering and every identity/lifecycle/refusal gate. Never
+retry a request or infer capability, delivery or acceptance from a trace.
+Prompts, pane command text, paths, environment and arbitrary error text must not
+enter the log; the trace owner defines positive projection and secure bounds.
+
 ## Dependencies
+
+- [Herdr trace](herdr-trace.prompt.md): required generation/runtime for the module function `traceHerdrRequest`, opt-in redaction and bounded diagnostics; it grants no transport or controller authority.
 
 - [Story](../../story/cli/WORKFLOW-CONTROLLER.md) and [cases](../../vectors/cli/workflow-controller.json): verification; expected outcomes, not observed results.
 - [Claims](workflow-claims.prompt.md): required generation/runtime nonblocking

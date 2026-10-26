@@ -200,6 +200,8 @@ the runtime owner's supplied guard. No CLI path writes journal bytes itself.
 
 ## Dependencies
 
+- [Herdr diagnostics](herdr-trace.prompt.md): required generation/runtime for opt-in local workflow boundary tracing; no launch authority.
+
 - [Model discovery](workflow-models.prompt.md) and [project discovery](workflow-projects.prompt.md): runtime local adapter factories and explicit public port seams.
 - [Versions](versions.prompt.md), [update lock](update-lock.prompt.md) and [launcher](pdd-launch.prompt.md): runtime verified setup/recovery support and service provisioning under the update lease.
 
@@ -240,3 +242,11 @@ At controller launch, map a supplied human resume binding to the controller's
 public decision shape {decision,id,rev,expectStage?,expectSeq?}. Runner preparation
 keeps its existing {decision,decisionId,expectedRev,expect?} input. Do not pass one
 owner's DTO unchanged to a different owner.
+
+Opt-in [Herdr diagnostics](herdr-trace.prompt.md) observe local workflow
+preparation/resume and controller start at their actual module boundaries. Pass
+the existing full ports object to the trace wrapper and invoke each owner once;
+retain raw resolver runtime and canonical prepared runtime independently. Safe
+boundary state/code and field-presence diagnostics do not supply missing Herdr,
+identity or authority ports, change the launch diagnostic, retry, or convert a
+refusal into success. Discovery and remote dispatch do not construct this trace.

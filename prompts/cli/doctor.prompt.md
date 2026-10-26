@@ -101,6 +101,16 @@ unknown state/event or unproved free-text value grants no printing permission.
 Unknown report fields are not permission to dump raw adapter data. Use the same
 health exit rule as other read modes; missing optional facts remain explicit skips.
 
+Additionally, `--report` includes both `herdrTrace` and `gitTrace`, each up to
+its last 200 safe records. Use the local module function `readHerdrTrace({home})`
+in [Herdr diagnostics](herdr-trace.prompt.md) and async module function
+`readGitTrace({home})` in [Git diagnostics](git-trace.prompt.md). Each trusted
+reader independently revalidates its fixed local file and positive projection;
+adapter-supplied fields or raw log text cannot populate either property.
+Missing/unsafe traces give an empty array for that property without suppressing
+the other trace or changing the health exit code. Other doctor modes read neither
+trace. Reports do not enable tracing or write any file.
+
 </details>
 
 <details>
@@ -128,6 +138,9 @@ continuation or a staged-version self-test.
 ## Dependencies
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
+- [Herdr diagnostics](herdr-trace.prompt.md) and [Git diagnostics](git-trace.prompt.md):
+  required generation/runtime for their independent safe local `--report` readers;
+  no recording during doctor.
 - [Versions](versions.prompt.md) and [install record](install-record.prompt.md):
   required for generation/runtime; authoritative Runtime and install-state shapes.
 - [Story](../../story/cli/DOCTOR.md) and [cases](../../vectors/cli/doctor.json):

@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {runHerdrStage,inspectHerdrStage,closeHerdrStage,attachHerdrStage,resumeHerdrStage} from '../src/workflow-stage-herdr.mjs';
 import vectors from '../vectors/cli/workflow-stage-herdr.json' with {type:'json'};
+import {readHerdrTrace} from '../src/herdr-trace.mjs';
 const nativeId='11111111-2222-4333-8444-555555555555';
 async function harness(t,options={}) {
   const cwd=await realpath(await mkdtemp(join(tmpdir(),'pdd-stage-')));t.after(()=>rm(cwd,{recursive:true,force:true}));
@@ -205,4 +206,27 @@ for(const settings of [null,{model:'saved',effort:'high'}])for(const later of ['
   else {assert.equal(args.includes('-m'),false);assert.equal(args.some(a=>a.startsWith('model_reasoning_effort=')),false);}
   const next=await runHerdrStage({...h.input,backend:first.backend},h.ports);assert.equal(next.state,'settled',next.reason);
   assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);assert.equal(reads,0);
+});
+
+
+test('enabled stage trace covers actual argv transport and attachment without exposing guide or prompt',async t=>{
+  const h=await harness(t);h.ports.home=h.input.cwd;h.ports.env={PDD_TRACE:'herdr'};
+  h.input.instructions+='\nSYNTHETIC_SECRET_MUST_STAY_IN_REQUEST';
+  const r=await runHerdrStage(h.input,h.ports);assert.equal(r.state,'settled',r.reason);
+  assert.equal(count(h,'agent','start'),1);assert.equal(count(h,'agent','prompt'),1);
+  assert.ok(h.calls.find(c=>c[0]==='agent'&&c[1]==='prompt')[3].includes('SYNTHETIC_SECRET_MUST_STAY_IN_REQUEST'));
+  assert.equal(await attachHerdrStage({backend:r.backend},h.ports),0);
+  const done=await closeHerdrStage({backend:r.backend,acceptance:acceptance(r.backend)},{...h.ports,checkpoint:h.input.checkpoint});
+  assert.equal(done.state,'closed',done.reason);assert.equal(count(h,'pane','close'),1);
+  const encoded=JSON.stringify(readHerdrTrace(h.ports));
+  for(const operation of ['pane.split','agent.start','agent.get','pane.process_info','agent.prompt','agent.attach','pane.close','pane.list'])assert.ok(encoded.includes(operation),operation);
+  for(const secret of ['SYNTHETIC_SECRET_MUST_STAY_IN_REQUEST','# Entire guide','literal $(not shell)',h.input.cwd])assert.ok(!encoded.includes(secret),secret);
+});
+
+test('enabled trace retains lost prompt delivery as inspection-only, never another start or prompt',async t=>{
+  const h=await harness(t,{lostPrompt:true});h.ports.home=h.input.cwd;h.ports.env={PDD_TRACE:'herdr'};
+  const first=await runHerdrStage(h.input,h.ports);assert.equal(first.backend.phase,'prompt_intent');
+  const second=await runHerdrStage({...h.input,backend:first.backend},h.ports);
+  assert.equal(second.state,'active');assert.equal(second.backend.phase,'prompt_intent');assert.equal(count(h,'agent','prompt'),1);assert.equal(count(h,'agent','start'),1);
+  const encoded=JSON.stringify(readHerdrTrace(h.ports));assert.ok(encoded.includes('agent.prompt'));assert.ok(!encoded.includes('lost reply'));
 });

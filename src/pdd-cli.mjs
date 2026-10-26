@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 4dbe0b1fcd25c92754f7d52f300706b353f392035ff9ae652fc3e60226ce6545).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: a02bdfa8ca9018d20b67ff7484e4cf6c70866e1d85e547c10457fb37562fc8c9).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -165,14 +165,17 @@ export async function runPdd(argv, dependencies = {}) {
         Object.assign(ports,{loadGuidance,launchNativeSession:nativeSession});
         if(plan.local==='workflow-drive') return printResult(await runner.driveWorkflow(input,ports));
         if(plan.local==='workflow-attach') return printResult(await runner.attachWorkflow(input,ports));
+        const {traceHerdrRequest}=await import('./herdr-trace.mjs');
         let prepared;
         if(plan.local==='workflow-run') {
           const launch=await launchInput(plan); if(launch.exitCode!==undefined) return launch.exitCode;
-          prepared=await runner.prepareWorkflow({name:plan.operands[0],issue:plan.operands[1],packageRoot,...launch},ports);
-        } else prepared=await runner.resumeWorkflow(input,ports);
+          const request={name:plan.operands[0],issue:plan.operands[1],packageRoot,...launch};
+          prepared=await traceHerdrRequest({operation:'workflow.prepare',request},()=>runner.prepareWorkflow(request,ports),ports);
+        } else prepared=await traceHerdrRequest({operation:'workflow.resume',request:input},()=>runner.resumeWorkflow(input,ports),ports);
         if(prepared?.state!=='prepared') return printResult(prepared);
         const controller=workflowController??await import('./workflow-controller.mjs');
-        const result=await controller.startWorkflowController({...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null},ports);
+        const controllerInput={...prepared,decision:plan.options['--decision']?{decision:decision.decision,id:decision.decisionId,rev:decision.expectedRev,...(decision.expect?{expectStage:decision.expect.stage,expectSeq:decision.expect.seq}:{})}:null};
+        const result=await traceHerdrRequest({operation:'controller.start',request:controllerInput},()=>controller.startWorkflowController(controllerInput,ports),ports);
         const started=result?.state==='started';
         line(started?stdout:stderr,started?`Started workflow ${prepared.runId}.`:'Workflow controller launch unconfirmed. Inspect the saved run before retrying.');
         return started?0:1;
@@ -253,7 +256,7 @@ export async function runPdd(argv, dependencies = {}) {
       }catch {line(stderr,'Public setup could not be completed. Use the verified PDD installer or ~/.pdd/launcher/pdd-launch recover, then rerun pdd setup.');return 1;}
     }
     case 'doctor': {
-      try {const mod=doctorModule??await import('./doctor.mjs');const exitCode=await mod.runDoctorCommand(argv.slice(1),{...(clientAdapter?.doctorChecks?{clientAdapter}:{}),...doctorDeps,cwd,packageRoot,stdout,stderr});if(![0,1,2].includes(exitCode))throw Error();return exitCode;}
+      try {const mod=doctorModule??await import('./doctor.mjs');const exitCode=await mod.runDoctorCommand(argv.slice(1),{...(clientAdapter?.doctorChecks?{clientAdapter}:{}),home,...doctorDeps,cwd,packageRoot,stdout,stderr});if(![0,1,2].includes(exitCode))throw Error();return exitCode;}
       catch {line(stderr,'Public diagnostics unavailable. Check the selected package.');return 1;}
     }
     case 'projects': case 'models': {
