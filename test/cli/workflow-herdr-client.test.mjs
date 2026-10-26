@@ -83,7 +83,7 @@ test('capability checks read only existing panes and fresh OS identity; empty or
 });
 test('opaque alphanumeric pane and creation handles remain exact instead of decimal-only',async()=>{
  const calls=[],argv=['/runtime/node','/runtime/pdd.mjs','workflow','drive','synthetic-run'];
- const {herdr}=await createWorkflowHerdrPorts({platform:'linux',fs:os(),execFile:async(file,args)=>{
+ const {herdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,platform:'linux',fs:os(),execFile:async(file,args)=>{
   calls.push(args);
   if(args[3]==='list')return encoded({panes:[{pane_id:'wA:pZ'}]});
   if(args[3]==='process-info'){assert.equal(args.at(-1),'wA:pZ');return encoded({process_info:{pane_id:'wA:pZ',shell_pid:123,foreground_processes:[{pid:123,argv}]}});}
@@ -117,7 +117,7 @@ test('keeper observations start at actual reads, retain continuity and reset fai
 });
 test('failed delivery, nonzero JSON and malformed replies never retry a mutation or leak raw details',async()=>{
  for(const mode of ['rejected','nonzero','invalid']){
-  let calls=0;const {herdr}=await createWorkflowHerdrPorts({execFile:async()=>{calls++;if(mode==='rejected')throw Object.assign(Error('synthetic-secret'),{code:'ECONNREFUSED'});if(mode==='nonzero')return {code:1,stdout:'',stderr:'synthetic-secret'};return {stdout:'synthetic-secret'};}});
+  let calls=0;const {herdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,execFile:async()=>{calls++;if(mode==='rejected')throw Object.assign(Error('synthetic-secret'),{code:'ECONNREFUSED'});if(mode==='nonzero')return {code:1,stdout:'',stderr:'synthetic-secret'};return {stdout:'synthetic-secret'};}});
   await assert.rejects(herdr.paneRun({session:'default',paneId:'w1:p7',command:'only once'}),e=>e.message==='herdr_command_uncertain'&&!e.message.includes('synthetic-secret'));assert.equal(calls,1);
  }
  const f=fixture(),{herdr}=await createWorkflowHerdrPorts(f.ports);
