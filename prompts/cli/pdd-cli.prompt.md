@@ -178,9 +178,41 @@ the stable service paths and equal-file preservation; the CLI defines no service
 text or second recovery policy. A missing verified runtime/module/lease gives
 finite exit 1 with the public install/recover next step, never a client requirement.
 On public setup success, an explicitly supplied client's runSetupCommand may
-continue optional fleet/tool setup with the original argv. With no client, report
+continue optional fleet/tool setup with the original argv. Without an explicit
+adapter, discover only the fixed installed private entry described below. With no client, report
 public recovery ready and exit 0. Do not perform an account sign-in or erase
 settings in the public step. Discovery/help never loads these effect modules.
+
+### Installed private setup continuation
+
+After public service/readiness work has completed and its update lease has been
+released, an installed private client may continue setup. Resolve only
+`runtime.versionRoot/client/src/fleet/setup.mjs`, relative to the selected
+physical version root beneath this home's `.pdd/versions`. Never search cwd,
+another checkout, a later `current`, environment paths or a command catalogue.
+The private directory's absence means Alpha-only setup. An existing private
+directory with a missing, aliased, nonregular or unusable setup entry refuses
+with finite `this needs the fleet client` guidance; it must not become public
+success. Validate the directory chain from the caller's home through `.pdd`,
+`versions`, the selected version root and each private entry ancestor, not just
+the `client` subtree: a writable parent permits replacement of a safe child.
+Require canonical owned directories and an owned, single-link regular
+entry, without group/world write permissions, before importing it. No private
+module is imported by help, discovery or Alpha-only setup.
+
+Bind only the private module function
+`runSetupCommand(argv.slice(1), {home,linkDir,stdin,stdout,stderr,signal})`, with
+`linkDir` fixed to `<home>/.pdd/link`, actual caller streams (process streams by
+default) and cancellation signal. Await its entire lifetime once and propagate
+only an integer exit code from 0 through 255; an exception or invalid exit is
+unconfirmed, never successful and never retried. Do not spread public ports or
+pass a lease, `verifiedBootstrap`, membership, provider or credential state.
+The private setup owner reacquires its real update lock and owns consent,
+enrollment and recovery. Local enrollment success does not imply Member or
+Provider readiness; preserve its output. File/layout checks here are entry
+selection, not release-signature verification. Authorized checkout enrollment
+uses the owner's direct private export; this installed loader adds no checkout
+fallback. Explicit adapter injection retains its existing reference contract.
 
 ## P1 command routes
 
@@ -305,6 +337,19 @@ A `herdr_not_found` refusal always prints `Herdr not found at <path>`, without
 launching, selecting another PATH binary, or hiding it behind generic failure.
 The missing-path message is local actionable output, never trace payload.
 
+## Persistent Herdr setup
+
+After recording runtime.herdr under the update lease, production setup calls
+`provisionHerdrService({home,runtime,lease},ports)` from the persistent Herdr
+service owner before PDD recovery service provisioning or optional client setup.
+Failure prints its finite repair message and stops continuation. Once the lease
+work succeeds, `ensureDefaultHerdr` must freshly prove transport readiness with
+that runtime before setup reports success. This installs/enables Linux boot
+linger or the macOS login LaunchAgent; no controller/native prompt is sent.
+Explicit setupModules remain an offline owner seam: a supplied herdrService
+module opts that seam into provisioning and readiness; production always uses
+the real module. No command-line switch bypasses the service prerequisite.
+
 ## Native workflow login preflight
 
 For each new local `workflow run`, after placement/model/project selection and
@@ -327,6 +372,13 @@ guidance, never arbitrary messages or success. Accept only valid combinations
 of state/code and selected agent, and use fixed CLI diagnostics derived from them.
 
 ## Dependencies
+
+- Installed-only required interface: `client/src/fleet/setup.mjs` module function
+  `runSetupCommand(argv,{home,linkDir,stdin,stdout,stderr,signal}) -> Promise<integer>`.
+  Required only at installed private setup runtime; Join owns its real enrollment
+  and lock behavior. Public Alpha does not bundle or require this private module.
+
+- [Persistent Herdr service](workflow-herdr-service.prompt.md): required generation/runtime for setup service enablement and finite failure results.
 
 - [Public update command](update-command.prompt.md): required generation/runtime for package-local status and finite absent-selector results.
 

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/herdr-trace.prompt.md (sha256: c714b7119e299f777d0075e32a8e247729bf00a5472b7b33e238383dd1981514).
+// Generated from prompts/cli/herdr-trace.prompt.md (sha256: 1e47071191473b7967cfe6bc79afaf468ad568f427cfb90fe229a70808ceb994).
 import {constants,closeSync,fstatSync,ftruncateSync,lstatSync,mkdirSync,openSync,readSync,realpathSync,unlinkSync,writeSync} from 'node:fs';
 import {join,isAbsolute} from 'node:path';
 import {homedir} from 'node:os';
@@ -97,13 +97,14 @@ function readBounded(fd){
 async function append(value,ports){
   let lock,fd,path,stage;
   try{
-    const deadline=performance.now()+250;
+    let deadline;
     for(;;){
       path=location(ports,true);stage='lock';
-      if(performance.now()>deadline)throw traceFault('busy');
+      if(deadline!==undefined&&performance.now()>deadline)throw traceFault('busy');
       try{lock=openSync(path+'.lock',constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);break;}
       catch(error){
         if(error?.code!=='EEXIST')throw error;
+        deadline??=performance.now()+250;
         const left=deadline-performance.now();if(left<=0)throw traceFault('busy');
         await new Promise(resolve=>setTimeout(resolve,Math.min(10,left)));
         if(performance.now()>deadline)throw traceFault('busy');

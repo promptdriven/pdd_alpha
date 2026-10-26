@@ -27,7 +27,12 @@ permissive log directories/files and oversized input; never repair, follow or
 replace such a target. Bound the trace to 1 MiB and each record to 4096 bytes.
 When compacting, retain at most the last 200 positively projected records within
 that bound. An existing writer lock is transient contention: asynchronously wait for at most
-250 monotonic milliseconds per record, retrying only exclusive lock acquisition
+250 monotonic milliseconds per record from the first exclusive acquisition that
+reports an existing writer. Safe location validation must precede acquisition,
+but slow initial validation alone is not writer contention: attempt acquisition
+once before classifying the sink as busy. After contention begins, validation
+and waits share that same deadline; never renew it or attempt acquisition after
+it expires. Retry only exclusive lock acquisition
 at intervals of at most 10ms and revalidating directory safety after each wait.
 Do not block the event loop, steal/remove another writer's lock, or retry file
 writes or API effects. A lock still busy at the deadline or an unavailable sink

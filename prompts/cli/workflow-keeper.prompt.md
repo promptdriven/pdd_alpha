@@ -101,8 +101,28 @@ A confirmed absent default server returns `needs_you / herdr_not_found`,
 Herdr service, then inspect pdd workflow status before resuming the saved run.`
 Clear observation continuity and launch nothing. Unknown or malformed server
 observations remain `herdr_unsettled`; they do not establish absence. Preserve
-missing-executable path diagnostics separately. Service startup remains the
-C19 service owner's contract, not a reason to bypass observation or identity.
+missing-executable path diagnostics separately. For factory-composed keeper recovery, after this explicit absence and a valid
+saved runtime, call the boot owner's `ensureDefaultHerdr(ports)` with that strict
+journal Runtime, preserving explicit supplied callback references. Never call it
+for a missing executable, an unknown/malformed observation, or an ineligible run.
+It owns the single bounded startup request, including selecting the installed
+service; keeper never installs, stops or restarts a service itself.
+
+Within this keeper lifetime, fence one startup attempt per home/full saved
+Runtime and continuous absence episode before awaiting the helper. Share that
+fence across entries and passes, including concurrent callers, helper errors and
+lost replies. Only a fresh complete PID/start-bound server observation ends the
+episode; unknown observations cannot reset it. Explicit absent-server evidence
+after a later proved running server can authorize one new attempt. Changed
+runtime bindings are independent, never substituted for a previous one.
+A ready helper result is only transport readiness: report stopped/herdr_unsettled
+for this pass, leave the free-lock memo empty, and require later fresh C18 server
+settling and two free-lock observations before a controller launch. A failed or
+uncertain startup retains the actionable C20 absence diagnostic and gives no
+retry/launch authority; a known missing executable retains its exact path reason.
+An explicit reconciliation caller without a startup binding remains observation-only;
+the production factory supplies the default. Service startup is not permission
+to bypass observation, runtime, eligibility or controller identity.
 
 ## Explain every recovery decision
 
@@ -186,6 +206,8 @@ recovery must preserve its separate service/context, including when initially ab
 update, with one current stage process and no repeated first prompt.
 
 ## Dependencies
+
+- [Default Herdr readiness](workflow-herdr-boot.prompt.md): required generation/runtime for the bounded `ensureDefaultHerdr` module function; installed-service selection belongs to its service dependency. Factory fills only a missing callback.
 
 - [Keeper decisions](workflow-keeper-log.prompt.md): required generation/runtime for bounded per-pass diagnostics; no launch authority.
 

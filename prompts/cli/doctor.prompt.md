@@ -135,7 +135,37 @@ continuation or a staged-version self-test.
 
 </details>
 
+## Herdr boot persistence
+
+Normal text/JSON/report diagnostics include `checkHerdrService` from the public
+service owner, unless explicit alphaChecks supplies the whole offline observation
+seam. Report its enabled/running/linger result without effects. Candidate-only
+`--check-only` skips this machine-service check because staged software has not
+been provisioned; it still performs all existing local module/runtime checks.
+Include herdr-service in the redacted diagnostic vocabulary. No client adapter
+is needed for this public check.
+
+## Herdr client/server features
+
+Outside --check-only, default local diagnostics include a separate herdr-version
+feature row from `inspectHerdrVersion({session:'default'}, deps)` in the
+[version owner](workflow-herdr-version.prompt.md). Compatible is pass; absent,
+incompatible or unavailable is fail with its bounded next step. This reads only
+status and may print a quoted, exact live-handoff repair command when that owner
+verified support; doctor never executes it. Installed versions/protocols are display facts, never fixed-version gates. Keep C19 service health separate:
+a running service does not prove client/server compatibility. Candidate
+--check-only skips this machine observation without spawning Herdr. An explicit
+alphaChecks adapter remains authoritative for its own check list. Support-report
+redaction keeps version repair paths/argv out of shared diagnostics. The report
+retains the stable herdr-version check id and its pass/fail/skip state; this
+public machine check must not be relabeled client-check. Its detail and next
+remain redacted to the same local diagnostic vocabulary as other known checks.
+
 ## Dependencies
+
+- [Herdr version](workflow-herdr-version.prompt.md): required generation/runtime for read-only machine compatibility and pane-preserving guidance.
+
+- [Persistent Herdr service](workflow-herdr-service.prompt.md): generation/runtime for read-only machine service observations.
 
 - [Prompting guide](../../docs/prompting-guide.md): authoring.
 - [Herdr diagnostics](herdr-trace.prompt.md) and [Git diagnostics](git-trace.prompt.md):

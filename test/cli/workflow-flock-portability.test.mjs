@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {fileURLToPath} from 'node:url';
+import {execFile,spawn} from 'node:child_process';
+import {promisify} from 'node:util';
+import {once} from 'node:events';
+const execute=promisify(execFile);
+test('host-built flock retains exclusion across exec and refuses symlink locks',async t=>{
+ const root=await fs.mkdtemp(join(tmpdir(),'pdd-flock-portable-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const binary=join(root,'pdd-flock'),lock=join(root,'claim.lock');
+ await execute('cc',['-O2','-Wall','-Wextra','-Werror',fileURLToPath(new URL('../../src/workflow-flock.c',import.meta.url)),'-o',binary]);
+ const held=spawn(binary,['hold',lock],{stdio:['pipe','pipe','pipe']});const ended=once(held,'exit');t.after(async()=>{held.stdin.end();await ended;});
+ assert.equal((await once(held.stdout,'data'))[0].toString(),'held\n');
+ await assert.rejects(execute(binary,['exec',lock,'--','/bin/sh','-c','exit 0']),e=>e.code===75);
+ held.stdin.end();await ended;
+ assert.equal((await execute(binary,['exec',lock,'--','/bin/sh','-c','printf portable'])).stdout,'portable');
+ const link=join(root,'symlink');await fs.symlink(lock,link);await assert.rejects(execute(binary,['hold',link]),e=>e.code===70);
+});

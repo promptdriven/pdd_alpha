@@ -185,3 +185,57 @@ test('C20 absent server needs the person and clears prior continuity without lau
  const [row]=await f.pass(60000);assert.equal(row.state,'needs_you');assert.equal(row.code,'herdr_not_found');assert.match(row.message,/Herdr is not running.*pdd setup/);assert.equal(row.reason,'server_absent');assert.equal(f.calls.length,0);assert.equal(f.ports.observations.size,0);assert.equal(rows.at(-1).reason,'server_absent');
  f.ports.observeHerdr=async()=>({complete:true,upSince:0,stableSince:0});assert.equal((await f.pass(90000))[0].code,'observing_lock');assert.equal(f.calls.length,0);
 });
+
+
+const c19Absent={complete:false,upSince:null,stableSince:null,code:'herdr_not_found',reason:'server_absent',message:'Herdr is not running. Run pdd setup to start the Herdr service, then inspect pdd workflow status before resuming the saved run.'};
+test('C19 keeper boots only explicit absence with saved runtime and waits for fresh settling and both lock checks',async()=>{
+ const f=fixture(),runtime={releaseId:'saved',herdr:'/saved/herdr'},boots=[];f.state.runtime=runtime;f.ports.runtime={releaseId:'current',herdr:'/other/herdr'};
+ let observation=c19Absent;f.ports.observeHerdr=async()=>observation;
+ f.ports.ensureDefaultHerdr=async p=>{assert.equal(p.runtime,runtime);assert.equal(p.observeHerdr,f.ports.observeHerdr);boots.push(p);return {state:'ready'};};
+ assert.equal((await f.pass(30000))[0].code,'herdr_unsettled');assert.equal(boots.length,1);assert.equal(f.calls.length,0);
+ assert.equal((await f.pass(60000))[0].state,'needs_you');assert.equal(boots.length,1,'same absent episode never repeats startup');
+ observation={complete:false};await f.pass(90000);observation=c19Absent;await f.pass(120000);assert.equal(boots.length,1,'unknown cannot reset startup fence');
+ observation={complete:true,server:{pid:321,startIdentity:'boot:one'},upSince:150000,stableSince:150000};
+ assert.equal((await f.pass(150000))[0].code,'herdr_unsettled');assert.equal((await f.pass(180000))[0].code,'observing_lock');assert.equal(f.calls.length,0);
+ assert.equal((await f.pass(210000))[0].state,'started');assert.equal(f.calls.length,1);
+ observation=c19Absent;await f.pass(240000);assert.equal(boots.length,2,'a new absence after proved service may request one startup');
+});
+
+test('C19 keeper absence startup remains fenced across errors concurrent passes and different run entries',async()=>{
+ const f=fixture();let boots=0,release;const pending=new Promise(r=>{release=r;});f.ports.observeHerdr=async()=>c19Absent;f.ports.ensureDefaultHerdr=async()=>{boots++;await pending;throw Error('lost manager reply');};
+ const first=f.pass(30000);await new Promise(r=>setImmediate(r));const second=f.pass(30000);release();await Promise.all([first,second]);assert.equal(boots,1);assert.equal(f.calls.length,0);
+ const other='123e4567-e89b-42d3-a456-426614174000';f.entries.push({...f.entries[0],runId:other,runDir:'/saved/'+other});f.ports.readWorkflowJournal=async({runDir})=>({state:{...f.state,runId:runDir.endsWith(other)?other:runId},seq:1});
+ await f.pass(60000);assert.equal(boots,1);assert.equal(f.calls.length,0);
+});
+
+test('C19 keeper never starts on unknown proof missing executable invalid runtime or human wait',async()=>{
+ for(const mode of ['unknown','missing-executable','invalid-runtime','human-wait']){
+  const f=fixture();let boots=0;f.ports.ensureDefaultHerdr=async()=>{boots++;return {state:'ready'};};
+  f.ports.observeHerdr=async()=>mode==='unknown'?{complete:false}:mode==='missing-executable'?{complete:false,code:'herdr_not_found',message:'Herdr not found at /saved/herdr'}:c19Absent;
+  if(mode==='invalid-runtime')f.ports.checkWorkflowRuntime=async()=>({ok:false,code:'runtime_missing'});
+  if(mode==='human-wait')f.state.controlState='waiting_person';
+  await f.pass(30000);await f.pass(60000);assert.equal(boots,0,mode);assert.equal(f.calls.length,0,mode);
+ }
+});
+
+test('C19 keeper factory fills startup without invoking it and preserves explicit startup callback',async()=>{
+ const {createWorkflowKeeperPorts}=await import('../../src/workflow-keeper.mjs');const f=fixture();let invoked=0;const callback=async()=>{invoked++;return {state:'ready'};};
+ const supplied=await createWorkflowKeeperPorts({...f.ports,ensureDefaultHerdr:callback});assert.equal(supplied.ensureDefaultHerdr,callback);assert.equal(invoked,0);
+ const defaults=await createWorkflowKeeperPorts(f.ports);assert.equal(typeof defaults.ensureDefaultHerdr,'function');assert.equal(invoked,0);
+});
+
+test('C19 real boot and service composition starts the exact installed unit once without admitting a controller',async t=>{
+ const {createWorkflowKeeperPorts}=await import('../../src/workflow-keeper.mjs');
+ const {herdrServiceFiles}=await import('../../src/workflow-herdr-service.mjs');
+ const home=await folder(t),f=fixture(),runtime={releaseId:'saved',herdr:process.execPath};
+ const [definition]=herdrServiceFiles({home,herdr:process.execPath,platform:'linux'});
+ await fs.mkdir(join(home,'.config/systemd/user'),{recursive:true,mode:0o700});await fs.writeFile(definition.path,definition.text,{mode:0o600});
+ f.state.runtime=runtime;const commands=[];let ready=false;
+ const ports=await createWorkflowKeeperPorts({...f.ports,home,platform:'linux',runtime:{releaseId:'new',herdr:'/wrong/herdr'},env:{PATH:''},observeHerdr:async()=>c19Absent,
+  execFile:async(file,args,options)=>{commands.push({file,args});assert.equal(options.shell,false);assert.ok(options.timeout>0&&options.timeout<=5000);
+   if(file===process.execPath){assert.deepEqual(args,['--session','default','workspace','list']);return ready?{stdout:JSON.stringify({result:{workspaces:[]}}),code:0}:{stdout:'',code:1};}
+   assert.equal(file,'systemctl');assert.deepEqual(args,['--user','start','pdd-herdr-default.service']);ready=true;return {stdout:'',code:0};}});
+ const [row]=await reconcileWorkflowControllers({entries:f.entries,now:30000},ports);
+ assert.equal(row.code,'herdr_unsettled');assert.equal(f.calls.length,0);assert.deepEqual(commands.map(x=>x.file),[process.execPath,'systemctl',process.execPath]);
+ await reconcileWorkflowControllers({entries:f.entries,now:60000},ports);assert.equal(commands.length,3,'continued absence cannot replay manager startup');assert.equal(f.calls.length,0);
+});

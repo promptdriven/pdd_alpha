@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-claims.prompt.md (sha256: 616ba04d175a6bf7ae835b9406ff158d80028ae7ee39d96a92b0339088e8a78e).
+// Generated from prompts/cli/workflow-claims.prompt.md (sha256: 3d61ef638c783860141df891b7dd91f8f8da4a7b3b980e3f41b129f4bed046c4).
 import { spawn } from 'node:child_process';
 import { mkdir, access } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';

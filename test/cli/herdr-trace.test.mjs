@@ -190,3 +190,26 @@ test('issue21 C11 waits on outcome-record contention and preserves the original 
  },p),e=>e===error);
  assert.equal(calls,1);assert.deepEqual(warnings,[]);assert.deepEqual(readHerdrTrace(p).map(r=>r.phase),['request','error']);
 });
+
+test('slow initial directory validation is not writer contention and preserves request and outcome',t=>{
+ const p=fixture(t);
+ // Delay actual filesystem validation in an isolated child; no competing writer
+ // exists, and no production clock or filesystem port bypasses the safety checks.
+ const script=`import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+const home=process.argv[1],original=fs.realpathSync,wait=new Int32Array(new SharedArrayBuffer(4));
+let validations=0;
+fs.realpathSync=function(path,...args){if(path===home){validations++;Atomics.wait(wait,0,0,300);}return original.call(this,path,...args);};
+syncBuiltinESMExports();
+const {traceHerdrRequest,readHerdrTrace}=await import(${JSON.stringify(new URL('../../src/herdr-trace.mjs',import.meta.url).href)});
+const warnings=[],ports={home,env:{PDD_TRACE:'herdr'},stderr:{write:text=>warnings.push(text)}};
+let calls=0;const reply={same:true},error=Object.assign(Error('private error'),{code:'ECONNREFUSED'});
+const result=await traceHerdrRequest({operation:'workspace.list'},()=>{calls++;return reply;},ports);
+let caught;try{await traceHerdrRequest({operation:'workspace.list'},()=>{calls++;throw error;},ports);}catch(e){caught=e;}
+fs.realpathSync=original;syncBuiltinESMExports();
+const rows=readHerdrTrace(ports);
+console.log(JSON.stringify({validations,calls,sameReply:result===reply,sameError:caught===error,warnings,phases:rows.map(r=>r.phase),paired:rows.length===4&&rows[0].traceId===rows[1].traceId&&rows[2].traceId===rows[3].traceId}));`;
+ const child=spawnSync(process.execPath,['--input-type=module','-e',script,p.home],{encoding:'utf8',timeout:15000});
+ assert.equal(child.error,undefined);assert.equal(child.status,0,child.stderr);assert.equal(child.stderr,'');
+ assert.deepEqual(JSON.parse(child.stdout),{validations:4,calls:2,sameReply:true,sameError:true,warnings:[],phases:['request','reply','request','error'],paired:true});
+});

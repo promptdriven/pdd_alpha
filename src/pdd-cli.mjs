@@ -1,9 +1,10 @@
-// Generated from prompts/cli/pdd-cli.prompt.md (sha256: 29296f1554e543b17fb00cebbd9b2fdefbf782759214e2d76db91362b7efdf08).
+// Generated from prompts/cli/pdd-cli.prompt.md (sha256: f008899e8d74d404fdb2020d51a23f9b4259f9eab731e58de752c0c78a5b9556).
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync }  from 'node:fs';
+import { lstat, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadGuidance } from './guidance.mjs';
 import { launchNativeSession } from './native-session.mjs';
 import { CommandInputError, parseArgv } from './argument-parser.mjs';
@@ -31,6 +32,24 @@ export function renderHelp(prefix = []) {
 function guidanceError(stderr) {
   line(stderr, 'The complete PDD guidance could not be read. Use a package containing the canonical guide, skill, references and manual recipes.');
   return 1;
+}
+async function installedSetup(runtime,home) {
+  // An explicit offline owner may have no installed Runtime at all.
+  if(!runtime?.versionRoot)return null;
+  const root=runtime.versionRoot;
+  if(dirname(root)!==join(home,'.pdd/versions')||await realpath(root)!==root)throw Error('private entry unavailable');
+  const client=join(root,'client');
+  try{await lstat(client);}catch(error){if(error.code==='ENOENT')return null;throw error;}
+  const entry=join(client,'src/fleet/setup.mjs');
+  for(const path of [home,join(home,'.pdd'),join(home,'.pdd/versions'),root,client,join(client,'src'),join(client,'src/fleet'),entry]){
+    const stat=await lstat(path);
+    if(await realpath(path)!==path||stat.isSymbolicLink()||(stat.mode&0o022)
+      ||typeof process.getuid==='function'&&stat.uid!==process.getuid()
+      ||(path===entry?(!stat.isFile()||stat.nlink!==1):!stat.isDirectory()))throw Error('private entry unavailable');
+  }
+  const module=await import(pathToFileURL(entry).href);
+  if(typeof module.runSetupCommand!=='function')throw Error('private entry unavailable');
+  return module;
 }
 // One public production composition root. Factories stay lazy so discovery
 // cannot accidentally construct service transports or workflow authority.
@@ -63,7 +82,7 @@ export async function createPddCliPorts(ports = {}, {capability, ...options} = {
   throw new Error('Unsupported CLI port capability');
 }
 export async function runPdd(argv, dependencies = {}) {
-  const {stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
+  const {stdout = process.stdout, stderr = process.stderr, stdin = process.stdin, signal, cwd = process.cwd(), packageRoot = PACKAGE_ROOT,
     nativeSession = launchNativeSession, workflowRunner, workflowDefinitions, workflowStages, workflowDecider,
     phoneCli, clientAdapter = phoneCli, workflowController, workflowHerdrBoot, workflowKeeper, workflowCleaner, workflowRuntime, nativeAgentAuth,
     workflowRecords, workflowProjects, workflowModels, workflowPlacement, machinePlacement,
@@ -331,17 +350,30 @@ export async function runPdd(argv, dependencies = {}) {
           if(failure){nativeLoginFailure(failure);return 1;}
         }
         if(!await readyHerdr('ensureHerdrInstalled'))return 1;
+        const herdrService=modules.herdrService??(!dependencies.setupModules?await import('./workflow-herdr-service.mjs'):null);
         const result=await lock.withUpdateLock({home},async lease=>{
           const binding=modules.herdrRuntime??await import('./workflow-herdr-executable.mjs');
           runtime=await binding.recordHerdrRuntime({home,runtime,herdr:readyHerdrExecutable,lease},ports);
+          if(herdrService){const service=await herdrService.provisionHerdrService({home,runtime,lease},ports);if(service?.code!==null)return service;}
           const support=await launcher.installLauncherSupport({home,runtime,lease},ports);
           if(support?.code!==null)return support;
           return launcher.provisionRecoveryService({home,runtime,lease},ports);
         },ports);
-        if(result?.code!==null)throw Error();
+        if(result?.code!==null){if(result?.code==='herdr_service_unavailable'||result?.code==='herdr_not_found'){line(stderr,safeLabel(result.message));return 1;}throw Error();}
+        if(herdrService&&!await readyHerdr('ensureDefaultHerdr',runtime))return 1;
         if(clientAdapter?.runSetupCommand) {
           const exit=await clientAdapter.runSetupCommand(argv.slice(1),{...ports,cwd,packageRoot});
           if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();return exit;
+        }
+        if(clientAdapter===undefined){
+          let client;
+          try{client=await installedSetup(runtime,home);}catch{return unsupported();}
+          if(client){
+            try{
+              const exit=await client.runSetupCommand(argv.slice(1),{home,linkDir:join(home,'.pdd/link'),stdin,stdout,stderr,signal});
+              if(!Number.isInteger(exit)||exit<0||exit>255)throw Error();return exit;
+            }catch{line(stderr,'Optional client command unconfirmed. Inspect local state before retrying.');return 1;}
+          }
         }
         line(stdout,'Public recovery service ready.');return 0;
       }catch(error) {if(error?.code==='herdr_not_found'){line(stderr,safeLabel(error.message));return 1;}line(stderr,'Public setup could not be completed. Use the verified PDD installer or ~/.pdd/launcher/pdd-launch recover, then rerun pdd setup.');return 1;}

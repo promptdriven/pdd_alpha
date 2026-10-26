@@ -154,21 +154,40 @@ test('explicit model and project dependency references win without any productio
 // The child has a private HOME and a service-protocol stand-in at PATH's
 // external edge; it cannot contact the host user service manager.
 test('public setup uses real verified runtime, install helper, update lease and launcher before the external service edge',{skip:process.platform!=='linux'},async t=>{
- const f=await fixture(t),log=join(f.home,'service-requests.jsonl');
- await fs.writeFile(join(f.tools,'herdr'),'#!/bin/sh\nprintf "herdr synthetic\\n"\n',{mode:0o700});
+ const f=await fixture(t),log=join(f.home,'service-requests.jsonl'),herdrLog=join(f.home,'herdr-requests.jsonl');
+ await fs.writeFile(join(f.tools,'herdr'),`#!${process.execPath}
+const fs=await import('node:fs'),args=process.argv.slice(2);
+// SYNTHETIC OFFLINE executable smoke check, not version or feature acceptance.
+fs.appendFileSync(process.env.HERDR_EDGE_LOG,JSON.stringify(args)+'\\n');
+if(JSON.stringify(args)===JSON.stringify(['--help'])){console.log('Usage: herdr [command]');process.exit(0);}
+if(JSON.stringify(args)!==JSON.stringify(['--session','default','workspace','list']))process.exit(94);
+if(!fs.existsSync(process.env.HERDR_EDGE_STATE))process.exit(1);
+console.log(JSON.stringify({result:{workspaces:[]}}));
+`,{mode:0o700});
  await fs.writeFile(join(f.tools,'systemctl'),`#!${process.execPath}
 const fs=await import('node:fs');
 const args=process.argv.slice(2);
-if(![['--user','daemon-reload'],['--user','enable','--now','pdd-runs-keeper.service']].some(a=>JSON.stringify(a)===JSON.stringify(args)))process.exit(95);
+if(![['--user','daemon-reload'],['--user','enable','pdd-herdr-default.service'],['--user','is-enabled','pdd-herdr-default.service'],['--user','start','pdd-herdr-default.service'],['--user','enable','--now','pdd-runs-keeper.service']].some(a=>JSON.stringify(a)===JSON.stringify(args)))process.exit(95);
 fs.appendFileSync(process.env.SERVICE_EDGE_LOG,JSON.stringify(args)+'\\n');
+if(args[1]==='enable'&&args[2]==='pdd-herdr-default.service')fs.writeFileSync(process.env.HERDR_EDGE_STATE+'.enabled','enabled');
+if(args[1]==='is-enabled'){if(!fs.existsSync(process.env.HERDR_EDGE_STATE+'.enabled'))process.exit(1);console.log('enabled');}
+if(args[1]==='start')fs.writeFileSync(process.env.HERDR_EDGE_STATE,'running');
+`,{mode:0o700});
+ await fs.writeFile(join(f.tools,'loginctl'),`#!${process.execPath}
+const fs=await import('node:fs'),args=process.argv.slice(2),uid=String(process.getuid());
+if(JSON.stringify(args)===JSON.stringify(['--no-ask-password','enable-linger',uid]))fs.writeFileSync(process.env.HERDR_EDGE_STATE+'.linger','yes');
+else if(JSON.stringify(args)===JSON.stringify(['show-user',uid,'--property=Linger','--value'])){if(!fs.existsSync(process.env.HERDR_EDGE_STATE+'.linger'))process.exit(1);console.log('yes');}
+else process.exit(96);
 `,{mode:0o700});
  const script=`import {runPdd} from ${JSON.stringify(pathToFileURL(join(repo,'src/pdd-cli.mjs')).href)};
 process.exitCode=await runPdd(['setup'],{home:process.env.HOME,cwd:process.env.HOME,packageRoot:process.env.PACKAGE_EDGE_ROOT});`;
- const env={...f.env,SERVICE_EDGE_LOG:log,PACKAGE_EDGE_ROOT:f.versionRoot,DBUS_SESSION_BUS_ADDRESS:'unix:path=/nonexistent/pdd-test-bus'};
+ const env={...f.env,HERDR_EDGE_STATE:join(f.home,'herdr-service-state'),HERDR_EDGE_LOG:herdrLog,SERVICE_EDGE_LOG:log,PACKAGE_EDGE_ROOT:f.versionRoot,DBUS_SESSION_BUS_ADDRESS:'unix:path=/nonexistent/pdd-test-bus'};
  const result=await execute(process.execPath,['--input-type=module','--eval',script],{env,timeout:15000});
  assert.match(result.stdout,/Public recovery service ready/);assert.equal(result.stderr,'');
+ assert.deepEqual((await fs.readFile(herdrLog,'utf8')).trim().split('\n').map(JSON.parse),[['--help'],['--session','default','workspace','list'],['--session','default','workspace','list']]);
  assert.deepEqual((await fs.readFile(f.authLog,'utf8')).trim().split('\n').map(JSON.parse),[{args:['login','status'],cwd:f.home,home:f.home}]);
- assert.deepEqual((await fs.readFile(log,'utf8')).trim().split('\n').map(JSON.parse),[['--user','daemon-reload'],['--user','enable','--now','pdd-runs-keeper.service']]);
+ assert.deepEqual((await fs.readFile(log,'utf8')).trim().split('\n').map(JSON.parse),[['--user','daemon-reload'],['--user','enable','pdd-herdr-default.service'],['--user','is-enabled','pdd-herdr-default.service'],['--user','daemon-reload'],['--user','enable','--now','pdd-runs-keeper.service'],['--user','start','pdd-herdr-default.service']]);
+ assert.match(await fs.readFile(join(f.home,'.config/systemd/user/pdd-herdr-default.service'),'utf8'),/ExecStart=.*herdr.* server/);
  assert.match(await fs.readFile(join(f.home,'.config/systemd/user/pdd-runs-keeper.service'),'utf8'),/cli runs-keeper/);
  assert.ok((await fs.stat(join(f.home,'.pdd/launcher/pdd-launch'))).mode&0o100);
  const lockBefore=await fs.stat(join(f.home,'.pdd/update.lock'));

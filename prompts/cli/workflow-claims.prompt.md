@@ -23,6 +23,9 @@ validated native id from Herdr/session history. Busy starts nothing and says
 `<kind> session <id> already runs here`. PID files, stale timestamps and
 unlinking a held lock are not exclusion. Mac and Linux must prove the actual
 flock helper and descriptor inheritance; no Linux-only shell command fallback.
+The C helper must expose Darwin flock and O_NOFOLLOW declarations while retaining
+its POSIX feature level: define _DARWIN_C_SOURCE under __APPLE__ immediately after
+_POSIX_C_SOURCE. Preserve the stable inode, no-follow open and cross-exec lock.
 
 For a stage, `owner` is `{runId,attemptId,backendGen}` from the journal.
 `nativeSessionId:null` is allowed only for this provisional owner, never as an

@@ -1,4 +1,4 @@
-// Generated from prompts/cli/pdd-launch.prompt.md (sha256: b7b5e8195058e18c953f1ce23165ca7ec7213293c05c9981764aa046cf27db3c).
+// Generated from prompts/cli/pdd-launch.prompt.md (sha256: df97942d481fffe8e12f078eb034b628cbc049f63074219a02d00652d9d85878).
 import * as fs from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -15,8 +15,26 @@ import { ensurePrivateDirectory, repairPrivateTree } from './pdd-directory.mjs';
 const execFileAsync = promisify(execFile);
 const fail = code => ({ code, next: 'Run ~/.pdd/launcher/pdd-launch recover; retain the install record for inspection.' });
 const equal = (a, b) => a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b);
-export async function localProcessProof(pid = process.pid) {
-  if (process.platform !== 'linux') return null;
+const macStartTime = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/;
+export async function localProcessProof(pid = process.pid, ports = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error('recovery_required');
+  const platform = ports.platform ?? process.platform;
+  if (platform === 'darwin') {
+    const run = ports.execFile ?? execFileAsync;
+    const config = { encoding: 'utf8', timeout: 5000, maxBuffer: 4096, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC0' } };
+    try {
+      const boot = (await run('/usr/sbin/sysctl', ['-n', 'kern.boottime'], config)).stdout;
+      const match = /^\{\s*sec\s*=\s*(\d+),\s*usec\s*=\s*(\d+)\s*\}/.exec(boot.trim());
+      if (!match) throw new Error('unreadable boot identity');
+      const birth = (await run('/bin/ps', ['-p', String(pid), '-o', 'lstart='], config)).stdout.trim().replace(/\s+/g, ' ');
+      if (!macStartTime.test(birth)) throw new Error('unreadable process identity');
+      return { pid, birth: `darwin-lstart:${birth}`, bootId: `darwin-boottime:${match[1]}:${match[2]}` };
+    } catch {
+      try { (ports.killProcess ?? process.kill)(pid, 0); } catch (e) { if (e.code === 'ESRCH') return null; }
+      throw new Error('recovery_required');
+    }
+  }
+  if (platform !== 'linux') return null;
   try {
     const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
     const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
@@ -24,10 +42,21 @@ export async function localProcessProof(pid = process.pid) {
     return { pid, birth: fields[19], bootId: (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim() };
   } catch (e) { if (e.code === 'ENOENT' || e.code === 'ESRCH') return null; throw e; }
 }
+async function terminateMatchingProcess(proof, ports) {
+  if ((ports.platform ?? process.platform) === 'darwin') {
+    // Recheck immediately before the synchronous signal; no Linux helper on Mac.
+    if (!equal(await localProcessProof(proof.pid, ports), proof)) throw new Error('recovery_required');
+    try { (ports.killProcess ?? process.kill)(proof.pid, 'SIGKILL'); }
+    catch (e) { if (e.code !== 'ESRCH') throw e; }
+    return;
+  }
+  if ((ports.platform ?? process.platform) !== 'linux') throw new Error('recovery_required');
+  await execFileAsync(kernelLockHelper, ['--terminate', String(proof.pid), String(proof.birth)]);
+}
 async function processState(proof, ports) {
   if (!proof) return 'unknown';
   if (ports.processState) return ports.processState(proof);
-  try { return equal(await localProcessProof(proof.pid), proof) ? 'live' : 'dead'; } catch { return 'unknown'; }
+  try { return equal(await localProcessProof(proof.pid, ports), proof) ? 'live' : 'dead'; } catch { return 'unknown'; }
 }
 export async function replaceInstallPointer({ home, name, runtime }, io = fs) {
   if (!['current', 'previous'].includes(name)) throw new Error('invalid pointer');
@@ -123,7 +152,7 @@ async function reconcileLocked({ home, lease, attemptId, deadline = false }, por
   }
   const status = await processState(attempt.processProof, ports);
   if (status === 'unknown') return fail('recovery_required');
-  const now = ports.now ? await ports.now() : { bootId: (await localProcessProof())?.bootId, elapsedMs: uptime() * 1000 };
+  const now = ports.now ? await ports.now() : { bootId: (await localProcessProof(process.pid, ports))?.bootId, elapsedMs: uptime() * 1000 };
   const elapsed = now.bootId === attempt.bootId && now.elapsedMs >= attempt.deadlineAt;
   if (status === 'live' && !elapsed) return { runtime, phase: 'starting', live: true, code: null };
   const next = structuredClone(record);
@@ -131,10 +160,8 @@ async function reconcileLocked({ home, lease, attemptId, deadline = false }, por
   const written = await save(home, lease, record, next, ports);
   if (written.code) return written;
   if (status === 'live' && elapsed) {
-    // Kernel pidfd termination on Linux prevents a reused pid from targeting a successor.
-    const terminate = ports.terminateProcess ?? (async proof => {
-      await execFileAsync(kernelLockHelper, ['--terminate', String(proof.pid), String(proof.birth)]);
-    });
+    // Retain Linux pidfd termination and use freshly matched Darwin proof.
+    const terminate = ports.terminateProcess ?? (proof => terminateMatchingProcess(proof, ports));
     if (await processState(attempt.processProof, ports) === 'live') {
       try { await terminate(attempt.processProof); } catch { return fail('recovery_required'); }
     }
@@ -156,7 +183,7 @@ export async function prepareLinkStart({ home }, ports = {}) {
     const read = await readInstallRecord({ home }, ports);
     if (read.code) return read;
     const record = read.value ?? initialInstallRecord();
-    const proof = ports.selfProof ? await ports.selfProof() : await localProcessProof();
+    const proof = ports.selfProof ? await ports.selfProof() : await localProcessProof(process.pid, ports);
     if (!proof) return fail('recovery_required');
     const now = ports.now ? await ports.now() : { bootId: proof.bootId, elapsedMs: uptime() * 1000 };
     const attempt = { attemptId: randomUUID(), bootId: now.bootId, processProof: proof, startedAt: now.elapsedMs, deadlineAt: now.elapsedMs + 600000, deadlineRegistration: null, state: 'starting' };
@@ -191,7 +218,7 @@ export async function commitStartupReady({ home, attemptId }, ports = {}) {
     const entry = Object.entries(record.starts).find(([, s]) => s.pending?.attemptId === attemptId);
     if (!entry || entry[1].pending.state !== 'starting') return fail('recovery_required');
     const [releaseId, start] = entry, attempt = start.pending;
-    const proof = ports.selfProof ? await ports.selfProof() : await localProcessProof();
+    const proof = ports.selfProof ? await ports.selfProof() : await localProcessProof(process.pid, ports);
     const now = ports.now ? await ports.now() : { bootId: proof?.bootId, elapsedMs: uptime() * 1000 };
     if (!equal(proof, attempt.processProof) || now.bootId !== attempt.bootId || now.elapsedMs < attempt.startedAt || now.elapsedMs >= attempt.deadlineAt) return fail('recovery_required');
     await durableJson(join(home, '.pdd/link/ready'), { attemptId, releaseId, bootId: now.bootId, processProof: proof, readyAt: now.elapsedMs }, ports.fs);

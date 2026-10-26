@@ -78,7 +78,23 @@ owned one-shot deadline, independent of Link's event loop. It invokes the stable
 boot/process identity and the ready record under the lock, commits failure, and
 terminates only the still-matching failed Link so its service manager can restart.
 It exits after that attempt; it is not a continuous supervisor or update checker.
-A stale/cancelled callback cannot kill a successor or count twice. A matching
+A stale/cancelled callback cannot kill a successor or count twice.
+`src/pdd-launch.mjs:localProcessProof(pid, ports={})` provides Linux procfs proof
+or macOS `{pid,birth,bootId}` from stock `/bin/ps -p PID -o lstart=` and
+`/usr/sbin/sysctl -n kern.boottime`, with LC_ALL=C and TZ=UTC0. Require a positive
+safe PID and well-formed start/boot values; tool failures or malformed output
+remain unknown, except an ESRCH existence probe proves absence. Bound each tool
+to five seconds and 4096 bytes. Ports may supply platform, execFile and killProcess
+at the OS boundary for testing; ordinary production uses the current process OS.
+
+Darwin deadline termination must freshly compare both boot identity and lstart
+with the recorded failed attempt immediately before a synchronous SIGKILL to
+that positive PID. No matching proof means no signal; never invoke the Linux
+pdd-lock --terminate operation on Darwin. Preserve Linux pidfd behavior. A
+second-precision lstart comparison cannot distinguish same-second PID reuse;
+retain that platform limit rather than claiming pidfd-equivalent protection.
+No missing/unknown proof is permission to kill or to start a successor.
+ A matching
 success disarms or renders the one-shot harmless. The platform binding must work
 for a hung startup and prove it on Mac/Linux before release; no Link-only JS timer
 may stand in for it. Missing binding gives `startup_deadline_unavailable`.

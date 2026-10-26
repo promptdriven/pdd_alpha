@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 073a599ddf97dee35cc0b277735ddb7327d89a32fa9e9d27fd365294c06f4bbb).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: ebbdd22369f18ecdd01661054986c8bad14cabd704162cd9239e0910ef732ff1).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
@@ -11,6 +11,7 @@ import {appendKeeperDecision} from './workflow-keeper-log.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const observations=new Map();
 const compositions=new WeakMap();
+const startupAttempts=new WeakMap();
 const fsOf=p=>p.fs??nodeFs;
 const eligible=s=>['running','waiting_agent','quota_wait','WAIT'].includes(s?.controlState)&&s.adopted!==false&&!s.archived&&!s.removing&&!s.waitingPerson&&!s.blockedQuestion&&s.pending?.backend?.agentStatus!=='blocked';
 const fleetRequired=()=>Object.assign(Error('This recovery operation is unavailable: this needs the fleet client.'),{code:'fleet_client_required'});
@@ -21,6 +22,7 @@ const controllerState=seen=>seen.code==='launch_budget'&&seen.state==='refused'?
 export async function createWorkflowKeeperPorts(ports={}){
   const local=await createLocalWorkflowControllerPorts(ports);
   const defaults={
+    ensureDefaultHerdr:async input=>(await import('./workflow-herdr-boot.mjs')).ensureDefaultHerdr(input),
     observeQuota:async()=>({fresh:false,room:false,code:'fleet_client_required',message:fleetRequired().message}),
     readManagedLaunch:unavailable,validateManagedRuntime:unavailable,validateManagedFlags:unavailable,
     validateOwner:unavailable,restoreNative:unavailable,
@@ -78,9 +80,28 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
         ports={...passPorts,...saved.ports};
       }
       const herdr=await ports.observeHerdr?.();
-      if(herdr?.code==='herdr_not_found'){memo.delete(entry.runId);finish('needs_you',herdr.code,{message:herdr.message,...(herdr.reason==='server_absent'?{reason:herdr.reason}:{})});continue;}
+      const startupKey=JSON.stringify({home:ports.home??homedir(),runtime:s.runtime});
+      if(herdr?.code==='herdr_not_found'){
+        memo.delete(entry.runId);
+        if(herdr.reason==='server_absent'&&typeof ports.ensureDefaultHerdr==='function'){
+          let attempts=startupAttempts.get(passPorts);if(!attempts){attempts=new Set();startupAttempts.set(passPorts,attempts);}
+          if(!attempts.has(startupKey)){
+            const runtime=await (ports.checkWorkflowRuntime??(spec=>checkWorkflowRuntime(spec,ports)))({runDir:entry.runDir});
+            if(!runtime.ok){finish('needs_you',runtime.code,runtime.message?{message:runtime.message}:{});continue;}
+            // Fence before awaiting; a lost reply or another run cannot resend startup.
+            if(!attempts.has(startupKey)){
+              attempts.add(startupKey);
+              let boot;try{boot=await ports.ensureDefaultHerdr({...ports,runtime:s.runtime});}catch{}
+              if(boot?.state==='ready'){finish('stopped','herdr_unsettled');continue;}
+              if(boot?.code==='herdr_not_found'){finish('needs_you',boot.code,{message:boot.message});continue;}
+            }
+          }
+        }
+        finish('needs_you',herdr.code,{message:herdr.message,...(herdr.reason==='server_absent'?{reason:herdr.reason}:{})});continue;
+      }
       const first=memo.get(entry.runId);
       const serverKnown=Number.isSafeInteger(herdr?.server?.pid)&&herdr.server.pid>0&&typeof herdr.server.startIdentity==='string'&&herdr.server.startIdentity.length>0;
+      if(herdr?.complete&&serverKnown)startupAttempts.get(passPorts)?.delete(startupKey);
       const sameObservation=first&&first.runDir===entry.runDir&&first.upSince===herdr?.upSince&&first.at<=now&&isDeepStrictEqual(first.server,herdr?.server);
       const inspect=ports.inspectWorkflowLock??((spec)=>inspectWorkflowLock(spec,ports));
       if(!herdr?.complete||!Number.isFinite(herdr.upSince)||!Number.isFinite(herdr.stableSince)||now-herdr.upSince<30000||now-herdr.stableSince<30000||Object.hasOwn(herdr,'server')&&!serverKnown){

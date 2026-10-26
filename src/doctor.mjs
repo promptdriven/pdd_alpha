@@ -1,8 +1,10 @@
-// Generated from prompts/cli/doctor.prompt.md (sha256: cd174d64260abaddea57306784eeb1bd940945785079a2d0adac9f2cb3007364).
+// Generated from prompts/cli/doctor.prompt.md (sha256: 867ab56f0e2c5614c070fbc5218c59d0c388144d505b5cd41f5dd671adedc427).
 import {readFileSync,readdirSync,existsSync,statfsSync,accessSync,constants} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {checkHerdrService} from './workflow-herdr-service.mjs';
+import {inspectHerdrVersion} from './workflow-herdr-version.mjs';
 import {readHerdrTrace} from './herdr-trace.mjs';
 import {readGitTrace} from './git-trace.mjs';
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -18,7 +20,7 @@ function checksFrom(values) {
     return row(c.id,c.state,c.detail,c.next);
   });
 }
-const CHECK_IDS = new Set(['modules','runtime','disk','install','retained-runtimes','native-tools','path','herdr','alpha','client-self-check','client-service','relay','membership','provider-cache','vault','keeper','cleanup','cleanup-item']);
+const CHECK_IDS = new Set(['modules','runtime','disk','install','retained-runtimes','native-tools','path','herdr','herdr-service','herdr-version','alpha','client-self-check','client-service','relay','membership','provider-cache','vault','keeper','cleanup','cleanup-item']);
 const PHASES = new Set(['locked','staged','checked','activating','flipped','link_restarted','ready','rolling_back','rolled_back','downloading','failed']);
 const ACCOUNT_STATES = new Set(['ready','unavailable','full','waiting','needs_signin','auto','fixed','Auto']);
 const LOG_EVENTS = new Set(['check.completed','check.failed','runtime.checked','install.observed','account.observed','service.observed']);
@@ -130,6 +132,11 @@ export async function runDoctorCommand(argv,deps={}) {
     let checks=[],report={};
     try { const local=deps.alphaChecks ? await deps.alphaChecks({mode,packageRoot:deps.packageRoot??PACKAGE_ROOT}) : localChecks(deps.packageRoot??PACKAGE_ROOT);
       checks.push(...checksFrom(local.checks??local));report=reportFrom(local.report);
+      if(!deps.alphaChecks){
+        checks.push(mode==='check-only'?row('herdr-service','skip','Candidate self-check does not require machine service provisioning.'):await checkHerdrService(deps));
+        if(mode==='check-only')checks.push(row('herdr-version','skip','Candidate self-check does not probe machine Herdr.'));
+        else {const observed=await inspectHerdrVersion({session:'default'},deps);checks.push(row('herdr-version',observed.state==='compatible'?'pass':'fail',observed.detail,observed.next));}
+      }
     } catch { checks.push(row('alpha','fail','Public diagnostics unavailable.','Check the selected local package.')); }
     if(deps.clientInstalled || deps.clientAdapter || existsSync(join(deps.packageRoot??PACKAGE_ROOT,'client'))) {
       try {const client=await deps.clientAdapter.doctorChecks({mode});checks.push(...checksFrom(client.checks));Object.assign(report,reportFrom(client.report));}

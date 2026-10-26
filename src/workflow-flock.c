@@ -1,5 +1,8 @@
-// Generated from prompts/cli/workflow-claims.prompt.md (sha256: 616ba04d175a6bf7ae835b9406ff158d80028ae7ee39d96a92b0339088e8a78e).
+// Generated from prompts/cli/workflow-claims.prompt.md (sha256: 3d61ef638c783860141df891b7dd91f8f8da4a7b3b980e3f41b129f4bed046c4).
 #define _POSIX_C_SOURCE 200809L
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <fcntl.h>
