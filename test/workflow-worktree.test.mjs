@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, writeFile, rm, readdir, lstat, symlink, mkdir, link } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rename, rm, readdir, lstat, symlink, mkdir, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename, resolve } from 'node:path';
 import { allocateIssueWorktree, lookupIssueWorktree } from '../src/workflow-worktree.mjs';
@@ -23,7 +23,7 @@ async function fixture(t) {
   const ports = { async execFile(file, args, options) {
     assert.equal(file, 'git'); assert.deepEqual(Object.keys(options), ['cwd']);
     calls.push({ file, args: [...args], cwd: options.cwd });
-    if(args[0]==='fetch'){const head=(await git('rev-parse',args[2])).stdout.trim();await git('update-ref',`refs/remotes/origin/${args[2]}`,head);const path=(await gitAt(options.cwd,'rev-parse','--git-path','FETCH_HEAD')).stdout.trim();await writeFile(resolve(options.cwd,path),head+'\n');return {stdout:''};}
+    if(args[0]==='fetch'){const head=(await git('rev-parse',args[2])).stdout.trim();await git('update-ref',`refs/remotes/origin/${args[2]}`,head);const path=(await gitAt(options.cwd,'rev-parse','--git-path','FETCH_HEAD')).stdout.trim();const destination=resolve(options.cwd,path),pending=destination+'.'+randomUUID();await writeFile(pending,head+'\n');await rename(pending,destination);return {stdout:''};}
     return execute(file, args, { ...options, encoding: 'utf8' });
   } };
   const input = (issueNumber = 1, extra = {}) => ({ cwd, repository: 'Acme/Project', issueNumber,
