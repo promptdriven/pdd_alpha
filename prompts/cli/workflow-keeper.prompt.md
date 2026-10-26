@@ -30,9 +30,17 @@ flowchart TD
     B -->|Yes| S[Launch recorded drive and require process proof]
 ```
 
-**Restore settled:** Herdr has been up at least 30 s and a complete agent list
-has been stable at least 5 s. Check the controller lock free on two checks at
-least 30 s apart. A fresh locked recheck immediately precedes launch admission;
+**Restore settled:** the same Herdr server PID and OS start identity has
+answered continuously for at least 30 s. Working agents, pane changes and
+foreground child activity do not restart this interval. Check the controller
+lock free on two checks at least 30 s apart. A `herdr_unsettled` pass cannot
+launch, but retains the first free-lock observation when complete evidence
+still identifies the same server, run directory and availability interval and
+a fresh controller-lock inspection proves it free on that pass. A held or
+unknown lock, or failed inspection, clears the observation. Unknown/failed server
+evidence, a server restart or backward time also invalidates it. Explicit supplied legacy observers without a
+server field retain their timestamp binding but cannot retain a memo through
+an unsettled pass. A fresh locked recheck immediately precedes launch admission;
 concurrent keepers cannot both create a launch intent. Persist launch admissions
 and allow fewer than 3 in the preceding hour. Exactly 3 suppresses the next
 launch. If uncertainty remains from an earlier launch, reconcile its exact
@@ -45,7 +53,7 @@ composed copy, retaining all supplied values and references. Inside its lifetime
 lock, the public keeper uses that factory before scheduling reconciliation. It
 fills missing runner authority and locator bindings through
 `createLocalWorkflowControllerPorts(ports)`. The controller factory obtains missing real Herdr,
-shared `processStartIdentity` and complete/stable inventory bindings from their
+shared `processStartIdentity` and continuous server identity bindings from their
 public owner. It creates no pane and grants no launch authority by itself.
 Explicit test/owner ports win.
 The public keeper uses the same real Herdr/OS identity composition as direct

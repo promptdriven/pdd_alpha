@@ -27,6 +27,10 @@ async function fixture(t){
   // Git, freeze, strict readers, assignment/lifecycle, native locks, OS identity,
   // controller composition and the public CLI/keeper entry remain real.
   const ports={home,loadGuidance,signal:abort.signal,env:{HOME:home,PDD_TRACE:''},
+    // Synthetic service socket ownership; shared OS start identity stays real.
+    fs:{...fs,readFile:async(path,...args)=>path==='/proc/net/unix'?`x: 2 0 00010000 0001 01 77 /synthetic/herdr.sock\n`:fs.readFile(path,...args),
+      readdir:async(path,...args)=>path==='/proc'?[String(process.pid)]:path===`/proc/${process.pid}/fd`?['99']:fs.readdir(path,...args),
+      readlink:async(path,...args)=>path===`/proc/${process.pid}/fd/99`?'socket:[77]':fs.readlink(path,...args)},
     stdout:{write(s){output.push(s);}},stderr:{write(s){output.push(s);if(s.includes('this needs the fleet client'))abort.abort();}},
     runtime:{herdr:herdrExecutable,v:1,releaseId:'synthetic',versionRoot:packageRoot,packageRoot,node:process.execPath,bin:join(packageRoot,'bin/pdd.mjs'),pddVersion:'test',alphaDigest:'a'.repeat(64),nodeVersion:process.versions.node,clientDigest:null,credentialHelper:null},
     execFile:async(file,args,opts)=>{
@@ -42,10 +46,9 @@ async function fixture(t){
       assert.equal(file,herdrExecutable,'No native agent, installer or service startup is permitted');
       assert.deepEqual(args.slice(0,2),['--session','default']);
       const operation=args.slice(2,4).join('.');let result;
-      if(operation==='pane.list')result={panes:[{pane_id:'wA:pB'}]};
-      else if(operation==='pane.process-info'){
-        result={process_info:{pane_id:'wA:pB',shell_pid:process.pid,foreground_processes:[{pid:process.pid,argv:[process.execPath]}]}};
-        if(commands.filter(([f,a])=>f===herdrExecutable&&a[2]==='pane'&&a[3]==='process-info').length===2)abort.abort();
+      if(operation==='status.--json'){
+        if(commands.filter(([f,a])=>f===herdrExecutable&&a[2]==='status').length===2)abort.abort();
+        return {stdout:JSON.stringify({server:{running:true,status:'running',session:null,socket:'/synthetic/herdr.sock'}}),code:0};
       }else assert.fail('Read-only first recovery pass cannot mutate Herdr: '+operation);
       return {stdout:JSON.stringify({result}),code:0};
     }};
@@ -64,7 +67,7 @@ test('pdd runs-keeper composes real factories, physical authority and OS identit
   assert.equal(await local.processStartIdentity({pid:process.pid}),await readProcessStartIdentity({pid:process.pid}));
   assert.equal(await runPdd(['runs-keeper'],{home:f.home,cwd:f.cwd,ports:f.ports,stdout:f.ports.stdout,stderr:f.ports.stderr}),0);
   assert.equal(f.abort.signal.aborted,true);
-  assert.deepEqual(f.commands.filter(([name])=>name===f.spec.runtime.herdr).map(([,args])=>args.slice(2,4).join('.')),['pane.list','pane.process-info','pane.process-info']);
+  assert.deepEqual(f.commands.filter(([name])=>name===f.spec.runtime.herdr).map(([,args])=>args.slice(2,4).join('.')),['status.--json','status.--json']);
   assert.equal(await inspectWorkflowLock({path:join(f.home,'.pdd/runs/keeper.lock')}),'free');
   assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
   assert.equal(await fs.stat(join(f.spec.runDir,'controller-launch')).then(()=>true,()=>false),false);

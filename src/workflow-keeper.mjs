@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: d1b3de96f690f4fdb4f3149dd228c57585503cb249a5241ed83ec3e51f25df96).
+// Generated from prompts/cli/workflow-keeper.prompt.md (sha256: 85b27bacb2088df40a4b7dc6289ae7ea4820cb50c553c23cca3187a834f1e24c).
 import * as nodeFs from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
@@ -78,12 +78,21 @@ export async function reconcileWorkflowControllers({entries,now},ports={}){
       }
       const herdr=await ports.observeHerdr?.();
       if(herdr?.code==='herdr_not_found'){memo.delete(entry.runId);finish('needs_you',herdr.code,{message:herdr.message});continue;}
-      if(!herdr?.complete||!Number.isFinite(herdr.upSince)||!Number.isFinite(herdr.stableSince)||now-herdr.upSince<30000||now-herdr.stableSince<5000){memo.delete(entry.runId);finish('stopped','herdr_unsettled');continue;}
+      const first=memo.get(entry.runId);
+      const serverKnown=Number.isSafeInteger(herdr?.server?.pid)&&herdr.server.pid>0&&typeof herdr.server.startIdentity==='string'&&herdr.server.startIdentity.length>0;
+      const sameObservation=first&&first.runDir===entry.runDir&&first.upSince===herdr?.upSince&&first.at<=now&&isDeepStrictEqual(first.server,herdr?.server);
       const inspect=ports.inspectWorkflowLock??((spec)=>inspectWorkflowLock(spec,ports));
+      if(!herdr?.complete||!Number.isFinite(herdr.upSince)||!Number.isFinite(herdr.stableSince)||now-herdr.upSince<30000||now-herdr.stableSince<30000||Object.hasOwn(herdr,'server')&&!serverKnown){
+        if(!(herdr?.complete&&serverKnown&&sameObservation&&Number.isFinite(herdr.upSince)&&Number.isFinite(herdr.stableSince)&&herdr.upSince<=now&&herdr.stableSince<=now))memo.delete(entry.runId);
+        else{
+          const lock=await inspect({path:join(entry.runDir,'controller.lock')});controller=lock==='free'?'absent':lock==='held'?'held':'unknown';
+          if(lock!=='free')memo.delete(entry.runId);
+        }
+        finish('stopped','herdr_unsettled');continue;
+      }
       const lock=await inspect({path:join(entry.runDir,'controller.lock')});controller=lock==='free'?'absent':lock==='held'?'held':'unknown';
       if(lock!=='free'){memo.delete(entry.runId);finish('stopped',lock==='held'?'controller_busy':'lock_unknown');continue;}
-      const first=memo.get(entry.runId);
-      if(!first||first.runDir!==entry.runDir||first.upSince!==herdr.upSince||first.at>now){memo.set(entry.runId,{at:now,runDir:entry.runDir,upSince:herdr.upSince});finish('stopped','observing_lock');continue;}
+      if(!sameObservation){memo.set(entry.runId,{at:now,runDir:entry.runDir,upSince:herdr.upSince,...(serverKnown?{server:{...herdr.server}}:{})});finish('stopped','observing_lock');continue;}
       if(now-first.at<30000){finish('stopped','observing_lock');continue;}
       const launches=await (ports.readControllerLaunches??(spec=>readControllerLaunches(spec,ports)))({runDir:entry.runDir});
       const prior=launches.at(-1);

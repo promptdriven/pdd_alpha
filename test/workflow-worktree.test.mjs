@@ -10,6 +10,12 @@ import { join, dirname, basename, resolve } from 'node:path';
 import { allocateIssueWorktree, lookupIssueWorktree } from '../src/workflow-worktree.mjs';
 
 const execute = promisify(execFile);
+async function writeFetchedHead(path, head) {
+  // A successful synthetic fetch must keep a complete snapshot visible to peers.
+  const staged = path + '.' + randomUUID();
+  await writeFile(staged, head + '\n', { flag: 'wx' });
+  await rename(staged, path);
+}
 async function fixture(t) {
   const temp = await mkdtemp(join(tmpdir(), 'pdd-worktrees-')), cwd = join(temp, 'project');
   await mkdir(cwd); t.after(() => rm(temp, { recursive: true, force: true }));
@@ -23,7 +29,7 @@ async function fixture(t) {
   const ports = { async execFile(file, args, options) {
     assert.equal(file, 'git'); assert.deepEqual(Object.keys(options), ['cwd']);
     calls.push({ file, args: [...args], cwd: options.cwd });
-    if(args[0]==='fetch'){const head=(await git('rev-parse',args[2])).stdout.trim();await git('update-ref',`refs/remotes/origin/${args[2]}`,head);const path=(await gitAt(options.cwd,'rev-parse','--git-path','FETCH_HEAD')).stdout.trim();const destination=resolve(options.cwd,path),pending=destination+'.'+randomUUID();await writeFile(pending,head+'\n');await rename(pending,destination);return {stdout:''};}
+    if(args[0]==='fetch'){const head=(await git('rev-parse',args[2])).stdout.trim();await git('update-ref',`refs/remotes/origin/${args[2]}`,head);const path=(await gitAt(options.cwd,'rev-parse','--git-path','FETCH_HEAD')).stdout.trim();await writeFetchedHead(resolve(options.cwd,path),head);return {stdout:''};}
     return execute(file, args, { ...options, encoding: 'utf8' });
   } };
   const input = (issueNumber = 1, extra = {}) => ({ cwd, repository: 'Acme/Project', issueNumber,
@@ -202,10 +208,11 @@ test('partial intent or missing issue claim is retained and never repaired or ad
 const moduleUrl = new URL('../src/workflow-worktree.mjs', import.meta.url).href;
 function subprocessAllocator(input, crash) {
   const code = `import { allocateIssueWorktree } from ${JSON.stringify(moduleUrl)};
-    import { execFile } from 'node:child_process'; import { promisify } from 'node:util';import {writeFile} from 'node:fs/promises';
+    import { execFile } from 'node:child_process'; import { promisify } from 'node:util';import {writeFile,rename} from 'node:fs/promises';import {randomUUID} from 'node:crypto';
     const execute = promisify(execFile), crash = process.argv[2];
+    const writeFetchedHead = ${writeFetchedHead.toString()};
     const ports = { async execFile(file,args,options) {
-      if(args[0]==='fetch'){const head=(await execute('git',['rev-parse',args[2]],options)).stdout.trim();await execute('git',['update-ref','refs/remotes/origin/'+args[2],head],options);const path=(await execute('git',['rev-parse','--git-path','FETCH_HEAD'],options)).stdout.trim();await writeFile(path,head+'\\n');return {stdout:''};}
+      if(args[0]==='fetch'){const head=(await execute('git',['rev-parse',args[2]],options)).stdout.trim();await execute('git',['update-ref','refs/remotes/origin/'+args[2],head],options);const path=(await execute('git',['rev-parse','--git-path','FETCH_HEAD'],options)).stdout.trim();await writeFetchedHead(path,head);return {stdout:''};}
       const add = args[0] === 'worktree' && args[1] === 'add';
       if (add && crash === 'before') process.exit(77);
       const response = await execute(file,args,{...options,encoding:'utf8'});

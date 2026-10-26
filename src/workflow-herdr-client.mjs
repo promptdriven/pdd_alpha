@@ -1,4 +1,4 @@
-// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: 1f152c73189a4d2753b886604d9bd2bd9d50efbfc4aab954b83be1db39960bd5).
+// Generated from prompts/cli/workflow-herdr-client.prompt.md (sha256: 67eea91a81136b0b4a20ad075556463d9b4ed1369c48b71d6a648270fc350e93).
 import * as nodeFs from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify,isDeepStrictEqual} from 'node:util';
@@ -62,6 +62,7 @@ export async function createWorkflowHerdrPorts(ports={}){
       if(typeof response?.stdout!=='string'||Buffer.byteLength(response.stdout)>1024*1024)throw fault('herdr_invalid_reply');
       if(operation==='pane.run'&&response.stdout==='')return {result:{}};
       let reply;try{reply=JSON.parse(response.stdout);}catch{throw fault('herdr_invalid_reply');}
+      if(operation==='server.status'&&reply&&!reply.error&&reply.server&&typeof reply.server==='object')return {result:reply};
       if(!reply||reply.error||!reply.result||typeof reply.result!=='object')throw fault('herdr_invalid_reply');
       return reply;
     },ports);}catch(error){if(error?.code==='herdr_not_found')throw error;throw fault('herdr_command_uncertain');}
@@ -175,16 +176,53 @@ export async function createWorkflowHerdrPorts(ports={}){
       }catch(error){if(error?.code==='herdr_not_found')throw error;throw fault('process_unproved');}
     }
   };
+  async function serverOwner(socket){
+    if(p.platform==='linux'){
+      const rows=(await p.fs.readFile('/proc/net/unix','utf8')).split('\n').map(line=>/^\S+\s+\S+\s+\S+\s+00010000\s+0001\s+01\s+(\d+)\s+(.+)$/.exec(line));
+      const sockets=rows.filter(row=>row&&row[2]===socket);
+      if(sockets.length!==1)throw fault('process_unproved');
+      const inode=sockets[0][1],owners=[];
+      const names=(await p.fs.readdir('/proc')).filter(name=>/^[1-9]\d*$/.test(name)&&positive(Number(name)));
+      let next=0;
+      await Promise.all(Array.from({length:Math.min(16,names.length)},async()=>{
+        while(next<names.length){
+          const name=names[next++];
+          try{
+            for(const fd of await p.fs.readdir(`/proc/${name}/fd`)){
+              let target;try{target=await p.fs.readlink(`/proc/${name}/fd/${fd}`);}catch{continue;}
+              if(target===`socket:[${inode}]`){owners.push(Number(name));break;}
+            }
+          }catch{/* Exited or inaccessible processes supply no socket-owner proof. */}
+        }
+      }));
+      if(owners.length!==1)throw fault('process_unproved');
+      return {pid:owners[0],socket,inode};
+    }
+    if(p.platform==='darwin'){
+      const result=await p.execFile('/usr/sbin/lsof',['-nP','-a','-U','-Fp','--',socket],{cwd:p.home,env:p.env,shell:false,encoding:'utf8',timeout:2000,maxBuffer:4096});
+      if(exit(result)!==0||typeof result.stdout!=='string'||Buffer.byteLength(result.stdout)>4096)throw fault('process_unproved');
+      const rows=result.stdout.trim().split('\n');
+      if(rows.length!==1||!/^p[1-9]\d*$/.test(rows[0])||!positive(Number(rows[0].slice(1))))throw fault('process_unproved');
+      return {pid:Number(rows[0].slice(1)),socket};
+    }
+    throw fault('process_unproved');
+  }
+  async function serverStatus(){
+    const {server}=await request('server.status',['status','--json']);
+    if(server?.running!==true||server.status!=='running'||![null,'default'].includes(server.session)||typeof server.socket!=='string'||!isAbsolute(server.socket)||server.socket.includes('\0'))throw fault('process_unproved');
+    return server.socket;
+  }
   async function observeHerdr(){
     try{
-      const rows=[];for(const paneId of await inventory()){
-        const row=await capability(paneId);if(!row)throw fault('process_unproved');rows.push(row);
-      }
+      const socket=await serverStatus(),owner=await serverOwner(socket);
+      if(typeof identity!=='function')throw fault('process_unproved');
+      const startIdentity=await identity({pid:owner.pid});
+      if(typeof startIdentity!=='string'||!startIdentity||await serverStatus()!==socket||!isDeepStrictEqual(await serverOwner(socket),owner)||await identity({pid:owner.pid})!==startIdentity)throw fault('process_unproved');
       const now=(p.herdrObservationNow??Date.now)();if(!Number.isFinite(now))throw fault('process_unproved');
-      const key=JSON.stringify(rows);
-      if(!continuity||now<continuity.last||now-continuity.last>60000)continuity={upSince:now,stableSince:now,key,last:now};
-      else continuity={...continuity,stableSince:key===continuity.key?continuity.stableSince:now,key,last:now};
-      return {complete:true,upSince:continuity.upSince,stableSince:continuity.stableSince};
+      const server={pid:owner.pid,startIdentity},key=JSON.stringify({...owner,startIdentity});
+      if(!continuity||key!==continuity.key||now<continuity.last||now-continuity.last>60000)continuity={upSince:now,stableSince:now,key,last:now};
+      else continuity={...continuity,last:now};
+      return {complete:true,upSince:continuity.upSince,stableSince:continuity.stableSince,server};
     }catch(error){continuity=null;return {complete:false,upSince:null,stableSince:null,...(error?.code==='herdr_not_found'?{code:error.code,message:error.message}:{})};}
   }
   return {herdr:ports.herdr!==undefined?ports.herdr:herdr,processStartIdentity:identity,observeHerdr:ports.observeHerdr!==undefined?ports.observeHerdr:observeHerdr};

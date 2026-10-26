@@ -106,18 +106,21 @@ test('keeper uses independent saved executable bindings and observation continui
   const states=new Map(entries.map((e,i)=>[e.runDir,{runId:e.runId,root:home,name:'feature',issue:{number:i+7},controlState:'running',runtime:{herdr:i?second:first}}]));
   let now=0;const commands=[],starts=[];
   const ports=await createWorkflowKeeperPorts({home,env:{PATH:'',PDD_TRACE:''},runtime:{herdr:current},herdrExecutable:current,
+    fs:{...fs,readFile:async(p,...args)=>p==='/proc/net/unix'?'x: 2 0 00010000 0001 01 77 /synthetic/herdr.sock\n':fs.readFile(p,...args),
+      readdir:async(p,...args)=>p==='/proc'?[String(process.pid)]:p===`/proc/${process.pid}/fd`?['99']:fs.readdir(p,...args),
+      readlink:async(p,...args)=>p===`/proc/${process.pid}/fd/99`?'socket:[77]':fs.readlink(p,...args)},
     observations:new Map(),herdrObservationNow:()=>now,validateLocator:async()=>true,
     readWorkflowJournal:async e=>({seq:1,state:states.get(e.runDir)}),inspectWorkflowLock:async()=> 'free',
     readControllerLaunches:async()=>[],checkWorkflowRuntime:async()=>({ok:true}),
     startWorkflowController:async spec=>{starts.push(spec);return {state:'started',code:null};},
-    execFile:async(file,args)=>{assert.ok([first,second].includes(file));assert.deepEqual(args,['--session','default','pane','list']);commands.push(file);return {stdout:JSON.stringify({result:{panes:[]}})};}});
+    execFile:async(file,args)=>{assert.ok([first,second].includes(file));assert.deepEqual(args,['--session','default','status','--json']);commands.push(file);return {stdout:JSON.stringify({server:{running:true,status:'running',session:null,socket:'/synthetic/herdr.sock'}})};}});
   for(now of [0,30000,60000])await reconcileWorkflowControllers({entries,now},ports);
-  assert.deepEqual(commands,[first,second,first,second,first,second]);
+  assert.deepEqual(commands,[first,first,second,second,first,first,second,second,first,first,second,second]);
   assert.deepEqual(starts.map(s=>s.runtime.herdr),[first,second]);
   await fs.unlink(first);now=90000;
   const result=await reconcileWorkflowControllers({entries:[entries[0]],now},ports);
   assert.deepEqual(result,[{runId,state:'needs_you',code:'herdr_not_found',message:`Herdr not found at ${first}`}]);
-  assert.equal(starts.length,2);assert.equal(commands.length,6);
+  assert.equal(starts.length,2);assert.equal(commands.length,12);
 });
 
 

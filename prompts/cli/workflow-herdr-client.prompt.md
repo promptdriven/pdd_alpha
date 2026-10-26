@@ -128,27 +128,42 @@ The no-argument compatibility form still examines existing pane inventory and
 returns false for an empty inventory. Capability is neither unconditional nor a
 version/help assertion and cannot replace fresh controller `processInfo` proof.
 
-`observeHerdr()` returns `{complete,upSince,stableSince}` from actual successful
-default pane inventory and process identity observations. Times mean first
-observed continuous availability and unchanged inventory, not inferred server
-boot time. Start from the first successful observation; reset on failure,
-backward time or a gap over 60 seconds; inventory change resets stableSince.
-Use retained local observations and real wall time (optional
-`ports.herdrObservationNow` for isolated tests), never invent a historical uptime.
-Incomplete observation returns complete:false with null times. Keeper still
-owns its 30s/5s stability and repeated-free-lock gates.
+`observeHerdr()` returns `{complete,upSince,stableSince,server}` after successful
+read-only default-session status replies and OS proof of the answering server.
+`server` is `{pid,startIdentity}`: the unique owner of the reported listening
+Unix socket and its shared OS start identity, confirmed around a second status
+reply and socket-owner observation. Use `--session default status --json` and
+its `server.running`, `server.status`, `server.session` (null or default), and
+absolute `server.socket`; missing, ambiguous or changed proof stays unknown.
+On Linux bind the listening inode from `/proc/net/unix` to its unique
+`/proc/<pid>/fd` socket owner. On busy hosts, independent process-descriptor
+reads must be able to overlap with a finite concurrency bound. Still finish
+the candidate-process scan before proving uniqueness; finding one matching
+owner cannot hide a later second owner. On macOS use bounded `/usr/sbin/lsof`
+Unix-socket ownership reads; unavailable OS evidence never permits a fallback
+to pane contents, a PID alone or a guessed server.
+
+Times mean first observed continuous availability of that exact server, not
+inferred boot time. Both times reset on server PID/start identity or socket
+change, failed proof, backward time or a gap over 60 seconds. Pane inventory,
+agent status, foreground children and working content do not reset either time.
+Use retained observations and wall time (`ports.herdrObservationNow` may supply
+isolated test time), never historical uptime. Incomplete observations return
+complete:false with null times and no server proof. Keeper owns the 30s server
+stability gate and repeated-free-lock checks; this observation grants no
+controller exit or stage acceptance authority.
 
 ## Ports, tracing and dependencies
 
 Honor `env`, `home`, `cwd`, `platform`, promise-style `execFile`, async `fs`
-(`readFile`/`realpath`) and optional `herdrExecutable`. OS probes use bounded
+(`readFile`/`realpath`/`readdir`/`readlink`) and optional `herdrExecutable`. OS probes use bounded
 fixed argv, not shells; no arbitrary OS data is included in errors. Missing
 `processStartIdentity` binds the shared export over complete ports. Supplied
 `herdr`, `processStartIdentity` and `observeHerdr` are preserved by reference.
 
 Trace actual transport requests, including failed calls, through the canonical
 trace wrapper with static operations workspace.list/create, tab.create,
-pane.list/process_info/run. OS observations are not Herdr commands. The trace
+pane.list/process_info/run and server.status (trace owner may classify it as other). OS observations are not Herdr commands. The trace
 owner controls enablement/redaction/bounds; never expose raw argv, stderr or OS
 records in user-facing errors. Tracing does not authorize a repeat or affect
 the original command's delivery.

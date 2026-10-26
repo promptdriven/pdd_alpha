@@ -7,11 +7,13 @@ const os=(overrides={})=>({readFile:async path=>path.endsWith('boot_id')?boot+'\
 const processInfo=(overrides={})=>({pane_id:'w1:p7',shell_pid:50,foreground_processes:[{pid:123,name:'node',cwd:'/synthetic',argv:['/runtime/node','/runtime/pdd.mjs','workflow','drive','synthetic-run']}],...overrides});
 const encoded=result=>({stdout:JSON.stringify({result}),code:0});
 function fixture(extra={}){
- const calls=[];let info=processInfo(),panes=[{pane_id:'w1:p7'}];
- const ports={herdrExecutable:process.execPath,home:'/synthetic/home',cwd:'/synthetic/work',platform:'linux',env:{PATH:'/synthetic/bin'},fs:os(),execFile:async(file,args,options)=>{
+ const calls=[];let info=processInfo(),panes=[{pane_id:'w1:p7'}],serverPid=321,serverStart='987',serverSocket='/synthetic/herdr.sock',serverRunning=true;
+ const serverFs=os({readFile:async path=>path==='/proc/net/unix'?`x: 2 0 00010000 0001 01 77 ${serverSocket}\n`:path.endsWith('boot_id')?boot:stat(Number(path.split('/')[2]),serverStart),readdir:async path=>path==='/proc'?[String(serverPid)]:['4'],readlink:async()=> 'socket:[77]'});
+ const ports={herdrExecutable:process.execPath,home:'/synthetic/home',cwd:'/synthetic/work',platform:'linux',env:{PATH:'/synthetic/bin'},fs:serverFs,execFile:async(file,args,options)=>{
   calls.push({file,args,options});
   assert.equal(file,process.execPath);assert.deepEqual(args.slice(0,2),['--session','default']);assert.equal(options.shell,false);assert.equal(options.env,ports.env);
   const cmd=args.slice(2);
+  if(cmd[0]==='status')return {stdout:JSON.stringify({server:{running:serverRunning,status:serverRunning?'running':'stopped',session:null,socket:serverSocket}}),code:0};
   if(cmd[0]==='pane'&&cmd[1]==='list')return encoded({type:'pane_list',panes});
   if(cmd[0]==='pane'&&cmd[1]==='process-info')return encoded({type:'pane_process_info',process_info:info});
   if(cmd[0]==='workspace'&&cmd[1]==='list')return encoded({type:'workspace_list',workspaces:[{workspace_id:'w1',active_tab_id:'w1:t3',pane_count:1}]});
@@ -20,7 +22,7 @@ function fixture(extra={}){
   if(cmd[0]==='pane'&&cmd[1]==='run')return encoded({type:'ok'});
   assert.fail('unexpected transport command');
  },...extra};
- return {ports,calls,setInfo:x=>{info=x;},setPanes:x=>{panes=x;}};
+ return {ports,calls,setInfo:x=>{info=x;},setPanes:x=>{panes=x;},setServer:({pid=serverPid,start=serverStart,socket=serverSocket,running=serverRunning}={})=>{serverPid=pid;serverStart=start;serverSocket=socket;serverRunning=running;}};
 }
 
 test('Linux shared identity binds boot ID plus field22 after parenthesized process name',async()=>{
@@ -102,13 +104,16 @@ test('historical shell reply shape has no identity field; OS evidence is require
  assert.ok(f.calls.every(x=>['list','process-info'].includes(x.args[3])));
 });
 test('keeper observations start at actual reads, retain continuity and reset failure or inventory change',async()=>{
+ // Retain the historical test identity; C18 replaces the inventory-reset rule
+ // with server continuity. Failure and backward-time controls remain strict.
  let time=1000;const f=fixture({herdrObservationNow:()=>time}),{observeHerdr}=await createWorkflowHerdrPorts(f.ports);
- assert.deepEqual(await observeHerdr(),{complete:true,upSince:1000,stableSince:1000});
- time=6000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:1000,stableSince:1000});
- f.setPanes([]);time=7000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:1000,stableSince:7000});
- f.setPanes([{pane_id:'invalid'}]);assert.deepEqual(await observeHerdr(),{complete:false,upSince:null,stableSince:null});
- f.setPanes([]);time=8000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:8000,stableSince:8000});
- time=7000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:7000,stableSince:7000});
+ const server={pid:321,startIdentity:`linux:${boot}:987`};
+ assert.deepEqual(await observeHerdr(),{complete:true,upSince:1000,stableSince:1000,server});
+ time=6000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:1000,stableSince:1000,server});
+ f.setPanes([]);time=7000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:1000,stableSince:1000,server});
+ f.setServer({running:false});assert.deepEqual(await observeHerdr(),{complete:false,upSince:null,stableSince:null});
+ f.setServer({running:true});time=8000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:8000,stableSince:8000,server});
+ time=7000;assert.deepEqual(await observeHerdr(),{complete:true,upSince:7000,stableSince:7000,server});
 });
 test('failed delivery, nonzero JSON and malformed replies never retry a mutation or leak raw details',async()=>{
  for(const mode of ['rejected','nonzero','invalid']){
@@ -218,4 +223,81 @@ test('issue21 C10 repeated leader selection refuses changed group, PID, argv, OS
   await assert.rejects(herdr.processInfo({session:'default',paneId:'w1:p7'}),{code:'process_unproved'});
   assert.equal(f.calls.length,mode==='executable'?1:2);assert.ok(f.calls.every(c=>c.args[3]==='process-info'));
  }
+});
+
+
+test('C18 same server stays stable while panes and foreground agents change on every observation',async()=>{
+ let time=0;const f=fixture({herdrObservationNow:()=>time}),{observeHerdr}=await createWorkflowHerdrPorts(f.ports);
+ for(time of [0,1000,5000,30000,60000,90000]){
+  f.setPanes([{pane_id:`w2:p${time+1}`}]);f.setInfo(processInfo({foreground_processes:[{pid:700+time,argv:['/agent'] }]}));
+  assert.deepEqual(await observeHerdr(),{complete:true,upSince:0,stableSince:0,server:{pid:321,startIdentity:`linux:${boot}:987`}});
+ }
+ assert.ok(f.calls.every(c=>c.args.slice(2).join(' ')==='status --json'),'server observation never depends on pane inventory or contents');
+});
+
+test('C18 server PID reuse, restart, endpoint change and long observation gaps start a new stability interval',async()=>{
+ let time=0;const f=fixture({herdrObservationNow:()=>time}),{observeHerdr}=await createWorkflowHerdrPorts(f.ports);
+ await observeHerdr();time=30000;f.setServer({pid:322});assert.equal((await observeHerdr()).stableSince,30000);
+ time=60000;f.setServer({start:'988'});assert.equal((await observeHerdr()).stableSince,60000);
+ time=90000;f.setServer({socket:'/synthetic/two  spaces/herdr.sock'});assert.equal((await observeHerdr()).stableSince,90000);
+ time=150001;assert.equal((await observeHerdr()).stableSince,150001);
+});
+
+test('C18 ambiguous socket owners, missing identity and changes within a server sample stay unproved',async()=>{
+ for(const mode of ['owners','inode','identity','race','reply']){
+  let n=0;const f=fixture();
+  if(mode==='owners')f.ports.fs.readdir=async p=>p==='/proc'?['321','322']:['4'];
+  if(mode==='inode')f.ports.fs.readlink=async()=> 'socket:[78]';
+  if(mode==='identity')f.ports.processStartIdentity=async()=>null;
+  if(mode==='race')f.ports.processStartIdentity=async()=>String(++n);
+  if(mode==='reply')f.ports.execFile=async()=>({stdout:JSON.stringify({server:{running:true,status:'running',session:'other',socket:'/synthetic/herdr.sock'}})});
+  const {observeHerdr}=await createWorkflowHerdrPorts(f.ports);
+  assert.deepEqual(await observeHerdr(),{complete:false,upSince:null,stableSince:null},mode);
+ }
+});
+
+test('C18 macOS socket owner uses bounded read-only OS identity; ambiguous ownership refuses',async()=>{
+ let time=0,owners='p321\n';const calls=[];
+ const {observeHerdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,platform:'darwin',home:'/synthetic',env:{PATH:''},herdrObservationNow:()=>time,
+  execFile:async(file,args,options)=>{calls.push({file,args,options});if(file===process.execPath)return {stdout:JSON.stringify({server:{running:true,status:'running',session:null,socket:'/synthetic/herdr.sock'}})};
+   if(file==='/usr/sbin/lsof'){assert.deepEqual(args,['-nP','-a','-U','-Fp','--','/synthetic/herdr.sock']);assert.equal(options.timeout,2000);assert.equal(options.shell,false);return {stdout:owners};}
+   assert.equal(file,'ps');return {stdout:'Mon Oct 26 04:00:00 2026\n'};}});
+ assert.equal((await observeHerdr()).stableSince,0);time=30000;assert.equal((await observeHerdr()).stableSince,0);
+ owners='p321\np322\n';assert.equal((await observeHerdr()).complete,false);
+ assert.ok(calls.every(c=>c.options.shell===false));
+});
+
+test('C18 real Linux listening socket binds its actual PID and OS start identity', {timeout:10000}, async t=>{
+ if(process.platform!=='linux'){t.skip('Linux procfs integration');return;}
+ const {createServer}=await import('node:net'),fs=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path');
+ const root=await fs.mkdtemp(join(tmpdir(),'c18-socket-')),socket=join(root,'server  endpoint.sock');
+ const listener=createServer();
+ t.after(async()=>{await new Promise(resolve=>listener.close(resolve));await fs.rm(root,{recursive:true,force:true});});
+ await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(socket,resolve);});
+ let time=0;
+ const {observeHerdr}=await createWorkflowHerdrPorts({herdrExecutable:process.execPath,env:{PATH:'',PDD_TRACE:''},herdrObservationNow:()=>time,
+  execFile:async(file,args)=>{assert.equal(file,process.execPath);assert.deepEqual(args,['--session','default','status','--json']);return {stdout:JSON.stringify({server:{running:true,status:'running',session:null,socket}})};}});
+ const first=await observeHerdr();assert.equal(first.complete,true);assert.equal(first.server.pid,process.pid);
+ assert.equal(first.server.startIdentity,await readProcessStartIdentity({pid:process.pid}));
+ time=30000;assert.deepEqual(await observeHerdr(),first,'same OS server retains both initial stability times');
+});
+
+for(const duplicate of [false,true])test(`C18 bounded procfs scan completes the inventory before ownership proof, duplicate=${duplicate}`,async()=>{
+ const f=fixture(),names=Array.from({length:48},(_,i)=>String(100+i)),scans=[];
+ let active=0,peak=0;
+ const read=async action=>{active++;peak=Math.max(peak,active);try{await new Promise(resolve=>setImmediate(resolve));return action();}finally{active--;}};
+ f.ports.fs.readdir=async path=>{
+  if(path==='/proc'){scans.push(new Set());return names;}
+  return read(()=>{scans.at(-1).add(path.split('/')[2]);return ['4','5'];});
+ };
+ f.ports.fs.readlink=async path=>read(()=>{
+  const [, ,pid,,fd]=path.split('/');
+  return fd==='5'&&(pid==='100'||duplicate&&pid==='147')?'socket:[77]':'socket:[78]';
+ });
+ const {observeHerdr}=await createWorkflowHerdrPorts(f.ports),seen=await observeHerdr();
+ assert.ok(peak>1,'independent procfs reads overlap instead of serializing the host inventory');
+ assert.ok(peak<=16,'the scan does not enqueue one read for every process at once');assert.equal(active,0);
+ assert.equal(scans.length,duplicate?1:2);for(const scanned of scans)assert.deepEqual([...scanned].sort(),names);
+ if(duplicate)assert.deepEqual(seen,{complete:false,upSince:null,stableSince:null});
+ else{assert.equal(seen.complete,true);assert.deepEqual(seen.server,{pid:100,startIdentity:`linux:${boot}:987`});}
 });

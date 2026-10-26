@@ -12,7 +12,7 @@
       "given": {
         "controlState": "running",
         "herdrUpSeconds": 60,
-        "stableListSeconds": 5,
+        "stableServerSeconds": 30,
         "lockFreeAtSeconds": [
           30,
           60
@@ -173,7 +173,7 @@
       ],
       "given": {
         "herdrUpSeconds": 30,
-        "stableListSeconds": 4.999
+        "stableServerSeconds": 29.999
       },
       "when": {
         "operation": "workflow-keeper"
