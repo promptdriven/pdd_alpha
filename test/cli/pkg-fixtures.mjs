@@ -7,7 +7,7 @@ import { initialInstallRecord, writeInstallRecord, readInstallRecord } from '../
 export const repo = fileURLToPath(new URL('../../', import.meta.url));
 export async function cases(name) { return JSON.parse(await fs.readFile(new URL(`../../vectors/cli/${name}.json`, import.meta.url))).cases; }
 export async function temporary(t) {
-  const home = await fs.mkdtemp(join(tmpdir(), 'pdd-pkg test-'));
+  const home = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'pdd-pkg test-')));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   return home;
 }

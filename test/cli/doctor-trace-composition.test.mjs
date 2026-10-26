@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,readFileSync,symlinkSync,writeFileSync,unlinkSync,chmodSync,readdirSync,lstatSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync,symlinkSync,writeFileSync,unlinkSync,chmodSync,readdirSync,lstatSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {runDoctorCommand} from '../../src/doctor.mjs';
@@ -9,7 +9,7 @@ import {traceGitCommand,readGitTrace} from '../../src/git-trace.mjs';
 const capture=()=>({text:'',write(x){this.text+=x;}});
 const pass={id:'runtime',state:'pass',detail:'Runtime checked.',next:null};
 async function fixture(t){
- const home=mkdtempSync(join(tmpdir(),'pdd-doctor-both-'));t.after(()=>rmSync(home,{recursive:true,force:true}));
+ const home=realpathSync(mkdtempSync(join(tmpdir(),'pdd-doctor-both-')));t.after(()=>rmSync(home,{recursive:true,force:true}));
  await traceHerdrRequest({operation:'tab.create',request:{command:'private prompt'}},()=>({result:{type:'tab_created',tab:{tab_id:'w1:t1',pane_id:'w1:p1'}}}),{home,env:{PDD_TRACE:'herdr'}});
  await traceGitCommand({argv:['fetch','origin'],cwd:home},()=>({code:0,stderr:''}),{home,env:{PDD_TRACE:'git'}});
  return {home,herdr:join(home,'.pdd/logs/herdr-trace.jsonl'),git:join(home,'.pdd/logs/git-trace.jsonl'),logs:join(home,'.pdd/logs')};

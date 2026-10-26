@@ -9,7 +9,7 @@ import {resolveRuntime} from '../../src/versions.mjs';
 
 const capture=()=>({text:'',write(value){this.text+=value;}});
 async function fixture(t,source){
- const home=await fs.mkdtemp(join(tmpdir(),'installed-setup-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'installed-setup-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const versionRoot=join(home,'.pdd/versions/test'),entry=join(versionRoot,'client/src/fleet/setup.mjs');
  await fs.mkdir(versionRoot,{recursive:true,mode:0o700});
  if(source!==undefined){await fs.mkdir(join(versionRoot,'client/src/fleet'),{recursive:true,mode:0o700});await fs.writeFile(entry,source,{mode:0o600});}

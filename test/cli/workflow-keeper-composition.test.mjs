@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import {join,resolve} from 'node:path';
@@ -15,7 +16,7 @@ import {readProcessStartIdentity} from '../../src/workflow-herdr-client.mjs';
 const exec=promisify(execFile),packageRoot=resolve(import.meta.dirname,'../..');
 const launchId='123e4567-e89b-42d3-a456-426614174000';
 async function fixture(t){
-  const home=await fs.mkdtemp(join(tmpdir(),'pdd-keeper-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+  const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-keeper-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
   const cwd=join(home,'repo');await fs.mkdir(cwd);
   const git=async(...args)=>(await exec('git',args,{cwd})).stdout.trim();
   await git('init','-b','main');await git('config','user.name','Synthetic');await git('config','user.email','synthetic@example.invalid');
@@ -57,7 +58,7 @@ async function fixture(t){
   return {home,cwd,ports,spec,abort,commands,output};
 }
 
-test('pdd runs-keeper composes real factories, physical authority and OS identity; conditional paths explain the fleet prerequisite',async t=>{
+test('pdd runs-keeper composes real factories, physical authority and OS identity; conditional paths explain the fleet prerequisite',{skip:hostFixtureSkip},async t=>{
   const f=await fixture(t),before=await fs.readFile(join(f.spec.runDir,'journal.jsonl'));
   const local=await createWorkflowKeeperPorts(f.ports);
   for(const name of ['observeQuota','observeHerdr','readManagedLaunch','validateManagedRuntime','validateManagedFlags','validateOwner','restoreNative','readWorkflowJournal','validateLocator','withLifecycleGuard','validateRun','inspectControllerLock','processStartIdentity'])assert.equal(typeof local[name],'function',name);

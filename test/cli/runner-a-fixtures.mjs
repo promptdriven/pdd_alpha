@@ -6,7 +6,7 @@ export const runId='6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f';
 export const attemptId='0b1e7a52-3c94-4d1f-a2b8-5e6f7a8b9c0d';
 export const nativeId='9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
 export const hash=b=>createHash('sha256').update(b).digest('hex');
-export async function folder(t){const dir=await fs.mkdtemp(join(tmpdir(),'fleet-runner-a-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
+export async function folder(t){const dir=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'fleet-runner-a-')));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
 export function fakeLocks(){const held=new Set();return async({path})=>{if(held.has(path))return {state:'busy'};held.add(path);return {state:'owned',async release(){held.delete(path);}};};}
 export async function runtimeFixture(t){
   const root=await folder(t),runDir=join(root,'pdd','workflows',runId),versionRoot=join(root,'versions','old');

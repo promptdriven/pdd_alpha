@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,readFile,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {decideWorkflow} from '../src/workflow-decide.mjs';
 import vectors from '../vectors/cli/workflow-decide.json' with {type:'json'};
 const id='6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e6f',did='0b7e9a10-2c3d-4e5f-9a6b-7c8d9e0f1a2b';
 async function fixture(t) {
-  const root=await mkdtemp(join(tmpdir(),'pdd-decide-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const root=await realpath(await mkdtemp(join(tmpdir(),'pdd-decide-')));t.after(()=>rm(root,{recursive:true,force:true}));
   const assignment={gitDir:join(root,'git'),worktreePath:join(root,'worktree')},runDir=join(assignment.gitDir,'pdd','workflows',id);await mkdir(runDir,{recursive:true});
   const state={runId:id,assignment,definitions:[{id:'approve',kind:'human'}],index:0,seq:57,p1:true,controlState:'waiting_person',waitingPerson:{rev:57,stage:'approve',inputRevision:'head',decisions:['approve']},runtime:{node:'/old/node',bin:'/old/bin/pdd.mjs'},name:'feature',issue:{number:17}};
   const input={runId:id,decisionId:did,decision:'approve',expectedRev:57,cwd:assignment.worktreePath,packageRoot:root};let starts=0,last;

@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import {constants} from 'node:fs';
@@ -17,7 +18,7 @@ import {readHerdrTrace} from '../../src/herdr-trace.mjs';
 const execute=promisify(execFile),repo=resolve(import.meta.dirname,'../..');
 const capture=()=>({text:'',write(text){this.text+=text;}});
 async function fixture(t){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-real-cli-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-real-cli-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const cwd=join(home,'project'),tools=join(home,'tools'),versionRoot=join(home,'.pdd/versions/synthetic');
  await fs.mkdir(cwd);await fs.mkdir(tools);await fs.mkdir(join(home,'.pdd'),{mode:0o700});await fs.mkdir(versionRoot,{recursive:true});
  for(const name of ['src','bin','launcher','docs','skills','.pdd','package.json']){
@@ -91,7 +92,7 @@ if(!['initialize','config/read','model/list'].includes(r.method))process.exit(93
   deps:{home,cwd,packageRoot:versionRoot,stdout,stderr,ports},setBroken:x=>{broken=x;},setPanes:x=>{panes=x;}};
 }
 
-test('real CLI factories compose discovery, prepared run/resume, strict authority and failed Herdr trace with network edges only',async t=>{
+test('real CLI factories compose discovery, prepared run/resume, strict authority and failed Herdr trace with network edges only',{skip:hostFixtureSkip},async t=>{
  const f=await fixture(t);
  assert.equal(await runPdd(['models','--agent','codex'],f.deps),0,f.stderr.text);assert.match(f.stdout.text,/synthetic/);
  f.stdout.text='';assert.equal(await runPdd(['projects'],f.deps),0);assert.match(f.stdout.text,/project/);
@@ -133,7 +134,7 @@ test('real CLI factories compose discovery, prepared run/resume, strict authorit
 });
 
 test('fleet conditional CLI paths explicitly refuse without importing or creating client state',async t=>{
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-no-client-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-no-client-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  for(const argv of [['phone'],['link','status'],['fleet','status'],['join'],['accounts'],['settings'],['models','--on','desktop','--agent','codex'],['projects','--on','desktop'],['session','--on','desktop']]){
   const stdout=capture(),stderr=capture();
   assert.equal(await runPdd(argv,{home,cwd:home,stdout,stderr}),1,JSON.stringify(argv));

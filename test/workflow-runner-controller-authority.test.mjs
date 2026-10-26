@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import {join,resolve} from 'node:path';
@@ -12,7 +13,7 @@ import {loadGuidance} from '../src/guidance.mjs';
 import {withWorkflowLock,inspectWorkflowLock} from './cli/workflow-test-lock.mjs';
 const exec=promisify(execFile),packageRoot=resolve(import.meta.dirname,'..');
 async function fixture(t){
-  const home=await fs.mkdtemp(join(tmpdir(),'pdd-authority-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+  const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-authority-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
   const cwd=join(home,'repo');await fs.mkdir(cwd);
   const git=async(...args)=>(await exec('git',args,{cwd})).stdout.trim();
   await git('init','-b','main');await git('config','user.name','Synthetic');await git('config','user.email','synthetic@example.invalid');
@@ -130,7 +131,7 @@ test('drive refuses unavailable shared OS identity instead of falling back to ra
   assert.equal(r.exitCode,1);assert.match(r.message,/start identity is unavailable/);
   assert.deepEqual(await fs.readFile(join(f.spec.runDir,'journal.jsonl')),before);
 });
-for(const empty of [false,true]) test(`real public adapter joins Herdr-shaped replies to OS identity and actual frozen drive journal${empty?' — fresh Herdr, no panes':''}`,async t=>{
+for(const empty of [false,true]) test(`real public adapter joins Herdr-shaped replies to OS identity and actual frozen drive journal${empty?' — fresh Herdr, no panes':''}`,{skip:hostFixtureSkip},async t=>{
   const f=await fixture(t),execute=f.ports.execFile;let intent,starts=0,local;
   f.ports.acquireLock=fakeLocks();
   f.ports.env={...process.env,PDD_TRACE:''};

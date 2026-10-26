@@ -9,7 +9,7 @@ import {traceGitCommand,readGitTrace} from '../../src/git-trace.mjs';
 const command={argv:['fetch','origin','main'],cwd:'/synthetic/project'};
 const capture=()=>({text:'',write(s){this.text+=s;}});
 async function fixture(t,unsafe=false){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-warning-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-warning-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  if(unsafe){await fs.mkdir(join(home,'.pdd'),{mode:0o700});await fs.chmod(join(home,'.pdd'),0o775);}
  return {home,env:{PDD_TRACE:'herdr,git'},stderr:capture()};
 }

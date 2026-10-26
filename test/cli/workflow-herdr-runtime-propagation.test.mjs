@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import {join} from 'node:path';
@@ -69,7 +70,7 @@ async function controllerFixture(t){
   return {home,herdr,current,spec,state,calls,input,deliveries:()=>deliveries};
 }
 
-test('real controller factory uses saved Herdr with empty PATH and retains exact OS/start/argv proof with one delivery',async t=>{
+test('real controller factory uses saved Herdr with empty PATH and retains exact OS/start/argv proof with one delivery',{skip:hostFixtureSkip},async t=>{
   const f=await controllerFixture(t),ports=await createLocalWorkflowControllerPorts(f.input);
   const r=await startWorkflowController(f.spec,ports);
   assert.equal(r.state,'started',JSON.stringify(r));assert.equal(f.deliveries(),1);
@@ -99,7 +100,7 @@ test('controller runtime rebinding preserves every explicitly supplied transport
   assert.equal((await startWorkflowController(f.spec,ports)).code,'workspace_create_failed');assert.deepEqual(f.calls,[]);
 });
 
-test('keeper uses independent saved executable bindings and observation continuity, then refuses a missing recorded binary',async t=>{
+test('keeper uses independent saved executable bindings and observation continuity, then refuses a missing recorded binary',{skip:hostFixtureSkip},async t=>{
   const home=await folder(t),first=await binary(home,'first-herdr'),second=await binary(home,'second-herdr'),current=await binary(home,'current-herdr');
   const secondId='6f1c2d3e-0a1b-4c2d-8e3f-1a2b3c4d5e70';
   const entries=[runId,secondId].map(id=>({runId:id,runDir:join(home,id),root:home}));

@@ -13,7 +13,7 @@ const rows=()=>[
  {value:'synthetic-hidden',displayName:'Hidden',supportsEffort:false,hidden:true}
 ];
 async function fixture(t,{models=rows(),mode='ok',version='2.1.310 (Claude Code)',bodyVersion='2.1.310'}={}){
- const home=await fs.mkdtemp(join(tmpdir(),'pdd-claude-models-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const home=await fs.realpath(await fs.mkdtemp(join(tmpdir(),'pdd-claude-models-')));t.after(()=>fs.rm(home,{recursive:true,force:true}));
  const cwd=join(home,'project'),log=join(home,'requests.jsonl'),config=join(home,'fixture.json'),executable=join(home,'synthetic-claude.mjs');
  await fs.mkdir(cwd);await fs.writeFile(config,JSON.stringify({models,mode,version,bodyVersion}));
  await fs.writeFile(executable,`#!${process.execPath}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -16,7 +16,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const issueUrl = 'https://github.com/example/project/issues/17';
 
 async function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'pdd-frozen-source-'));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'pdd-frozen-source-')));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const source = join(directory, 'source'); mkdirSync(source);
   const git = async (cwd, ...args) => (await exec('git', args, { cwd })).stdout.trim();

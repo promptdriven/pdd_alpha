@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,stat,chmod,symlink,link,rm,readdir} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,stat,chmod,symlink,link,rm,readdir,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -10,7 +10,7 @@ import vectors from '../../vectors/cli/git-trace.json' with {type:'json'};
 const expected=id=>vectors.cases.find(c=>c.id===id).expected;
 const errorText=vectors.cases.find(c=>c.id==='transport-refusal').given.stderr;
 async function fixture(t){
-  const home=await mkdtemp(join(tmpdir(),'pdd-git-trace-'));t.after(()=>rm(home,{recursive:true,force:true}));
+  const home=await realpath(await mkdtemp(join(tmpdir(),'pdd-git-trace-')));t.after(()=>rm(home,{recursive:true,force:true}));
   return {home,env:{PDD_TRACE:'git'},path:join(home,'.pdd/logs/git-trace.jsonl')};
 }
 const command={argv:['fetch','origin','main'],cwd:'/synthetic/project'};

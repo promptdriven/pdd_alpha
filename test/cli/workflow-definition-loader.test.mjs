@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import vectors from '../../vectors/cli/workflow-definition-loader.json' with {type:'json'};
 import {loadWorkflowDefinition,listWorkflowDefinitions} from '../../src/workflow-definition-loader.mjs';
-function setup(t) {const base=mkdtempSync(join(tmpdir(),'pdd-loader-vectors-'));t.after(()=>rmSync(base,{recursive:true,force:true}));const cwd=join(base,'project'),packageRoot=join(base,'package');mkdirSync(cwd);mkdirSync(packageRoot);return {cwd,packageRoot,name:'custom-flow'};}
+function setup(t) {const base=realpathSync(mkdtempSync(join(tmpdir(),'pdd-loader-vectors-')));t.after(()=>rmSync(base,{recursive:true,force:true}));const cwd=join(base,'project'),packageRoot=join(base,'package');mkdirSync(cwd);mkdirSync(packageRoot);return {cwd,packageRoot,name:'custom-flow'};}
 function definition(name='custom-flow') {return {version:1,name,overview:'overview.md',stages:[{id:'specify',kind:'agent',file:'stage.md',protocol:'proposal',requiredRoles:['prompt','story','cases'],approval:'next-advance'},
  {id:'work',kind:'agent',file:'work.md',protocol:'work'},{id:'verify',kind:'agent',file:'verify.md',protocol:'verify'},{id:'publish',kind:'pr',file:'publish.md',publication:'verified'}]};}
 function put(base,d=definition()) {const dir=join(base,'.pdd/workflows',d.name);mkdirSync(dir,{recursive:true});writeFileSync(join(dir,'workflow.json'),JSON.stringify(d));for(const f of [d.overview,...d.stages.map(s=>s.file)].filter(p=>!p.includes('..')))writeFileSync(join(dir,f),'Selected instructions.\n');return dir;}

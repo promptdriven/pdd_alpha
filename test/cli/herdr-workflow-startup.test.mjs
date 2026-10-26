@@ -36,10 +36,10 @@ test('thrown startup failure cannot leak error details or retry workflow owners'
 });
 
 test('real readiness probe does not manufacture strict controller capability',async t=>{
- const {mkdtemp,mkdir,writeFile,rm}=await import('node:fs/promises');
+ const {mkdtemp,mkdir,writeFile,rm,realpath}=await import('node:fs/promises');
  const {join}=await import('node:path');const {tmpdir}=await import('node:os');
  const {readHerdrTrace}=await import('../../src/herdr-trace.mjs');
- const home=await mkdtemp(join(tmpdir(),'pdd-ready-not-proof-'));t.after(()=>rm(home,{recursive:true,force:true}));
+ const home=await realpath(await mkdtemp(join(tmpdir(),'pdd-ready-not-proof-')));t.after(()=>rm(home,{recursive:true,force:true}));
  const bin=join(home,'bin');await mkdir(bin,{mode:0o700});await writeFile(join(bin,'herdr'),'synthetic executable',{mode:0o700});
  const deps=io();let commands=0;
  assert.equal(await runPdd(['workflow','resume',id],{...deps,home,workflowRunner:{resumeWorkflow:async()=>({state:'prepared',runId:id,root:'/synthetic/root',runDir:'/synthetic/run',workflow:'small-change',issueNumber:17,runtime:{node:'/synthetic/node',bin:'/synthetic/pdd'}})},ports:{herdr:{supportsProcessIdentity:async()=>false},env:{PATH:bin,PDD_TRACE:'herdr'},platform:'linux',execFile:async(file,args)=>{commands++;assert.equal(file,join(bin,'herdr'));assert.deepEqual(args,['--session','default','workspace','list']);return {stdout:JSON.stringify({result:{workspaces:[]}}),code:0};}}}),1);

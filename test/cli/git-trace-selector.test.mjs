@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,readdir,rm,stat} from 'node:fs/promises';
+import {mkdtemp,readFile,readdir,rm,stat,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {traceGitCommand,readGitTrace} from '../../src/git-trace.mjs';
@@ -8,7 +8,7 @@ import {traceGitCommand,readGitTrace} from '../../src/git-trace.mjs';
 const command={argv:['fetch','origin','main'],cwd:'/synthetic/project'};
 const stderr="fatal: could not read Username for 'https://github.com': terminal prompts disabled\n";
 async function fixture(t){
- const home=await mkdtemp(join(tmpdir(),'pdd-git-selector-'));
+ const home=await realpath(await mkdtemp(join(tmpdir(),'pdd-git-selector-')));
  t.after(()=>rm(home,{recursive:true,force:true}));
  return {home,path:join(home,'.pdd/logs/git-trace.jsonl')};
 }
