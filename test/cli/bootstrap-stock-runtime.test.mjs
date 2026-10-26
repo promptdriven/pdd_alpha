@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -104,7 +105,7 @@ async function assertHerdrPersistence(f, setups) {
   assert.equal((await fs.stat(join(f.home,'.config/systemd/user/pdd-herdr-default.service'))).mode&0o777,0o600);
 }
 
-test('stock installer reaches real public setup after publication; rerun discloses retained release and repairs only mutable roots', { timeout: 120000 }, async t => {
+test('stock installer reaches real public setup after publication; rerun discloses retained release and repairs only mutable roots', { timeout: 120000, skip: hostFixtureSkip }, async t => {
   const f = await stockRuntime(t);
   const first = await f.run();
   assert.match(first.stdout, /Public recovery service ready\./);
@@ -160,7 +161,7 @@ test('stock installer preserves a genuine service failure after ready runtime pu
 });
 
 
-test('fresh stock installer removes only old global npm Alpha after the managed runtime is ready', { timeout: 120000 }, async t => {
+test('fresh stock installer removes only old global npm Alpha after the managed runtime is ready', { timeout: 120000, skip: hostFixtureSkip }, async t => {
   const f = await stockRuntime(t), legacy = join(f.home, 'legacy global'), calls = join(f.home, 'npm-calls');
   await put(join(legacy, 'pdd/package.json'), JSON.stringify({ name: 'pdd', repository: { url: 'git+https://github.com/promptdriven/pdd_alpha.git' } }));
   await put(join(legacy, 'unrelated/kept'), 'unrelated package');

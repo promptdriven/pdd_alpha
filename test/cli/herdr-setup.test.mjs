@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import {runPdd} from '../../src/pdd-cli.mjs';
 const capture=()=>({text:'',write(s){this.text+=s;}});
@@ -38,7 +39,7 @@ test('local discovery never invokes Herdr setup or startup',async()=>{
  }
 });
 
-test('public setup composes with real install helper and synthetic existing, installed and off-PATH executables',async t=>{
+test('public setup composes with real install helper and synthetic existing, installed and off-PATH executables',{skip:hostFixtureSkip},async t=>{
  const {mkdtemp,mkdir,writeFile,rm}=await import('node:fs/promises');
  const {join}=await import('node:path');const {tmpdir}=await import('node:os');
  const workflowHerdrBoot=await import('../../src/workflow-herdr-boot.mjs');

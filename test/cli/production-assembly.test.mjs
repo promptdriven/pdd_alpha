@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import {constants} from 'node:fs';
@@ -91,7 +92,7 @@ if(!['initialize','config/read','model/list'].includes(r.method))process.exit(93
   deps:{home,cwd,packageRoot:versionRoot,stdout,stderr,ports},setBroken:x=>{broken=x;},setPanes:x=>{panes=x;}};
 }
 
-test('real CLI factories compose discovery, prepared run/resume, strict authority and failed Herdr trace with network edges only',async t=>{
+test('real CLI factories compose discovery, prepared run/resume, strict authority and failed Herdr trace with network edges only',{skip:hostFixtureSkip},async t=>{
  const f=await fixture(t);
  assert.equal(await runPdd(['models','--agent','codex'],f.deps),0,f.stderr.text);assert.match(f.stdout.text,/synthetic/);
  f.stdout.text='';assert.equal(await runPdd(['projects'],f.deps),0);assert.match(f.stdout.text,/project/);

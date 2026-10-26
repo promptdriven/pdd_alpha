@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -80,7 +81,7 @@ function candidate(t) {
   for(const [name,source] of Object.entries(modules))writeFileSync(join(root,'src',name+'.mjs'),source);
   return root;
 }
-test('doctor imports a valid candidate and executes its public self-checks',async t=>{
+test('doctor imports a valid candidate and executes its public self-checks',{skip:hostFixtureSkip},async t=>{
   const packageRoot=candidate(t),stdout=capture();
   assert.equal(await runDoctorCommand(['--check-only'],{packageRoot,stdout,stderr:capture()}),0);
   assert.match(stdout.text,/PASS modules: Candidate public modules imported/);

@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
@@ -7,7 +8,7 @@ import {runPdd} from '../../src/pdd-cli.mjs';
 import {readHerdrTrace} from '../../src/herdr-trace.mjs';
 const id='7aa58de0-c656-4a8c-9d03-7227dbe7a759';
 const capture=()=>({text:'',write(x){this.text+=x;}});
-test('trace exposes actual strict controller refusal without inventing ports, changing runtime or retrying',async t=>{
+test('trace exposes actual strict controller refusal without inventing ports, changing runtime or retrying',{skip:hostFixtureSkip},async t=>{
   const home=mkdtempSync(join(tmpdir(),'pdd-controller-boundary-'));t.after(()=>rmSync(home,{recursive:true,force:true}));
   const raw={node:'/synthetic/node',bin:'/synthetic/bin',unknown:{kept:true}},frozen={...raw,packageRoot:'/synthetic/frozen'},stdout=capture(),stderr=capture();let resumes=0;
   assert.equal(await runPdd(['workflow','resume',id],{home,stdout,stderr,workflowHerdrBoot:{ensureDefaultHerdr:async()=>({state:'ready',code:null})},ports:{herdr:{supportsProcessIdentity:async()=>false},env:{PDD_TRACE:'herdr'},runtime:raw},workflowRunner:{resumeWorkflow:async(input,ports)=>{

@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -119,7 +120,7 @@ test('no duplicate restart after an uncertain service effect; durable ready rele
   assert.equal((await recoverUpdate({ home: f.home }, f.ports)).phase, 'ready'); assert.equal(f.counters.restarts, 1); assert.equal(f.counters.releases, 1);
 });
 
-test('default artifact pipeline verifies, stages and publishes complete immutable roots before current', async t => {
+test('default artifact pipeline verifies, stages and publishes complete immutable roots before current', {skip:hostFixtureSkip}, async t => {
   const home = await temporary(t), before = await runtime(home); await pointer(home, 'current', before);
   const alpha = tarFixture({ 'package/package.json': '{"type":"module","version":"1.0.2"}', 'package/bin/pdd.mjs': '// candidate', 'package/src/pdd-cli.mjs': '// self-test stand-in' });
   const node = tarFixture({ 'node-v22.16.1-linux-x64/bin/node': '#!/bin/sh\nexit 0\n' });

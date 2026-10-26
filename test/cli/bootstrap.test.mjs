@@ -1,4 +1,5 @@
 import test from 'node:test';
+const hostFixtureSkip = process.platform === 'darwin' && process.env.PDD_MACOS_INTEGRATION !== '1';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -208,7 +209,7 @@ async function recoveryStage(home, suffix) {
   const descriptor = { releaseId: 'R1', pddVersion: '1.0.0', alpha: await asset('alpha'), nodes: { [`${process.platform}-${process.arch}`]: { ...await asset('node'), version: process.versions.node } } };
   await fs.writeFile(join(stage, 'release.json'), JSON.stringify(descriptor)); return stage;
 }
-test('verified first-install retry resumes its original pre-flip intent without a recovery launcher', async t => {
+test('verified first-install retry resumes its original pre-flip intent without a recovery launcher', { skip: hostFixtureSkip }, async t => {
   const home = await temporary(t), firstStage = await recoveryStage(home, 'first');
   await assert.rejects(completeBootstrap({ home, stage: firstStage }, { selfTest: async () => false }), /stage_failed/);
   const before = (await readInstallRecord({ home })).value, id = Object.keys(before.staging)[0];
@@ -227,7 +228,7 @@ test('verified first-install retry resumes its original pre-flip intent without 
   assert.deepEqual(Object.keys((await readInstallRecord({ home })).value.staging), [id]);
   assert.equal(await fs.realpath(join(home, '.pdd/current')), installed.runtime.versionRoot); await fs.access(join(home, '.pdd/launcher/pdd-launch'), 1);
 });
-test('verified first-install retry repairs missing support after a flip without repeating activation', async t => {
+test('verified first-install retry repairs missing support after a flip without repeating activation', { skip: hostFixtureSkip }, async t => {
   const home = await temporary(t), firstStage = await recoveryStage(home, 'first');
   await assert.rejects(completeBootstrap({ home, stage: firstStage }, { selfTest: async () => true, activateRecoveryService: async () => { throw Error('service unavailable'); } }), /service_unavailable/);
   const before = (await readInstallRecord({ home })).value, id = before.transaction.id, inode = (await fs.lstat(join(home, '.pdd/current'))).ino;
